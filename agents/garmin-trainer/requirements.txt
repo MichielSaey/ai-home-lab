@@ -1,0 +1,11 @@
+chainlit
+langgraph
+langgraph-checkpoint-sqlite
+langchain
+langchain-community
+langchain-litellm
+botocore
+mcp
+cryptography
+aiosqlite
+icecream
