@@ -9,31 +9,17 @@ services:
       - edge
     expose:
       - "8000"
-
-  garmin-trainer:
+      
+  agent_hub:
     build:
       context: .
-      dockerfile: agents/garmin-trainer/Dockerfile
+      dockerfile: agents/agent_hub/Dockerfile
     env_file: .env
-    depends_on:
-      - garmin-mcp
     networks:
       - edge
       - mcp-internal
     ports:
       - "8001:8001"
-    volumes:
-      - ai_home_lab_data:/data
-
-  adhd-life-aid:
-    image: python:3.11-slim
-    env_file: .env
-    command: ["python", "-m", "http.server", "8002"]
-    networks:
-      - edge
-      - mcp-internal
-    ports:
-      - "8002:8002"
     volumes:
       - ai_home_lab_data:/data
 

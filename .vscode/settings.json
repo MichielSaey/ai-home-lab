@@ -1,0 +1,15 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.devenv/state/venv/bin/python",
+  "python.terminal.activateEnvironment": false,
+  "jupyter.kernels.excludePythonEnvironments": [
+    "${workspaceFolder}/.venv/bin/python"
+  ],
+  "notebook.kernels.excludePythonEnvironments": [
+    "${workspaceFolder}/.venv/bin/python"
+  ],
+  "jupyter.kernels.trusted": [
+    "ai-home-lab"
+  ],
+  "nixEnvSelector.nixFile": "${workspaceFolder}/devenv.nix",
+  "nixEnvSelector.useFlakes": false
+}
