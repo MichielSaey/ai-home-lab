@@ -302,6 +302,15 @@ def get_weekly_mileage() -> Dict[str, Any]:
 
     return {"Garmin Weekly Mileage": weekly_rows}
 
+# TODO: Excersies creation and scheduling tool
+# Start with minimalist funciton that takes a json for the workout.
+# From there add tools for pre-defined workout types (e.g., Quality, Threshold, Tempo, Endurance, etc.)
+# These tools should have minimal inputs. A set of paramaters defining repetition, and duration. But as 
+# much as possible should be done automatically. Then there should be a schedule tool, that takes an 
+# workout id, and a date, and schedules the workout for that date. Or we could add date as a pramater
+# in the create tool. 
+
+
 
 if __name__ == "__main__":
     mcp.run(transport="sse")
