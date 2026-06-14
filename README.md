@@ -3,9 +3,10 @@
 A pure Python monorepo for home lab agents, MCP microservices, and shared utilities. This repository contains a Garmin-focused coach UI, a local-only ADHD assistant placeholder, and a Garmin MCP server on an internal Docker network.
 
 ## Architecture
-- Agents live in `agents/` and expose Chainlit UIs.
-- MCP servers live in `mcp-servers/` and are only reachable on the internal Docker network.
-- Shared utilities live in `shared/` (SQLite profiles, Fernet encryption).
+- Application code lives under `src/`.
+- Agents live in `src/agents/` and expose Chainlit UIs.
+- MCP servers live in `src/mcp-servers/` and are only reachable on the internal Docker network.
+- Shared utilities live in `src/shared/` (SQLite profiles, Fernet encryption).
 
 ### Network and access model
 - `garmin-trainer` listens on port 8001 and is intended for Cloudflare Tunnel exposure.

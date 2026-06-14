@@ -85,14 +85,14 @@ in
   processes.agent-hub = {
     ports.http.allocate = 8001;
     exec = ''
-      chainlit run agents/agent_hub/app.py \
+      chainlit run src/agents/agent_hub/app.py \
         --host 0.0.0.0 \
         --port ${toString config.processes.agent-hub.ports.http.value}
     '';
   };
 
   scripts.run_agent_hub.exec = ''
-    chainlit run agents/agent_hub/app.py --host 0.0.0.0 --port 8001
+    chainlit run src/agents/agent_hub/app.py --host 0.0.0.0 --port 8001
   '';
 
   enterShell = ''

@@ -2,7 +2,7 @@ services:
   garmin-mcp:
     build:
       context: .
-      dockerfile: mcp-servers/garmin-mcp/Dockerfile
+      dockerfile: src/mcp-servers/garmin-mcp/Dockerfile
     env_file: .env
     networks:
       - mcp-internal
@@ -13,7 +13,7 @@ services:
   agent_hub:
     build:
       context: .
-      dockerfile: agents/agent_hub/Dockerfile
+      dockerfile: src/agents/agent_hub/Dockerfile
     env_file: .env
     networks:
       - edge

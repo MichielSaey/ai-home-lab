@@ -1,9 +1,19 @@
-"""EPUB chapter catalog helpers and LLM-based section classification."""
+"""EPUB chapter catalog helpers and LLM-based section classification.
+
+Chapter catalog and LLM-based section classification for audiobook narration.
+"""
 
 import json
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Protocol
+
+from epub2audiobook.config import SelectionConfig
+from epub2audiobook.logging_setup import ProgressContext
+
+logger = logging.getLogger(__name__)
 
 
 class ChapterLike(Protocol):
@@ -35,6 +45,44 @@ class ChapterDecision:
     reason: str
 
 
+_TOC_TITLE_RE = re.compile(
+    r"\b(?:table\s+of\s+)?contents?\b|\btoc\b",
+    re.IGNORECASE,
+)
+
+
+def is_obvious_table_of_contents(title: str, text: str) -> bool:
+    """Conservative heuristic for obvious TOC pages — never skips long narrative."""
+    words = text.split()
+    word_count = len(words)
+    if word_count > 500:
+        return False
+
+    title_lower = title.lower().strip()
+    if _TOC_TITLE_RE.search(title_lower) and word_count < 300:
+        return True
+
+    if word_count < 150:
+        digit_tokens = sum(1 for word in words if re.search(r"\d", word))
+        colon_count = text.count(":")
+        digit_ratio = digit_tokens / word_count if word_count else 0.0
+        if word_count < 100 and digit_ratio > 0.3:
+            return True
+        if word_count < 100 and colon_count >= 3 and digit_ratio > 0.2:
+            return True
+
+    return False
+
+
+def obvious_non_narrative_indices(chapters: list[ChapterLike]) -> set[int]:
+    """Section indices that look like TOC listings and should be skipped."""
+    return {
+        chapter.index
+        for chapter in chapters
+        if is_obvious_table_of_contents(chapter.title, chapter.text)
+    }
+
+
 def first_chunk_words(text: str, word_count: int) -> str:
     words = text.split()
     chunk = " ".join(words[:word_count])
@@ -43,7 +91,9 @@ def first_chunk_words(text: str, word_count: int) -> str:
     return chunk
 
 
-def build_catalog_entries(chapters: list[ChapterLike], preview_words: int = 40) -> list[CatalogEntry]:
+def build_catalog_entries(
+    chapters: list[ChapterLike], preview_words: int = 40
+) -> list[CatalogEntry]:
     entries: list[CatalogEntry] = []
     for ch in chapters:
         words = ch.text.split()
@@ -69,7 +119,6 @@ def _llm_generate(model: Any, tokenizer: Any, messages: list[dict], max_new_toke
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            temperature=0.0,
         )
     generated = output_ids[0][inputs["input_ids"].shape[-1] :]
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
@@ -314,5 +363,187 @@ def apply_chapter_decisions(
 
     if max_chapters is not None:
         chapters = chapters[:max_chapters]
+
+    return chapters, decision_map
+
+
+def _decisions_cache_path(staging_dir: Path) -> Path:
+    return staging_dir / "decisions.json"
+
+
+def _selection_fingerprint(selection: SelectionConfig) -> dict[str, Any]:
+    return {
+        "include_intro": selection.include_intro,
+        "include_appendix": selection.include_appendix,
+        "opening_words": selection.opening_words,
+        "opening_batch_size": selection.opening_batch_size,
+        "max_chapters": selection.max_chapters,
+    }
+
+
+def load_decisions_cache(
+    staging_dir: Path,
+    *,
+    book_title: str,
+    chapter_count: int,
+    selection: SelectionConfig,
+) -> tuple[list[OpeningAnalysis], list[ChapterDecision]] | None:
+    """Return cached analyses + decisions when the staging file matches this book."""
+    path = _decisions_cache_path(staging_dir)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("book_title") != book_title:
+            return None
+        if data.get("chapter_count") != chapter_count:
+            return None
+        if data.get("selection") != _selection_fingerprint(selection):
+            return None
+        analyses = [
+            OpeningAnalysis(
+                index=int(item["index"]),
+                section_type=str(item["section_type"]),
+                narratively_important=bool(item["narratively_important"]),
+                reason=str(item["reason"]),
+            )
+            for item in data["analyses"]
+        ]
+        decisions = [
+            ChapterDecision(
+                index=int(item["index"]),
+                keep=bool(item["keep"]),
+                reason=str(item["reason"]),
+            )
+            for item in data["decisions"]
+        ]
+        return analyses, decisions
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        logger.debug("Ignoring invalid decisions cache at %s", path)
+        return None
+
+
+def save_decisions_cache(
+    staging_dir: Path,
+    *,
+    book_title: str,
+    chapter_count: int,
+    selection: SelectionConfig,
+    analyses: list[OpeningAnalysis],
+    decisions: list[ChapterDecision],
+) -> None:
+    path = _decisions_cache_path(staging_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "book_title": book_title,
+        "chapter_count": chapter_count,
+        "selection": _selection_fingerprint(selection),
+        "analyses": [asdict(item) for item in analyses],
+        "decisions": [asdict(item) for item in decisions],
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def select_chapters(
+    model: Any,
+    tokenizer: Any,
+    all_chapters: list[ChapterLike],
+    *,
+    book_title: str,
+    selection: SelectionConfig,
+    staging_dir: Path | None = None,
+    progress: ProgressContext | None = None,
+) -> tuple[list[ChapterLike], dict[int, ChapterDecision]]:
+    """Notebook steps 6+7: opening analysis, then the final keep/skip catalog.
+
+    A manual selection.keep_chapter_indices override skips the LLM entirely.
+    """
+    def log_step(step: str, *, chapter_title: str | None = None) -> None:
+        if progress is not None:
+            logger.info("%s", progress.format(step, chapter_title=chapter_title))
+        else:
+            logger.info("%s", step)
+
+    obvious_skip = obvious_non_narrative_indices(all_chapters)
+    if obvious_skip:
+        log_step(f"heuristic TOC skip ({len(obvious_skip)} section(s))")
+
+    if selection.keep_chapter_indices:
+        keep = set(selection.keep_chapter_indices)
+        chapters = [ch for ch in all_chapters if ch.index in keep]
+        if selection.max_chapters is not None:
+            chapters = chapters[: selection.max_chapters]
+        if not chapters:
+            raise ValueError("No chapters match keep_chapter_indices")
+        decision_map: dict[int, ChapterDecision] = {}
+        log_step(f"manual selection: {len(chapters)} section(s)")
+    else:
+        if model is None or tokenizer is None:
+            raise RuntimeError("LLM model and tokenizer are required for chapter selection")
+
+        cached = (
+            load_decisions_cache(
+                staging_dir,
+                book_title=book_title,
+                chapter_count=len(all_chapters),
+                selection=selection,
+            )
+            if staging_dir is not None
+            else None
+        )
+        if cached is not None:
+            analyses, decisions = cached
+            log_step(f"classify cache hit ({len(analyses)} sections)")
+        else:
+            llm_chapters = [ch for ch in all_chapters if ch.index not in obvious_skip]
+            log_step("classify openings")
+            analyses = analyze_chapter_openings_with_llm(
+                model,
+                tokenizer,
+                llm_chapters,
+                book_title=book_title,
+                opening_words=selection.opening_words,
+                include_intro=selection.include_intro,
+                include_appendix=selection.include_appendix,
+                batch_size=selection.opening_batch_size,
+            )
+            for analysis in analyses:
+                title = next((ch.title for ch in all_chapters if ch.index == analysis.index), "")
+                flag = "KEEP" if analysis.narratively_important else "SKIP"
+                log_step(f"classify opening {flag}: {analysis.section_type}", chapter_title=title)
+
+            entries = build_catalog_entries(all_chapters)
+            log_step("classify final catalog")
+            decisions = classify_chapters_with_llm(
+                model,
+                tokenizer,
+                book_title=book_title,
+                entries=entries,
+                opening_analyses=analyses,
+                include_intro=selection.include_intro,
+                include_appendix=selection.include_appendix,
+            )
+            if staging_dir is not None:
+                save_decisions_cache(
+                    staging_dir,
+                    book_title=book_title,
+                    chapter_count=len(all_chapters),
+                    selection=selection,
+                    analyses=analyses,
+                    decisions=decisions,
+                )
+
+        chapters, decision_map = apply_chapter_decisions(
+            all_chapters,
+            decisions,
+            keep_indices_override=None,
+            max_chapters=selection.max_chapters,
+        )
+        for idx in obvious_skip:
+            decision_map[idx] = ChapterDecision(idx, False, "obvious table of contents (heuristic)")
+
+        log_step(f"keep_indices = {[ch.index for ch in chapters]}")
+
+    log_step(f"processing {len(chapters)} chapter(s)")
 
     return chapters, decision_map

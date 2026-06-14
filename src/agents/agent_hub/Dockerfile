@@ -2,12 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY agents/agent_hub/requirements.txt /app/requirements.txt
+COPY src/agents/agent_hub/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY agents/ /app/agents
-COPY shared /app/shared 
-COPY agents/agent_hub/app.py /app/app.py
+COPY src/agents/ /app/agents
+COPY src/shared /app/shared
+COPY src/agents/agent_hub/app.py /app/app.py
 
 ENV PYTHONPATH=/app
 
