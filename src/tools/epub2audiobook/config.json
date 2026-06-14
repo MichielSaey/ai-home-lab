@@ -1,0 +1,49 @@
+{
+  "paths": {
+    "epub_dir": "data/input",
+    "staging_dir": "data/staging",
+    "output_dir": "data/output",
+    "runs_dir": "data/runs"
+  },
+  "chunking": {
+    "words_per_chunk": 250,
+    "max_chunks_per_chapter": null
+  },
+  "selection": {
+    "keep_chapter_indices": null,
+    "max_chapters": null,
+    "include_intro": true,
+    "include_appendix": false,
+    "opening_words": 250,
+    "opening_batch_size": 4
+  },
+  "llm": {
+    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "device": "cuda",
+    "cleanup": true,
+    "cleanup_batch_size": 4,
+    "max_new_tokens": 1024,
+    "clean_prompt": "Clean this text for text-to-speech. Remove URLs, expand abbreviations, and improve phonetic readability. Return only the cleaned text, no commentary.\n\nText:\n{text}"
+  },
+  "tts": {
+    "lang": "b",
+    "voice": "bf_emma",
+    "speed": 0.92,
+    "device": "auto"
+  },
+  "output": {
+    "chapter_mp3": false,
+    "mp3_bitrate": "128k",
+    "m4b_bitrate": "64k",
+    "keep_wav": false,
+    "skip_existing": true,
+    "chunk_silence_ms": 0,
+    "chapter_silence_ms": 0,
+    "loudnorm": false
+  },
+  "pipeline": {
+    "concurrent_models": true,
+    "ffmpeg_workers": 2,
+    "queue_size": 32
+  }
+}

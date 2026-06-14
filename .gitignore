@@ -22,5 +22,9 @@ devenv.local.yaml
 
 
 # data
-experiments/epub-to-audiobook/data/**
-experiments/epub-to-audiobook/data/**/*
+src/epub-to-audiobook/data/**
+src/epub-to-audiobook/data/**/*
+!src/epub-to-audiobook/data/**/.gitkeep
+src/epub2audiobook/data/**
+src/epub2audiobook/data/**/*
+!src/epub2audiobook/data/**/.gitkeep
