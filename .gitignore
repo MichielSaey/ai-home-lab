@@ -20,6 +20,9 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
+# Odysseus upstream (cloned by scripts/ensure-odysseus.sh)
+vendor/odysseus
+
 
 # data
 src/epub-to-audiobook/data/**

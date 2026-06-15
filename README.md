@@ -1,48 +1,40 @@
 # AI Home Lab
 
-A pure Python monorepo for home lab agents, MCP microservices, and shared utilities. This repository contains a Garmin-focused coach UI, a local-only ADHD assistant placeholder, and a Garmin MCP server on an internal Docker network.
+Pure Python monorepo for home lab MCP microservices, shared utilities, and tools. Chat and agents run on [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus); domain logic lives in MCP servers under `src/mcp-servers/`.
 
-## Architecture
-- Application code lives under `src/`.
-- Agents live in `src/agents/` and expose Chainlit UIs.
-- MCP servers live in `src/mcp-servers/` and are only reachable on the internal Docker network.
-- Shared utilities live in `src/shared/` (SQLite profiles, Fernet encryption).
+Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md](docs/PLAN.md) (execution and issues).
 
-### Network and access model
-- `garmin-trainer` listens on port 8001 and is intended for Cloudflare Tunnel exposure.
-- `adhd-life-aid` listens on port 8002 and is intended for Tailscale-only access.
-- MCP servers are attached to the `mcp-internal` network, which is marked `internal: true` so they are not reachable from the host.
+## Quick start
 
-### Zero-trust security model
-- User credentials are symmetrically encrypted with `cryptography.Fernet` using `MASTER_KEY` from `.env`.
-- Encrypted secrets are stored in SQLite and never hashed or logged.
-- MCP servers do not publish ports to the host; only agents can reach them.
-- Only the edge-facing agents bind host ports (8001 and 8002).
+```bash
+cp .env.example .env          # GARMIN_EMAIL, GARMIN_PASSWORD, etc.
+./scripts/ensure-odysseus.sh
+docker compose up -d --build
+```
+
+1. Open `http://localhost:7000`
+2. Admin password: `docker compose logs odysseus | grep -i password`
+3. Odysseus admin → MCP → add `http://garmin-mcp:8000/sse`
+4. Configure models in Odysseus (or `OLLAMA_BASE_URL` / `LLM_HOST` in `.env`)
 
 ## Services
-- `garmin-trainer`: Chainlit UI for coaching. Port 8001.
-- `adhd-life-aid`: Local-only placeholder service. Port 8002.
-- `garmin-mcp`: MCP server exposing Garmin Connect data. Internal network only.
 
-## Running locally
-1. Copy `.env.example` to `.env` and fill in values.
-2. Generate a Fernet key and set `MASTER_KEY`:
-   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-3. Start the stack:
-   `docker compose up -d --build`
+| Service | Port | Role |
+|---------|------|------|
+| Odysseus | 7000 | Chat, agents, MCP client, memory |
+| garmin-mcp | 8000 (internal) | Garmin Connect tools + weekly report |
+| chromadb / searxng / ntfy | bundled with Odysseus | Vector store, search, notifications |
 
-## LiteLLM proxy (optional)
-If you use a self-hosted LiteLLM proxy, set these environment variables in `.env`:
-- `LITELLM_API_BASE` (example: `http://your-proxy:4000/v1`)
-- `LITELLM_API_KEY`
-- `LITELLM_MODEL`
-When set, the Garmin trainer routes requests through the LiteLLM proxy.
+Expose Odysseus via Tailscale or Cloudflare Tunnel. MCP ports stay internal (`edge` / `mcp-internal` networks).
 
-## Self-hosted GitHub Actions
-1. Install a GitHub Actions runner on your host and register it to this repo.
-2. Ensure the runner has the `self-hosted` and `linux` labels.
-3. Make sure the runner user can run Docker.
-4. Push to `main` or trigger the workflow manually to deploy via Docker Compose.
+## Python tools (devenv)
 
-## Langflow migration note
-The Garmin coach baseline mirrors the original Langflow graph by pulling a weekly Garmin report and combining it with user profile context inside a LangGraph `StateGraph`.
+```bash
+devenv shell
+```
+
+For epub2audiobook and Jupyter — not the Docker stack. See [docs/epub2audiobook.md](docs/epub2audiobook.md).
+
+## Deploy
+
+Self-hosted GitHub Actions runner (`self-hosted`, `linux`) runs `ensure-odysseus.sh` and `docker compose up -d --build` on push to `main`.
