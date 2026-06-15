@@ -10,5 +10,7 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure Odysseus vendor checkout
+        run: ./scripts/ensure-odysseus.sh
       - name: Build and start services
         run: docker compose up -d --build
