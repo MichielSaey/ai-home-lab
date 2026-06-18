@@ -1,0 +1,47 @@
+apiVersion: mcp-workbench.dev/v0alpha1
+
+# Note: Workbench's SSE client does not yet parse FastMCP endpoint events.
+# Use MCP Inspector (port 6274 / 6280) for interactive garmin-mcp testing.
+server:
+  transport: sse
+  url: http://garmin-mcp:8000/sse
+
+client:
+  protocolVersion: "2025-11-25"
+
+tests:
+  - id: tools-list
+    description: Garmin MCP exposes tools
+    act:
+      method: tools/list
+    assert:
+      - kind: status
+        equals: success
+      - kind: notEmpty
+        path: $.tools
+
+  - id: weekly-stats-tool
+    description: Weekly stats tool returns combined mileage and HR zones
+    act:
+      method: tools/call
+      tool: get_weekly_stats
+      args: {}
+    assert:
+      - kind: executionError
+        equals: false
+      - kind: jsonpath
+        path: $.structuredContent
+        matches: "Garmin Weekly Stats"
+
+  - id: weekly-report-tool
+    description: Weekly report tool returns coach bundle without activities by default
+    act:
+      method: tools/call
+      tool: get_weekly_report
+      args: {}
+    assert:
+      - kind: executionError
+        equals: false
+      - kind: jsonpath
+        path: $.structuredContent
+        matches: weekly_stats
