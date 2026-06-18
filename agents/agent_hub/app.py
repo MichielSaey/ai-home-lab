@@ -5,7 +5,10 @@ from agents.garmin_trainer.agent import parse_report_command, run_agent as run_g
 AGENTS = {
     "garmin": {
         "run": run_garmin,
-        "welcome": "Garmin coach ready. Ask about training or recovery. Use `/report [days] [days_ago]` to roll the data window (default 7 days).",
+        "welcome": (
+            "Garmin coach ready. I'll review your recent training using the 80/20 rule. "
+            "Ask about training or recovery, or use `/report [days] [days_ago]` to roll the data window (default 7 days)."
+        ),
         "thread_suffix": "garmin",
     },
     # "adhd": {
