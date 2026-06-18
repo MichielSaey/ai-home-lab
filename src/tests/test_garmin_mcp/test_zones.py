@@ -10,6 +10,7 @@ from zones import (
     easy_hard_from_zones,
     normalize_hr_zones,
     weekly_hr_zone_rows,
+    weekly_stats_rows,
     zones_to_minute_columns,
 )
 
@@ -52,6 +53,24 @@ def test_activity_date_parses_start_time_local() -> None:
     assert activity_date({"startTimeLocal": "2026-06-10 07:30:00"}) == date(2026, 6, 10)
     assert activity_date({}) is None
     assert activity_date({"startTimeLocal": "bad"}) is None
+
+
+def test_weekly_stats_rows_combines_distance_and_zones() -> None:
+    today = date(2026, 6, 17)
+    activities = [
+        {
+            "activityId": 1,
+            "distance": 5000,
+            "startTimeLocal": "2026-06-16 07:00:00",
+        }
+    ]
+    activity_zones = {1: {1: 600, 2: 0, 3: 0, 4: 0, 5: 0}}
+    rows = weekly_stats_rows(activities, activity_zones, today, num_blocks=2)
+
+    assert len(rows) == 2
+    current_week = rows[1]
+    assert current_week[2] == 5.0
+    assert current_week[3] == 10.0
 
 
 def test_weekly_hr_zone_rows_rolls_up_by_calendar_week() -> None:
