@@ -8,6 +8,7 @@ RUN if [ -f /app/build.sh ]; then chmod +x /app/build.sh && /app/build.sh; fi
 # Install Python requirements early so layers are cached when requirements don't change
 COPY mcp-servers/garmin-mcp/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY mcp-servers/garmin-mcp/errors.py /app/errors.py
 COPY mcp-servers/garmin-mcp/server.py /app/server.py
 COPY mcp-servers/garmin-mcp/zones.py /app/zones.py
 ENV MCP_HOST=0.0.0.0
