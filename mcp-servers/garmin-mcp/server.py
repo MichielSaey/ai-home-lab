@@ -408,6 +408,12 @@ def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> D
     )
 
 
+@mcp.resource("garmin://coach-prompt")
+def coach_prompt() -> str:
+    """Coach instructions including 80/20 polarized training rules and session workflow."""
+    return _load_coach_prompt()
+
+
 @mcp.resource("garmin://weekly-report")
 def weekly_report() -> Dict[str, Any]:
     """Default weekly review bundle (last 7 days). Alias for get_report."""
