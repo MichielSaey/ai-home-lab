@@ -1,7 +1,7 @@
 import sys
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
 sys.path.insert(0, str(GARMIN_MCP_DIR))
@@ -119,23 +119,23 @@ def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
     activities_table.assert_not_called()
 
 
-def test_weekly_report_resource_aliases_get_weekly_report() -> None:
+def test_weekly_report_resource_aliases_get_report() -> None:
     with patch.object(
-        server, "get_weekly_report", return_value={"profile": {}, "training_plan": []}
-    ) as get_weekly_report:
+        server, "get_report", return_value={"profile": {}, "training_plan": []}
+    ) as get_report:
         result = server.weekly_report()
 
     assert result == {"profile": {}, "training_plan": []}
-    get_weekly_report.assert_called_once_with()
+    get_report.assert_called_once_with(days=7, days_ago=0)
 
 
 def test_weekly_report_resource_for_days_clamps_and_forwards() -> None:
     with patch.object(
-        server, "get_weekly_report", return_value={"profile": {}}
-    ) as get_weekly_report:
+        server, "get_report", return_value={"profile": {}}
+    ) as get_report:
         server.weekly_report_for_days(120)
 
-    get_weekly_report.assert_called_once_with(days_back=90)
+    get_report.assert_called_once_with(days=90, days_ago=0)
 
 
 def test_get_profile_handles_missing_user_profile() -> None:
@@ -161,4 +161,9 @@ def test_get_weekly_report_can_include_activities() -> None:
         result = server.get_weekly_report(include_activities=True)
 
     assert "activities" in result
-    activities_table.assert_called_once()
+    activities_table.assert_called_once_with(
+        ANY,
+        days=7,
+        days_ago=0,
+        include_hr_zones=True,
+    )
