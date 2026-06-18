@@ -1,5 +1,6 @@
 import os
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from garminconnect import (
@@ -36,6 +37,8 @@ DEFAULT_GARMIN_PASSWORD = os.environ.get("GARMIN_PASSWORD")
 
 _CLIENT: Optional[Garmin] = None
 _CLIENT_ERROR: Optional[Dict[str, Any]] = None
+
+COACH_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "coach_prompt.md"
 
 ACTIVITY_HEADERS = [
     "name",
@@ -175,6 +178,12 @@ def _report_window(days: int, days_ago: int = 0) -> tuple[date, date]:
     end_date = date.today() - timedelta(days=days_ago)
     start_date = end_date - timedelta(days=days - 1)
     return start_date, end_date
+
+
+def _load_coach_prompt() -> str:
+    if not COACH_PROMPT_PATH.exists():
+        return "You are a Garmin running coach. Follow the 80/20 rule: 80% easy, 20% hard."
+    return COACH_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
@@ -468,6 +477,12 @@ def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> D
 def health() -> Dict[str, Any]:
     """Lightweight Garmin Connect reachability check (no weekly report)."""
     return _garmin_health_payload()
+
+
+@mcp.resource("garmin://coach-prompt")
+def coach_prompt() -> str:
+    """Coach instructions including 80/20 polarized training rules and session workflow."""
+    return _load_coach_prompt()
 
 
 @mcp.resource("garmin://weekly-report")
