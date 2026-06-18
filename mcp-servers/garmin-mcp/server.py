@@ -1,5 +1,5 @@
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from garminconnect import (
@@ -9,6 +9,14 @@ from garminconnect import (
 )
 from mcp.server.fastmcp import FastMCP
 
+from errors import (
+    AUTH_FAILED,
+    CONNECTION_ERROR,
+    MISSING_CREDENTIALS,
+    NOT_INITIALIZED,
+    UNKNOWN,
+    structured_error,
+)
 from training_plan import build_training_plan, first_event_date
 from training_status import parse_training_status
 from zones import (
@@ -80,16 +88,34 @@ def _init_client() -> None:
     if _CLIENT is not None or _CLIENT_ERROR is not None:
         return
     if not DEFAULT_GARMIN_USERNAME or not DEFAULT_GARMIN_PASSWORD:
-        _CLIENT_ERROR = {
-            "error": "Missing Garmin credentials. Set GARMIN_EMAIL and GARMIN_PASSWORD."
-        }
+        _CLIENT_ERROR = structured_error(
+            MISSING_CREDENTIALS,
+            "Missing Garmin credentials. Set GARMIN_EMAIL and GARMIN_PASSWORD.",
+            retryable=False,
+        )
         return
     try:
         client = Garmin(email=DEFAULT_GARMIN_USERNAME, password=DEFAULT_GARMIN_PASSWORD)
         client.login()
         _CLIENT = client
-    except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc:
-        _CLIENT_ERROR = {"error": str(exc)}
+    except GarminConnectAuthenticationError as exc:
+        _CLIENT_ERROR = structured_error(
+            AUTH_FAILED,
+            str(exc),
+            retryable=False,
+        )
+    except GarminConnectConnectionError as exc:
+        _CLIENT_ERROR = structured_error(
+            CONNECTION_ERROR,
+            str(exc),
+            retryable=True,
+        )
+    except Exception as exc:
+        _CLIENT_ERROR = structured_error(
+            UNKNOWN,
+            str(exc),
+            retryable=True,
+        )
 
 
 def _get_client_or_error() -> tuple[Optional[Garmin], Optional[Dict[str, Any]]]:
@@ -97,8 +123,47 @@ def _get_client_or_error() -> tuple[Optional[Garmin], Optional[Dict[str, Any]]]:
     if _CLIENT_ERROR is not None:
         return None, _CLIENT_ERROR
     if _CLIENT is None:
-        return None, {"error": "Garmin client not initialized."}
+        return None, structured_error(
+            NOT_INITIALIZED,
+            "Garmin client not initialized.",
+            retryable=True,
+        )
     return _CLIENT, None
+
+
+def _health_checked_at() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _garmin_health_payload() -> Dict[str, Any]:
+    client, error = _get_client_or_error()
+    if error is not None:
+        return {
+            "status": "error",
+            "garmin": error,
+            "checkedAt": _health_checked_at(),
+        }
+
+    probe = _call_optional(client, "get_user_profile")
+    if isinstance(probe, dict) and probe.get("error"):
+        return {
+            "status": "error",
+            "garmin": structured_error(
+                CONNECTION_ERROR,
+                str(probe["error"]),
+                retryable=True,
+            ),
+            "checkedAt": _health_checked_at(),
+        }
+
+    return {
+        "status": "ok",
+        "garmin": {
+            "reachable": True,
+            "authenticated": True,
+        },
+        "checkedAt": _health_checked_at(),
+    }
 
 
 def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
@@ -313,6 +378,12 @@ def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> D
             client, days_back, include_hr_zones=True
         )
     return report
+
+
+@mcp.resource("garmin://health")
+def health() -> Dict[str, Any]:
+    """Lightweight Garmin Connect reachability check (no weekly report)."""
+    return _garmin_health_payload()
 
 
 @mcp.resource("garmin://weekly-report")
