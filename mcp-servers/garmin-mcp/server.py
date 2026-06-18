@@ -213,7 +213,10 @@ def get_profile() -> Dict[str, Any]:
     if error:
         return error
 
-    profile = _call_optional(client, "get_user_profile").get("userData", {})
+    raw = _call_optional(client, "get_user_profile")
+    if isinstance(raw, dict) and raw.get("error"):
+        return raw
+    profile = (raw or {}).get("userData", {})
     return {
         "weight": round(profile.get("weight", 0) / 1000, 2),
         "height": profile.get("height"),
@@ -266,6 +269,19 @@ def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> D
             client, days_back, include_hr_zones=True
         )
     return report
+
+
+@mcp.resource("garmin://weekly-report")
+def weekly_report() -> Dict[str, Any]:
+    """Default weekly review bundle (last 7 days). Alias for get_weekly_report."""
+    return get_weekly_report()
+
+
+@mcp.resource("garmin://weekly-report/{days_back}")
+def weekly_report_for_days(days_back: int) -> Dict[str, Any]:
+    """Review bundle for a custom look-back window (days_back)."""
+    days_back = max(1, min(days_back, 90))
+    return get_weekly_report(days_back=days_back)
 
 
 @mcp.tool()
