@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from workout_builder import build_running_workout
+from nutrition_matrix import inject_nutrition_cues, intensity_for_template
+from workout_builder import build_running_workout, estimate_steps_duration_seconds
 
 TEMPLATE_TYPES = (
     "easy",
@@ -201,6 +202,30 @@ def build_template_steps(template: str, params: Optional[Dict[str, Any]] = None)
     )
 
 
+
+
+def estimate_template_duration_minutes(
+    template: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> int:
+    steps = build_template_steps(template, params)
+    return max(estimate_steps_duration_seconds(steps) // 60, 1)
+
+
+def estimate_combined_duration_minutes(segments: List[Dict[str, Any]]) -> int:
+    total_seconds = 0
+    for segment in segments:
+        if "steps" in segment and isinstance(segment["steps"], list):
+            total_seconds += estimate_steps_duration_seconds(segment["steps"])
+            continue
+        template = segment.get("template")
+        if not template:
+            continue
+        total_seconds += estimate_steps_duration_seconds(
+            build_template_steps(str(template), segment.get("params", {}))
+        )
+    return max(total_seconds // 60, 1)
+
 def combine_template_steps(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not segments:
         raise ValueError("Provide at least one template segment to combine.")
@@ -224,8 +249,16 @@ def build_template_workout(
     template: str,
     params: Optional[Dict[str, Any]] = None,
     description: Optional[str] = None,
+    include_nutrition_cues: bool = False,
 ):
     steps = build_template_steps(template, params)
+    if include_nutrition_cues:
+        duration_minutes = estimate_template_duration_minutes(template, params)
+        steps = inject_nutrition_cues(
+            steps,
+            duration_minutes,
+            intensity=intensity_for_template(template),
+        )
     return build_running_workout(name, steps, description=description)
 
 
@@ -233,8 +266,17 @@ def build_combined_workout(
     name: str,
     segments: List[Dict[str, Any]],
     description: Optional[str] = None,
+    include_nutrition_cues: bool = False,
 ):
     steps = combine_template_steps(segments)
+    if include_nutrition_cues:
+        duration_minutes = estimate_combined_duration_minutes(segments)
+        primary_template = str(segments[0].get("template", "easy")) if segments else "easy"
+        steps = inject_nutrition_cues(
+            steps,
+            duration_minutes,
+            intensity=intensity_for_template(primary_template),
+        )
     return build_running_workout(name, steps, description=description)
 
 

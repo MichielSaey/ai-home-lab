@@ -10,6 +10,10 @@ from garminconnect import (
 from mcp.server.fastmcp import FastMCP
 
 from hr_zones import resolve_hr_context
+from nutrition_matrix import (
+    get_nutrition_cues as lookup_nutrition_cues,
+    intensity_for_template,
+)
 from training_plan import build_training_plan, first_event_date
 from training_status import parse_training_status
 from workout_builder import build_running_workout, extract_workout_id
@@ -18,6 +22,8 @@ from workout_templates import (
     TEMPLATE_TYPES,
     build_combined_workout,
     build_template_workout,
+    estimate_combined_duration_minutes,
+    estimate_template_duration_minutes,
 )
 from zones import (
     activity_date,
@@ -550,6 +556,17 @@ def _upload_running_workout(client: Garmin, workout) -> Dict[str, Any]:
     }
 
 
+
+
+@mcp.tool()
+def get_nutrition_cues(duration_minutes: int, intensity: str = "easy") -> Dict[str, Any]:
+    """Return premade before/during/after eat and drink cues for a workout duration."""
+    try:
+        return lookup_nutrition_cues(duration_minutes, intensity=intensity)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
 @mcp.tool()
 def get_heart_rate_zones() -> Dict[str, Any]:
     """Return heart rate zones used by workout templates (Karvonen / HRR method)."""
@@ -678,6 +695,7 @@ def _create_from_template(
     name: str,
     params: Optional[Dict[str, Any]] = None,
     description: Optional[str] = None,
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     client, error = _get_client_or_error()
     if error:
@@ -689,6 +707,7 @@ def _create_from_template(
             template,
             params=params,
             description=description or TEMPLATE_DESCRIPTIONS.get(template),
+            include_nutrition_cues=include_nutrition_cues,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -700,16 +719,26 @@ def _create_from_template(
     upload_result["template"] = template
     upload_result["params"] = params or {}
     upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+    if include_nutrition_cues:
+        upload_result["nutritionCues"] = lookup_nutrition_cues(
+            estimate_template_duration_minutes(template, params),
+            intensity=intensity_for_template(template),
+        )
     return upload_result
 
 
 @mcp.tool()
-def create_easy_workout(duration_minutes: int = 30, name: str = "Easy Run") -> Dict[str, Any]:
+def create_easy_workout(
+    duration_minutes: int = 30,
+    name: str = "Easy Run",
+    include_nutrition_cues: bool = False,
+) -> Dict[str, Any]:
     """Create a single-step easy aerobic run (HR zone 2)."""
     return _create_from_template(
         "easy",
         name,
         params={"duration_minutes": duration_minutes},
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -717,12 +746,14 @@ def create_easy_workout(duration_minutes: int = 30, name: str = "Easy Run") -> D
 def create_long_run_workout(
     duration_minutes: int = 90,
     name: str = "Long Run",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create a single-step long easy run (HR zone 2)."""
     return _create_from_template(
         "long_run",
         name,
         params={"duration_minutes": duration_minutes},
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -730,12 +761,14 @@ def create_long_run_workout(
 def create_recovery_workout(
     duration_minutes: int = 25,
     name: str = "Recovery Run",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create a short recovery jog (HR zone 1)."""
     return _create_from_template(
         "recovery",
         name,
         params={"duration_minutes": duration_minutes},
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -745,6 +778,7 @@ def create_tempo_workout(
     warmup_minutes: int = 10,
     cooldown_minutes: int = 10,
     name: str = "Tempo Run",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create a tempo run with warmup and cooldown (main block HR zone 3)."""
     return _create_from_template(
@@ -755,6 +789,7 @@ def create_tempo_workout(
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
         },
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -764,6 +799,7 @@ def create_threshold_workout(
     warmup_minutes: int = 10,
     cooldown_minutes: int = 10,
     name: str = "Threshold Run",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create a lactate-threshold run with warmup and cooldown (main block HR zone 4)."""
     return _create_from_template(
@@ -774,6 +810,7 @@ def create_threshold_workout(
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
         },
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -785,6 +822,7 @@ def create_strides_workout(
     warmup_minutes: int = 15,
     cooldown_minutes: int = 10,
     name: str = "Strides",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create a strides session with easy warmup/cooldown (efforts in HR zone 5)."""
     return _create_from_template(
@@ -797,6 +835,7 @@ def create_strides_workout(
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
         },
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -808,6 +847,7 @@ def create_sprint_workout(
     warmup_minutes: int = 15,
     cooldown_minutes: int = 10,
     name: str = "Sprint Intervals",
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Create short sprint repeats with jog recoveries (efforts in HR zone 5)."""
     return _create_from_template(
@@ -820,6 +860,7 @@ def create_sprint_workout(
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
         },
+        include_nutrition_cues=include_nutrition_cues,
     )
 
 
@@ -828,6 +869,7 @@ def combine_workout_templates(
     name: str,
     segments: List[Dict[str, Any]],
     description: Optional[str] = None,
+    include_nutrition_cues: bool = False,
 ) -> Dict[str, Any]:
     """Combine multiple workout templates into one session.
 
@@ -843,7 +885,12 @@ def combine_workout_templates(
         return error
 
     try:
-        running_workout = build_combined_workout(name, segments, description=description)
+        running_workout = build_combined_workout(
+            name,
+            segments,
+            description=description,
+            include_nutrition_cues=include_nutrition_cues,
+        )
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -853,6 +900,12 @@ def combine_workout_templates(
 
     upload_result["segments"] = segments
     upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+    if include_nutrition_cues:
+        primary_template = str(segments[0].get("template", "easy")) if segments else "easy"
+        upload_result["nutritionCues"] = lookup_nutrition_cues(
+            estimate_combined_duration_minutes(segments),
+            intensity=intensity_for_template(primary_template),
+        )
     return upload_result
 
 
