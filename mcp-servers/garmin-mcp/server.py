@@ -82,6 +82,55 @@ def _call_optional(client: Garmin, method: str, *args, **kwargs) -> Any:
         return {"error": f"{method} failed: {exc}"}
 
 
+def _calendar_item_date(item: Dict[str, Any]) -> Optional[str]:
+    for key in ("date", "calendarDate"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value[:10]
+    return None
+
+
+def _calendar_item_workout_id(item: Dict[str, Any]) -> Optional[int]:
+    for key in ("workoutId", "workoutTemplateId"):
+        value = item.get(key)
+        if value is not None:
+            return int(value)
+    workout = item.get("workout")
+    if isinstance(workout, dict) and workout.get("workoutId") is not None:
+        return int(workout["workoutId"])
+    return None
+
+
+def _find_scheduled_workout(
+    client: Garmin, workout_id: int, workout_date: str
+) -> Optional[Dict[str, Any]]:
+    if not hasattr(client, "get_scheduled_workouts"):
+        return None
+    try:
+        target = date.fromisoformat(workout_date)
+    except ValueError:
+        return None
+
+    payload = _call_optional(
+        client, "get_scheduled_workouts", year=target.year, month=target.month
+    )
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+
+    items = payload.get("calendarItems", [])
+    if not isinstance(items, list):
+        return None
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if _calendar_item_date(item) != workout_date:
+            continue
+        if _calendar_item_workout_id(item) == workout_id:
+            return item
+    return None
+
+
 def _init_client() -> None:
     global _CLIENT
     global _CLIENT_ERROR
@@ -584,6 +633,16 @@ def schedule_workout(workout_id: int, workout_date: str) -> Dict[str, Any]:
     client, error = _get_client_or_error()
     if error:
         return error
+
+    if hasattr(client, "schedule_workout"):
+        existing = _find_scheduled_workout(client, workout_id, workout_date)
+        if existing is not None:
+            return {
+                "workoutId": workout_id,
+                "date": workout_date,
+                "alreadyScheduled": True,
+                "schedule": existing,
+            }
 
     result = _call_optional(client, "schedule_workout", workout_id, workout_date)
     if isinstance(result, dict) and result.get("error"):
