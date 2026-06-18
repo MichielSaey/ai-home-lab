@@ -9,6 +9,7 @@ from garminconnect.workout import (
     ExecutableStep,
     RunningWorkout,
     StepType,
+    TargetType,
     WorkoutSegment,
     create_repeat_group,
 )
@@ -45,6 +46,38 @@ def _resolve_zone(step: Dict[str, Any], default_zone: Optional[int]) -> int:
 def _minutes_to_seconds(minutes: float) -> float:
     return float(minutes) * 60.0
 
+
+
+
+def _no_target() -> dict[str, Any]:
+    return {
+        "workoutTargetTypeId": TargetType.NO_TARGET,
+        "workoutTargetTypeKey": "no.target",
+        "displayOrder": 1,
+    }
+
+
+def _build_cue_step(step: Dict[str, Any], step_order: int):
+    message = step.get("message") or step.get("description")
+    if not message:
+        raise ValueError("Cue steps require message or description.")
+
+    return ExecutableStep(
+        stepOrder=step_order,
+        stepType={
+            "stepTypeId": StepType.OTHER,
+            "stepTypeKey": "other",
+            "displayOrder": 7,
+        },
+        endCondition={
+            "conditionTypeId": ConditionType.LAP_BUTTON,
+            "conditionTypeKey": "lap.button",
+            "displayOrder": 1,
+            "displayable": True,
+        },
+        targetType=_no_target(),
+        description=str(message),
+    )
 
 def _build_executable_step(
     step: Dict[str, Any],
@@ -117,10 +150,29 @@ def build_workout_steps(
         step_type = str(step.get("type", "interval")).lower()
         if step_type == "repeat":
             built_steps.append(_build_repeat_group(step, index, default_zone))
+        elif step_type == "cue":
+            built_steps.append(_build_cue_step(step, index))
         else:
             built_steps.append(_build_executable_step(step, index, default_zone))
     return built_steps
 
+
+
+
+def estimate_steps_duration_seconds(steps: List[Dict[str, Any]]) -> int:
+    total = 0.0
+    for step in steps:
+        step_type = str(step.get("type", "interval")).lower()
+        if step_type == "cue":
+            continue
+        if step_type == "repeat":
+            iterations = int(step.get("iterations", 1))
+            nested_steps = step.get("steps") or []
+            for nested in nested_steps:
+                total += float(nested.get("duration_minutes", 0)) * 60 * iterations
+            continue
+        total += float(step.get("duration_minutes", 0)) * 60
+    return max(int(total), 60)
 
 def estimate_duration_seconds(steps: List[Any]) -> int:
     total = 0.0
@@ -133,6 +185,8 @@ def estimate_duration_seconds(steps: List[Any]) -> int:
                     for _ in range(int(node.get("numberOfIterations", 1))):
                         walk(child)
                 return
+            if node.get("stepType", {}).get("stepTypeKey") == "other":
+                return
             total += float(node.get("endConditionValue") or 0)
             return
 
@@ -141,6 +195,8 @@ def estimate_duration_seconds(steps: List[Any]) -> int:
             for child in data.get("workoutSteps", []):
                 for _ in range(int(data.get("numberOfIterations", 1))):
                     walk(child)
+            return
+        if data.get("stepType", {}).get("stepTypeKey") == "other":
             return
         total += float(data.get("endConditionValue") or 0)
 
