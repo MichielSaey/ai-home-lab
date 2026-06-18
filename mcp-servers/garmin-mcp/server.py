@@ -1,6 +1,6 @@
 import os
 from datetime import date, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from garminconnect import (
     Garmin,
@@ -14,6 +14,14 @@ from zones import (
     normalize_hr_zones,
     weekly_stats_rows,
     zones_to_minute_columns,
+)
+from hr_zones import resolve_hr_context
+from workout_builder import build_running_workout, extract_workout_id
+from workout_templates import (
+    TEMPLATE_DESCRIPTIONS,
+    TEMPLATE_TYPES,
+    build_combined_workout,
+    build_template_workout,
 )
 
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
@@ -70,6 +78,63 @@ def _call_optional(client: Garmin, method: str, *args, **kwargs) -> Any:
         return getattr(client, method)(*args, **kwargs)
     except Exception as exc:
         return {"error": f"{method} failed: {exc}"}
+(client: Garmin, method: str, *args, **kwargs) -> Any:
+    if not hasattr(client, method):
+        return None
+    try:
+        return getattr(client, method)(*args, **kwargs)
+    except Exception as exc:
+        return {"error": f"{method} failed: {exc}"}
+
+
+def _calendar_item_date(item: Dict[str, Any]) -> Optional[str]:
+    for key in ("date", "calendarDate"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value[:10]
+    return None
+
+
+def _calendar_item_workout_id(item: Dict[str, Any]) -> Optional[int]:
+    for key in ("workoutId", "workoutTemplateId"):
+        value = item.get(key)
+        if value is not None:
+            return int(value)
+    workout = item.get("workout")
+    if isinstance(workout, dict) and workout.get("workoutId") is not None:
+        return int(workout["workoutId"])
+    return None
+
+
+def _find_scheduled_workout(
+    client: Garmin, workout_id: int, workout_date: str
+) -> Optional[Dict[str, Any]]:
+    if not hasattr(client, "get_scheduled_workouts"):
+        return None
+    try:
+        target = date.fromisoformat(workout_date)
+    except ValueError:
+        return None
+
+    payload = _call_optional(
+        client, "get_scheduled_workouts", year=target.year, month=target.month
+    )
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+
+    items = payload.get("calendarItems", [])
+    if not isinstance(items, list):
+        return None
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if _calendar_item_date(item) != workout_date:
+            continue
+        if _calendar_item_workout_id(item) == workout_id:
+            return item
+    return None
+
 
 
 def _init_client() -> None:
@@ -385,13 +450,326 @@ def get_race_predictions() -> Dict[str, Any]:
     }
 
 
-# TODO: Excersies creation and scheduling tool
-# Start with minimalist funciton that takes a json for the workout.
-# From there add tools for pre-defined workout types (e.g., Quality, Threshold, Tempo, Endurance, etc.)
-# These tools should have minimal inputs. A set of paramaters defining repetition, and duration. But as
-# much as possible should be done automatically. Then there should be a schedule tool, that takes an
-# workout id, and a date, and schedules the workout for that date. Or we could add date as a pramater
-# in the create tool.
+def _upload_running_workout(client: Garmin, workout) -> Dict[str, Any]:
+    result = _call_optional(client, "upload_running_workout", workout)
+    if isinstance(result, dict) and result.get("error"):
+        return result
+    if not isinstance(result, dict):
+        return {"error": "Workout upload did not return a response."}
+
+    workout_id = extract_workout_id(result)
+    return {
+        "workoutId": workout_id,
+        "workoutName": workout.workoutName,
+        "estimatedDurationMinutes": round(workout.estimatedDurationInSecs / 60, 1),
+        "upload": result,
+    }
+
+
+@mcp.tool()
+def get_heart_rate_zones() -> Dict[str, Any]:
+    """Return heart rate zones used by workout templates (Karvonen / HRR method)."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+    return resolve_hr_context(client, get_profile())
+
+
+@mcp.tool()
+def get_workouts(start: int = 0, limit: int = 20) -> Dict[str, Any]:
+    """List saved Garmin workout templates from the workout library."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    workouts = _call_optional(client, "get_workouts", start=start, limit=limit)
+    if isinstance(workouts, dict) and workouts.get("error"):
+        return workouts
+    if not isinstance(workouts, list):
+        return {"error": "No workouts returned from Garmin"}
+
+    rows = []
+    for workout in workouts:
+        if not isinstance(workout, dict):
+            continue
+        rows.append(
+            [
+                workout.get("workoutId"),
+                workout.get("workoutName"),
+                round((workout.get("estimatedDurationInSecs") or 0) / 60, 1),
+                workout.get("sportType", {}).get("sportTypeKey"),
+            ]
+        )
+
+    return {
+        "Garmin Workouts": {
+            "Headers": ["id", "name", "duration_min", "sport"],
+            "Rows": rows,
+        }
+    }
+
+
+@mcp.tool()
+def workout(
+    name: str,
+    steps: List[Dict[str, Any]],
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a running workout from an ordered list of adjacent steps.
+
+    Each step is a dict with:
+    - type: warmup | interval | recovery | cooldown | repeat
+    - duration_minutes: float (required for regular steps)
+    - workout_type: optional preset zone key (easy, tempo, threshold, strides, sprint, ...)
+    - heart_rate_zone: optional Garmin zone number 1-5 (overrides workout_type)
+    - iterations + steps: required for repeat blocks
+
+    Heart rate targets are set automatically unless heart_rate_zone is provided.
+    """
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    try:
+        running_workout = build_running_workout(name, steps, description=description)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    upload_result = _upload_running_workout(client, running_workout)
+    if upload_result.get("error"):
+        return upload_result
+
+    upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+    return upload_result
+
+
+@mcp.tool()
+def schedule_workout(workout_id: int, workout_date: str) -> Dict[str, Any]:
+    """Schedule an existing workout template on a calendar date (YYYY-MM-DD)."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    if hasattr(client, "schedule_workout"):
+        existing = _find_scheduled_workout(client, workout_id, workout_date)
+        if existing is not None:
+            return {
+                "workoutId": workout_id,
+                "date": workout_date,
+                "alreadyScheduled": True,
+                "schedule": existing,
+            }
+
+    result = _call_optional(client, "schedule_workout", workout_id, workout_date)
+    if isinstance(result, dict) and result.get("error"):
+        return result
+    return {
+        "workoutId": workout_id,
+        "date": workout_date,
+        "schedule": result,
+    }
+
+
+@mcp.tool()
+def list_workout_templates() -> Dict[str, Any]:
+    """List built-in workout templates and the heart rate zones they use."""
+    return {
+        "templates": [
+            {
+                "template": template,
+                "description": TEMPLATE_DESCRIPTIONS[template],
+            }
+            for template in TEMPLATE_TYPES
+        ],
+        "combineHint": (
+            "Use combine_workout_templates with segments like "
+            '[{"template": "easy", "params": {"duration_minutes": 20}}, '
+            '{"template": "strides", "params": {"count": 6}}].'
+        ),
+    }
+
+
+def _create_from_template(
+    template: str,
+    name: str,
+    params: Optional[Dict[str, Any]] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    try:
+        running_workout = build_template_workout(
+            name,
+            template,
+            params=params,
+            description=description or TEMPLATE_DESCRIPTIONS.get(template),
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    upload_result = _upload_running_workout(client, running_workout)
+    if upload_result.get("error"):
+        return upload_result
+
+    upload_result["template"] = template
+    upload_result["params"] = params or {}
+    upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+    return upload_result
+
+
+@mcp.tool()
+def create_easy_workout(duration_minutes: int = 30, name: str = "Easy Run") -> Dict[str, Any]:
+    """Create a single-step easy aerobic run (HR zone 2)."""
+    return _create_from_template(
+        "easy",
+        name,
+        params={"duration_minutes": duration_minutes},
+    )
+
+
+@mcp.tool()
+def create_long_run_workout(
+    duration_minutes: int = 90,
+    name: str = "Long Run",
+) -> Dict[str, Any]:
+    """Create a single-step long easy run (HR zone 2)."""
+    return _create_from_template(
+        "long_run",
+        name,
+        params={"duration_minutes": duration_minutes},
+    )
+
+
+@mcp.tool()
+def create_recovery_workout(
+    duration_minutes: int = 25,
+    name: str = "Recovery Run",
+) -> Dict[str, Any]:
+    """Create a short recovery jog (HR zone 1)."""
+    return _create_from_template(
+        "recovery",
+        name,
+        params={"duration_minutes": duration_minutes},
+    )
+
+
+@mcp.tool()
+def create_tempo_workout(
+    duration_minutes: int = 20,
+    warmup_minutes: int = 10,
+    cooldown_minutes: int = 10,
+    name: str = "Tempo Run",
+) -> Dict[str, Any]:
+    """Create a tempo run with warmup and cooldown (main block HR zone 3)."""
+    return _create_from_template(
+        "tempo",
+        name,
+        params={
+            "duration_minutes": duration_minutes,
+            "warmup_minutes": warmup_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        },
+    )
+
+
+@mcp.tool()
+def create_threshold_workout(
+    duration_minutes: int = 20,
+    warmup_minutes: int = 10,
+    cooldown_minutes: int = 10,
+    name: str = "Threshold Run",
+) -> Dict[str, Any]:
+    """Create a lactate-threshold run with warmup and cooldown (main block HR zone 4)."""
+    return _create_from_template(
+        "threshold",
+        name,
+        params={
+            "duration_minutes": duration_minutes,
+            "warmup_minutes": warmup_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        },
+    )
+
+
+@mcp.tool()
+def create_strides_workout(
+    count: int = 6,
+    stride_seconds: int = 20,
+    recovery_seconds: int = 60,
+    warmup_minutes: int = 15,
+    cooldown_minutes: int = 10,
+    name: str = "Strides",
+) -> Dict[str, Any]:
+    """Create a strides session with easy warmup/cooldown (efforts in HR zone 5)."""
+    return _create_from_template(
+        "strides",
+        name,
+        params={
+            "count": count,
+            "stride_seconds": stride_seconds,
+            "recovery_seconds": recovery_seconds,
+            "warmup_minutes": warmup_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        },
+    )
+
+
+@mcp.tool()
+def create_sprint_workout(
+    repetitions: int = 6,
+    sprint_seconds: int = 30,
+    recovery_seconds: int = 90,
+    warmup_minutes: int = 15,
+    cooldown_minutes: int = 10,
+    name: str = "Sprint Intervals",
+) -> Dict[str, Any]:
+    """Create short sprint repeats with jog recoveries (efforts in HR zone 5)."""
+    return _create_from_template(
+        "sprint",
+        name,
+        params={
+            "repetitions": repetitions,
+            "sprint_seconds": sprint_seconds,
+            "recovery_seconds": recovery_seconds,
+            "warmup_minutes": warmup_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        },
+    )
+
+
+@mcp.tool()
+def combine_workout_templates(
+    name: str,
+    segments: List[Dict[str, Any]],
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Combine multiple workout templates into one session.
+
+    Each segment is either:
+    - {"template": "easy", "params": {"duration_minutes": 20}}
+    - {"template": "strides", "params": {"count": 6}}
+    - {"steps": [...]} with explicit workout() step objects
+
+    Example: easy 20 min + strides + easy 10 min cooldown block.
+    """
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    try:
+        running_workout = build_combined_workout(name, segments, description=description)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    upload_result = _upload_running_workout(client, running_workout)
+    if upload_result.get("error"):
+        return upload_result
+
+    upload_result["segments"] = segments
+    upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+    return upload_result
 
 
 if __name__ == "__main__":
