@@ -12,7 +12,6 @@ from langgraph.graph import END, StateGraph
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
-from mcp.types import ReadResourceResult
 
 from shared.database import get_checkpointer, get_user_profile
 from shared.security import decrypt_secret
@@ -108,12 +107,16 @@ async def fetch_weekly_report(state: CoachState) -> Dict[str, Any]:
     async with sse_client(MCP_URL) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            result: ReadResourceResult = await session.read_resource("garmin://weekly-report")
-            result = json.loads(result.contents[0].text)
-            ic("Raw MCP result:", result, "Type:", type(result))
-            if result.get("error"):
-                return {"error": result["error"]}
-    return {"weekly_report": _normalize_mcp_result(result)}
+            result = await session.call_tool("get_weekly_report", arguments={})
+            if result.isError:
+                return {"error": str(result.content)}
+            for block in result.content:
+                if hasattr(block, "text") and block.text:
+                    payload = json.loads(block.text)
+                    if isinstance(payload, dict) and payload.get("error"):
+                        return {"error": payload["error"]}
+                    return {"weekly_report": _normalize_mcp_result(payload)}
+    return {"error": "No weekly report returned from garmin-mcp"}
 
 
 async def generate_response(state: CoachState) -> Dict[str, Any]:

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "garmin-mcp": {
+      "type": "sse",
+      "url": "http://garmin-mcp:8000/sse"
+    }
+  }
+}
