@@ -39,6 +39,42 @@ def activity_date(activity: dict[str, Any]) -> date | None:
         return None
 
 
+def weekly_stats_rows(
+    activities: list[dict[str, Any]],
+    activity_zones: dict[Any, dict[int, float]],
+    today: date,
+    num_blocks: int = 4,
+) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    for block_index in range(num_blocks - 1, -1, -1):
+        block_end = today - timedelta(days=block_index * 7)
+        block_start = block_end - timedelta(days=6)
+        block_distance_km = 0.0
+        block_zones = {zone: 0.0 for zone in range(1, 6)}
+        for activity in activities:
+            act_date = activity_date(activity)
+            if act_date is None or not (block_start <= act_date <= block_end):
+                continue
+            block_distance_km += (activity.get("distance", 0) or 0) / 1000
+            zones = activity_zones.get(activity.get("activityId"), {})
+            for zone, secs in zones.items():
+                if 1 <= zone <= 5:
+                    block_zones[zone] += secs
+        easy_min, hard_min, easy_pct = easy_hard_from_zones(block_zones)
+        rows.append(
+            [
+                block_start.isoformat(),
+                block_end.isoformat(),
+                round(block_distance_km, 2),
+                *[round(block_zones[zone] / 60, 2) for zone in range(1, 6)],
+                easy_min,
+                hard_min,
+                easy_pct,
+            ]
+        )
+    return rows
+
+
 def weekly_hr_zone_rows(
     dated_zones: list[tuple[date, dict[int, float]]],
     today: date,

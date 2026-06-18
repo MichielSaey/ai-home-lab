@@ -12,7 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from zones import (
     activity_date,
     normalize_hr_zones,
-    weekly_hr_zone_rows,
+    weekly_stats_rows,
     zones_to_minute_columns,
 )
 
@@ -26,6 +26,41 @@ DEFAULT_GARMIN_PASSWORD = os.environ.get("GARMIN_PASSWORD")
 
 _CLIENT: Optional[Garmin] = None
 _CLIENT_ERROR: Optional[Dict[str, Any]] = None
+
+ACTIVITY_HEADERS = [
+    "name",
+    "type",
+    "distance_km",
+    "duration_min",
+    "avg_pace_min_per_km",
+    "max_pace_min_per_km",
+    "max_hr",
+    "avg_hr",
+    "aerobic_te",
+    "anaerobic_te",
+    "training_effect",
+    "zone_1_min",
+    "zone_2_min",
+    "zone_3_min",
+    "zone_4_min",
+    "zone_5_min",
+]
+
+ACTIVITY_HEADERS_NO_ZONES = ACTIVITY_HEADERS[:11]
+
+WEEKLY_STATS_HEADERS = [
+    "week_start",
+    "week_end",
+    "distance_km",
+    "zone_1_min",
+    "zone_2_min",
+    "zone_3_min",
+    "zone_4_min",
+    "zone_5_min",
+    "easy_min",
+    "hard_min",
+    "easy_pct",
+]
 
 
 def _call_optional(client: Garmin, method: str, *args, **kwargs) -> Any:
@@ -87,26 +122,88 @@ def _running_activities_in_range(
     ]
 
 
-@mcp.resource("garmin://weekly-report")
-def weekly_report() -> Dict[str, Any]:
-    client, error = _get_client_or_error()
-    if error:
-        return error
+def _activity_row(
+    activity: dict[str, Any],
+    zones: dict[int, float],
+    *,
+    include_hr_zones: bool,
+) -> list[Any]:
+    avg_speed = activity.get("averageSpeed")
+    max_speed = activity.get("maxSpeed")
+    row: list[Any] = [
+        activity.get("activityName"),
+        activity.get("activityType", {}).get("typeKey"),
+        round((activity.get("distance", 0) or 0) / 1000, 2),
+        round((activity.get("movingDuration", 0) or 0) / 60, 2),
+        round((1000 / avg_speed) / 60, 2) if avg_speed else None,
+        round((1000 / max_speed) / 60, 2) if max_speed else None,
+        activity.get("maxHR"),
+        activity.get("averageHR"),
+        round(activity.get("aerobicTrainingEffect", 0) or 0, 2),
+        round(activity.get("anaerobicTrainingEffect", 0) or 0, 2),
+        activity.get("trainingEffectLabel"),
+    ]
+    if include_hr_zones:
+        row.extend(zones_to_minute_columns(zones))
+    return row
 
-    profile = get_profile()
-    weekly_mileage = get_weekly_mileage()
-    weekly_hr_zones = get_weekly_hr_zones()
-    events = get_events()
-    race_predictions = get_race_predictions()
-    activities = get_activities(days_back=14)
+
+def _activities_table(
+    client: Garmin,
+    days_back: int,
+    *,
+    include_hr_zones: bool = True,
+) -> Dict[str, Any] | dict[str, Any]:
+    today = date.today()
+    activities = _running_activities_in_range(
+        client,
+        (today - timedelta(days=days_back)).isoformat(),
+        today.isoformat(),
+    )
+    if isinstance(activities, dict) and activities.get("error"):
+        return activities
+
+    headers = ACTIVITY_HEADERS if include_hr_zones else ACTIVITY_HEADERS_NO_ZONES
+    rows = []
+    for activity in activities:
+        zones = (
+            _fetch_hr_zones(client, activity.get("activityId"))
+            if include_hr_zones
+            else {}
+        )
+        rows.append(_activity_row(activity, zones, include_hr_zones=include_hr_zones))
 
     return {
-        "profile": profile,
-        "race_predictions": race_predictions,
-        "weekly_mileage": weekly_mileage,
-        "weekly_hr_zones": weekly_hr_zones,
-        "activities": activities,
-        "events": events,
+        "Garmin Activities": {
+            "Headers": headers,
+            "Rows": rows,
+        }
+    }
+
+
+def _weekly_stats_table(client: Garmin, weeks: int = 4) -> Dict[str, Any] | dict[str, Any]:
+    today = date.today()
+    lookback_days = weeks * 7 - 1
+    activities = _running_activities_in_range(
+        client,
+        (today - timedelta(days=lookback_days)).isoformat(),
+        today.isoformat(),
+    )
+    if isinstance(activities, dict) and activities.get("error"):
+        return activities
+
+    activity_zones: dict[Any, dict[int, float]] = {}
+    for activity in activities:
+        activity_id = activity.get("activityId")
+        if activity_id is None:
+            continue
+        activity_zones[activity_id] = _fetch_hr_zones(client, activity_id)
+
+    return {
+        "Garmin Weekly Stats": {
+            "Headers": WEEKLY_STATS_HEADERS,
+            "Rows": weekly_stats_rows(activities, activity_zones, today, num_blocks=weeks),
+        }
     }
 
 
@@ -118,80 +215,57 @@ def get_profile() -> Dict[str, Any]:
 
     profile = _call_optional(client, "get_user_profile").get("userData", {})
     return {
-        "weight": round(profile.get("weight", 0) / 1000, 2),  # weight (kg)
-        "height": profile.get("height"),  # height (cm)
-        "birthDate": profile.get("birthDate"),  # birthdate
-        "vo2MaxRunning": profile.get("vo2MaxRunning"),  # VO2 max (running)
+        "weight": round(profile.get("weight", 0) / 1000, 2),
+        "height": profile.get("height"),
+        "birthDate": profile.get("birthDate"),
+        "vo2MaxRunning": profile.get("vo2MaxRunning"),
         "lactateThresholdSpeed": round(
             (profile.get("lactateThresholdSpeed", 0) * 1000 / 60), 2
-        ),  # lactate threshold speed (m/s)
-        "lactateThresholdHeartRate": profile.get("lactateThresholdHeartRate"),  # lactate threshold HR (bpm)
-        "availableTrainingDays": profile.get("availableTrainingDays", []),  # available training days
+        ),
+        "lactateThresholdHeartRate": profile.get("lactateThresholdHeartRate"),
+        "availableTrainingDays": profile.get("availableTrainingDays", []),
         "preferredLongTrainingDays": profile.get(
             "preferredLongTrainingDays", []
-        ),  # preferred long training days
+        ),
     }
 
 
 @mcp.tool()
-def get_activities(days_back: int = 7) -> Dict[str, Any]:
+def get_activities(days_back: int = 7, include_hr_zones: bool = True) -> Dict[str, Any]:
+    """Running activities in the last N days. Set include_hr_zones=false for a faster summary."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+    return _activities_table(client, days_back, include_hr_zones=include_hr_zones)
+
+
+@mcp.tool()
+def get_weekly_stats(weeks: int = 4) -> Dict[str, Any]:
+    """Weekly running distance and HR zone rollups (one row per calendar week)."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+    return _weekly_stats_table(client, weeks=weeks)
+
+
+@mcp.tool()
+def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> Dict[str, Any]:
+    """Coach review bundle: profile, predictions, events, and weekly stats. Slow — call on demand."""
     client, error = _get_client_or_error()
     if error:
         return error
 
-    activity_columns = [
-        "n",
-        "t",
-        "d",
-        "dur",
-        "ap",
-        "mp",
-        "mxh",
-        "avh",
-        "ae",
-        "ane",
-        "tel",
-        "z1",
-        "z2",
-        "z3",
-        "z4",
-        "z5",
-    ]
-    today = date.today()
-    start_date = (today - timedelta(days=days_back)).isoformat()
-    end_date = today.isoformat()
-
-    activities = _running_activities_in_range(client, start_date, end_date)
-    if isinstance(activities, dict) and activities.get("error"):
-        return activities
-
-    activity_rows = []
-    for activity in activities:
-        avg_speed = activity.get("averageSpeed")
-        max_speed = activity.get("maxSpeed")
-        zones = _fetch_hr_zones(client, activity.get("activityId"))
-        row = [
-            activity.get("activityName"),
-            activity.get("activityType", {}).get("typeKey"),
-            round((activity.get("distance", 0) or 0) / 1000, 2),
-            round((activity.get("movingDuration", 0) or 0) / 60, 2),
-            round((1000 / avg_speed) / 60, 2) if avg_speed else None,
-            round((1000 / max_speed) / 60, 2) if max_speed else None,
-            activity.get("maxHR"),
-            activity.get("averageHR"),
-            round(activity.get("aerobicTrainingEffect", 0) or 0, 2),
-            round(activity.get("anaerobicTrainingEffect", 0) or 0, 2),
-            activity.get("trainingEffectLabel"),
-            *zones_to_minute_columns(zones),
-        ]
-        activity_rows.append(row)
-
-    return {
-        "Garmin activities_past_week": {
-            "Headers": activity_columns,
-            "Rows": activity_rows,
-        }
+    report: Dict[str, Any] = {
+        "profile": get_profile(),
+        "race_predictions": get_race_predictions(),
+        "events": get_events(),
+        "weekly_stats": _weekly_stats_table(client),
     }
+    if include_activities:
+        report["activities"] = _activities_table(
+            client, days_back, include_hr_zones=True
+        )
+    return report
 
 
 @mcp.tool()
@@ -200,7 +274,14 @@ def get_events(months_ahead: int = 12) -> Dict[str, Any]:
     if error:
         return error
 
-    event_columns = ["t", "it", "d", "cv", "cu", "ct"]
+    event_columns = [
+        "title",
+        "item_type",
+        "date",
+        "target_value",
+        "target_unit",
+        "target_unit_type",
+    ]
     today = date.today()
     start_month = today.replace(day=1)
     event_rows = []
@@ -273,7 +354,7 @@ def get_race_predictions() -> Dict[str, Any]:
 
     return {
         "Garmin Race Predictions": {
-            "Headers": ["5k", "10k", "hm", "m"],
+            "Headers": ["5k_min", "10k_min", "half_marathon_h", "marathon_h"],
             "Rows": [
                 [
                     round((prediction_source.get("time5K", 0) or 0) / 60, 2),
@@ -288,96 +369,15 @@ def get_race_predictions() -> Dict[str, Any]:
     }
 
 
-@mcp.tool()
-def get_weekly_mileage() -> Dict[str, Any]:
-    client, error = _get_client_or_error()
-    if error:
-        return error
-    today = date.today()
-    activities_28_days = _call_optional(
-        client,
-        "get_activities_by_date",
-        (today - timedelta(days=27)).isoformat(),
-        today.isoformat(),
-    )
-    if isinstance(activities_28_days, dict) and activities_28_days.get("error"):
-        return activities_28_days
-    if not isinstance(activities_28_days, list):
-        return {"error": "No activities returned from Garmin"}
-
-    weekly_rows = []
-    for block_index in range(3, -1, -1):
-        block_end = today - timedelta(days=block_index * 7)
-        block_start = block_end - timedelta(days=6)
-        block_distance_km = 0.0
-        for activity in activities_28_days:
-            if not isinstance(activity, dict):
-                continue
-            if activity.get("activityType", {}).get("typeKey") != "running":
-                continue
-            start_time = activity.get("startTimeLocal", "")
-            if not start_time:
-                continue
-            try:
-                activity_date = date.fromisoformat(start_time[:10])
-            except ValueError:
-                continue
-            if block_start <= activity_date <= block_end:
-                block_distance_km += (activity.get("distance", 0) or 0) / 1000
-
-        weekly_rows.append(
-            [
-                block_start.isoformat(),
-                block_end.isoformat(),
-                round(block_distance_km, 2),
-            ]
-        )
-
-    return {"Garmin Weekly Mileage": weekly_rows}
-
-
-@mcp.tool()
-def get_weekly_hr_zones() -> Dict[str, Any]:
-    client, error = _get_client_or_error()
-    if error:
-        return error
-
-    today = date.today()
-    activities = _running_activities_in_range(
-        client,
-        (today - timedelta(days=27)).isoformat(),
-        today.isoformat(),
-    )
-    if isinstance(activities, dict) and activities.get("error"):
-        return activities
-
-    dated_zones: list[tuple[date, dict[int, float]]] = []
-    for activity in activities:
-        act_date = activity_date(activity)
-        if act_date is None:
-            continue
-        zones = _fetch_hr_zones(client, activity.get("activityId"))
-        if zones:
-            dated_zones.append((act_date, zones))
-
-    zone_columns = ["start", "end", "z1", "z2", "z3", "z4", "z5", "easy_min", "hard_min", "easy_pct"]
-    return {
-        "Garmin Weekly HR Zones": {
-            "Headers": zone_columns,
-            "Rows": weekly_hr_zone_rows(dated_zones, today),
-        }
-    }
-
-
 # TODO: Excersies creation and scheduling tool
 # Start with minimalist funciton that takes a json for the workout.
 # From there add tools for pre-defined workout types (e.g., Quality, Threshold, Tempo, Endurance, etc.)
-# These tools should have minimal inputs. A set of paramaters defining repetition, and duration. But as 
-# much as possible should be done automatically. Then there should be a schedule tool, that takes an 
+# These tools should have minimal inputs. A set of paramaters defining repetition, and duration. But as
+# much as possible should be done automatically. Then there should be a schedule tool, that takes an
 # workout id, and a date, and schedules the workout for that date. Or we could add date as a pramater
-# in the create tool. 
-
+# in the create tool.
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    transport = os.environ.get("MCP_TRANSPORT", "sse")
+    mcp.run(transport=transport)  # type: ignore[arg-type]

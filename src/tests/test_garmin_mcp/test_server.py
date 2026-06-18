@@ -9,7 +9,7 @@ sys.path.insert(0, str(GARMIN_MCP_DIR))
 import server  # noqa: E402
 
 
-def test_get_activities_includes_hr_zone_minutes() -> None:
+def test_get_activities_uses_readable_headers_and_zone_minutes() -> None:
     mock_client = MagicMock()
     mock_client.get_activities_by_date.return_value = [
         {
@@ -36,19 +36,49 @@ def test_get_activities_includes_hr_zone_minutes() -> None:
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
         result = server.get_activities(days_back=7)
 
-    table = result["Garmin activities_past_week"]
-    assert "z1" in table["Headers"]
-    assert "z5" in table["Headers"]
+    table = result["Garmin Activities"]
+    assert table["Headers"][0] == "name"
+    assert table["Headers"][-1] == "zone_5_min"
     assert table["Rows"][0][-5:] == [10.0, 5.0, 0.0, 0.0, 0.0]
 
 
-def test_get_weekly_hr_zones_aggregates_four_week_blocks() -> None:
+def test_get_activities_can_skip_hr_zones() -> None:
+    mock_client = MagicMock()
+    mock_client.get_activities_by_date.return_value = [
+        {
+            "activityId": 101,
+            "activityName": "Morning Run",
+            "activityType": {"typeKey": "running"},
+            "distance": 5000,
+            "movingDuration": 1800,
+            "averageSpeed": 2.5,
+            "maxSpeed": 3.0,
+            "maxHR": 165,
+            "averageHR": 145,
+            "aerobicTrainingEffect": 2.5,
+            "anaerobicTrainingEffect": 0.1,
+            "trainingEffectLabel": "Aerobic Base",
+            "startTimeLocal": "2026-06-16 07:00:00",
+        }
+    ]
+
+    with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
+        result = server.get_activities(days_back=7, include_hr_zones=False)
+
+    table = result["Garmin Activities"]
+    assert "zone_1_min" not in table["Headers"]
+    assert len(table["Rows"][0]) == 11
+    mock_client.get_activity_hr_in_timezones.assert_not_called()
+
+
+def test_get_weekly_stats_combines_distance_and_zones() -> None:
     mock_client = MagicMock()
     today = date.today()
     mock_client.get_activities_by_date.return_value = [
         {
             "activityId": 201,
             "activityType": {"typeKey": "running"},
+            "distance": 10000,
             "startTimeLocal": f"{today.isoformat()} 07:00:00",
         }
     ]
@@ -57,23 +87,47 @@ def test_get_weekly_hr_zones_aggregates_four_week_blocks() -> None:
     ]
 
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
-        result = server.get_weekly_hr_zones()
+        result = server.get_weekly_stats()
 
-    table = result["Garmin Weekly HR Zones"]
+    table = result["Garmin Weekly Stats"]
+    assert table["Headers"][2] == "distance_km"
+    assert table["Headers"][3] == "zone_1_min"
     assert len(table["Rows"]) == 4
-    assert table["Rows"][-1][2] == 20.0
+    current_week = table["Rows"][-1]
+    assert current_week[2] == 10.0
+    assert current_week[3] == 20.0
 
 
-def test_weekly_report_includes_weekly_hr_zones() -> None:
+def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
     with (
         patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
         patch.object(server, "get_profile", return_value={"weight": 70}),
-        patch.object(server, "get_weekly_mileage", return_value={"Garmin Weekly Mileage": []}),
-        patch.object(server, "get_weekly_hr_zones", return_value={"Garmin Weekly HR Zones": {"Headers": [], "Rows": []}}),
-        patch.object(server, "get_events", return_value={"Garmin Events": {"Headers": [], "Rows": []}}),
-        patch.object(server, "get_race_predictions", return_value={"Garmin Race Predictions": {"Headers": [], "Rows": []}}),
-        patch.object(server, "get_activities", return_value={"Garmin activities_past_week": {"Headers": [], "Rows": []}}),
+        patch.object(server, "get_race_predictions", return_value={"Garmin Race Predictions": {}}),
+        patch.object(server, "get_events", return_value={"Garmin Events": {}}),
+        patch.object(
+            server,
+            "_weekly_stats_table",
+            return_value={"Garmin Weekly Stats": {"Headers": [], "Rows": []}},
+        ),
+        patch.object(server, "_activities_table") as activities_table,
     ):
-        result = server.weekly_report()
+        result = server.get_weekly_report()
 
-    assert "weekly_hr_zones" in result
+    assert "weekly_stats" in result
+    assert "activities" not in result
+    activities_table.assert_not_called()
+
+
+def test_get_weekly_report_can_include_activities() -> None:
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
+        patch.object(server, "get_profile", return_value={}),
+        patch.object(server, "get_race_predictions", return_value={}),
+        patch.object(server, "get_events", return_value={}),
+        patch.object(server, "_weekly_stats_table", return_value={}),
+        patch.object(server, "_activities_table", return_value={"Garmin Activities": {}}) as activities_table,
+    ):
+        result = server.get_weekly_report(include_activities=True)
+
+    assert "activities" in result
+    activities_table.assert_called_once()
