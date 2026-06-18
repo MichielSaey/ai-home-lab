@@ -120,21 +120,21 @@ def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
 
 def test_weekly_report_resource_aliases_get_weekly_report() -> None:
     with patch.object(
-        server, "get_weekly_report", return_value={"profile": {}, "weekly_stats": {}}
-    ) as get_weekly_report:
+        server, "get_report", return_value={"profile": {}, "weekly_stats": {}}
+    ) as get_report:
         result = server.weekly_report()
 
     assert result == {"profile": {}, "weekly_stats": {}}
-    get_weekly_report.assert_called_once_with()
+    get_report.assert_called_once_with(days=7, days_ago=0)
 
 
 def test_weekly_report_resource_for_days_clamps_and_forwards() -> None:
     with patch.object(
-        server, "get_weekly_report", return_value={"profile": {}}
-    ) as get_weekly_report:
+        server, "get_report", return_value={"profile": {}}
+    ) as get_report:
         server.weekly_report_for_days(120)
 
-    get_weekly_report.assert_called_once_with(days_back=90)
+    get_report.assert_called_once_with(days=90, days_ago=0)
 
 
 def test_get_profile_handles_missing_user_profile() -> None:
@@ -144,8 +144,7 @@ def test_get_profile_handles_missing_user_profile() -> None:
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
         result = server.get_profile()
 
-    assert result["weight"] == 0.0
-    assert result["availableTrainingDays"] == []
+    assert result["error"] == "No profile returned from Garmin"
 
 
 def test_get_weekly_report_can_include_activities() -> None:

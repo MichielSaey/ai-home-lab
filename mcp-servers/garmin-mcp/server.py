@@ -99,6 +99,17 @@ def _get_client_or_error() -> tuple[Optional[Garmin], Optional[Dict[str, Any]]]:
     return _CLIENT, None
 
 
+def _report_window(days: int, days_ago: int = 0) -> tuple[date, date]:
+    if days < 1:
+        raise ValueError("days must be at least 1")
+    if days_ago < 0:
+        raise ValueError("days_ago must be zero or positive")
+
+    end_date = date.today() - timedelta(days=days_ago)
+    start_date = end_date - timedelta(days=days - 1)
+    return start_date, end_date
+
+
 def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
     raw = _call_optional(client, "get_activity_hr_in_timezones", str(activity_id))
     if isinstance(raw, dict) and raw.get("error"):
@@ -150,16 +161,22 @@ def _activity_row(
 
 def _activities_table(
     client: Garmin,
-    days_back: int,
+    days_back: int = 7,
     *,
+    days: Optional[int] = None,
+    days_ago: int = 0,
     include_hr_zones: bool = True,
 ) -> Dict[str, Any] | dict[str, Any]:
-    today = date.today()
-    activities = _running_activities_in_range(
-        client,
-        (today - timedelta(days=days_back)).isoformat(),
-        today.isoformat(),
-    )
+    if days is not None:
+        window_start, window_end = _report_window(days, days_ago)
+        start_date = window_start.isoformat()
+        end_date = window_end.isoformat()
+    else:
+        today = date.today()
+        start_date = (today - timedelta(days=days_back)).isoformat()
+        end_date = today.isoformat()
+
+    activities = _running_activities_in_range(client, start_date, end_date)
     if isinstance(activities, dict) and activities.get("error"):
         return activities
 
@@ -173,21 +190,31 @@ def _activities_table(
         )
         rows.append(_activity_row(activity, zones, include_hr_zones=include_hr_zones))
 
-    return {
+    payload: Dict[str, Any] = {
         "Garmin Activities": {
             "Headers": headers,
             "Rows": rows,
         }
     }
+    if days is not None:
+        payload["window"] = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "days": days,
+            "days_ago": days_ago,
+        }
+    return payload
 
 
-def _weekly_stats_table(client: Garmin, weeks: int = 4) -> Dict[str, Any] | dict[str, Any]:
-    today = date.today()
+def _weekly_stats_table(
+    client: Garmin, weeks: int = 4, *, end_date: Optional[date] = None
+) -> Dict[str, Any] | dict[str, Any]:
+    report_end = end_date or date.today()
     lookback_days = weeks * 7 - 1
     activities = _running_activities_in_range(
         client,
-        (today - timedelta(days=lookback_days)).isoformat(),
-        today.isoformat(),
+        (report_end - timedelta(days=lookback_days)).isoformat(),
+        report_end.isoformat(),
     )
     if isinstance(activities, dict) and activities.get("error"):
         return activities
@@ -202,7 +229,7 @@ def _weekly_stats_table(client: Garmin, weeks: int = 4) -> Dict[str, Any] | dict
     return {
         "Garmin Weekly Stats": {
             "Headers": WEEKLY_STATS_HEADERS,
-            "Rows": weekly_stats_rows(activities, activity_zones, today, num_blocks=weeks),
+            "Rows": weekly_stats_rows(activities, activity_zones, report_end, num_blocks=weeks),
         }
     }
 
@@ -214,9 +241,11 @@ def get_profile() -> Dict[str, Any]:
         return error
 
     raw = _call_optional(client, "get_user_profile")
-    if isinstance(raw, dict) and raw.get("error"):
+    if not isinstance(raw, dict):
+        return {"error": "No profile returned from Garmin"}
+    if raw.get("error"):
         return raw
-    profile = (raw or {}).get("userData", {})
+    profile = raw.get("userData") or {}
     return {
         "weight": round(profile.get("weight", 0) / 1000, 2),
         "height": profile.get("height"),
@@ -234,54 +263,114 @@ def get_profile() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_activities(days_back: int = 7, include_hr_zones: bool = True) -> Dict[str, Any]:
-    """Running activities in the last N days. Set include_hr_zones=false for a faster summary."""
+def get_activities(
+    days_back: int = 7,
+    include_hr_zones: bool = True,
+    days: Optional[int] = None,
+    days_ago: int = 0,
+) -> Dict[str, Any]:
+    """Running activities in a date window. Use days/days_ago for rollable windows."""
     client, error = _get_client_or_error()
     if error:
         return error
-    return _activities_table(client, days_back, include_hr_zones=include_hr_zones)
+    return _activities_table(
+        client,
+        days_back,
+        days=days,
+        days_ago=days_ago,
+        include_hr_zones=include_hr_zones,
+    )
 
 
 @mcp.tool()
-def get_weekly_stats(weeks: int = 4) -> Dict[str, Any]:
+def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str, Any]:
     """Weekly running distance and HR zone rollups (one row per calendar week)."""
     client, error = _get_client_or_error()
     if error:
         return error
-    return _weekly_stats_table(client, weeks=weeks)
+    report_end: Optional[date] = None
+    if end_date is not None:
+        try:
+            report_end = date.fromisoformat(end_date)
+        except ValueError:
+            return {"error": "end_date must be an ISO date (YYYY-MM-DD)"}
+    return _weekly_stats_table(client, weeks=weeks, end_date=report_end)
+
+
+@mcp.tool()
+def get_report(
+    days: int = 7, days_ago: int = 0, include_activities: bool = False
+) -> Dict[str, Any]:
+    """Build a rollable Garmin training report for a past window of days."""
+    if days < 1 or days > 90:
+        return {"error": "days must be between 1 and 90"}
+
+    try:
+        start_date, end_date = _report_window(days, days_ago)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    profile = get_profile()
+    if isinstance(profile, dict) and profile.get("error"):
+        return profile
+
+    race_predictions = get_race_predictions()
+    if isinstance(race_predictions, dict) and race_predictions.get("error"):
+        return race_predictions
+
+    events = get_events()
+    if isinstance(events, dict) and events.get("error"):
+        return events
+
+    report: Dict[str, Any] = {
+        "window": {
+            "days": days,
+            "days_ago": days_ago,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        },
+        "profile": profile,
+        "race_predictions": race_predictions,
+        "events": events,
+        "weekly_stats": _weekly_stats_table(client, end_date=end_date),
+    }
+    if include_activities:
+        report["activities"] = _activities_table(
+            client, days=days, days_ago=days_ago, include_hr_zones=True
+        )
+    return report
 
 
 @mcp.tool()
 def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> Dict[str, Any]:
     """Coach review bundle: profile, predictions, events, and weekly stats. Slow — call on demand."""
-    client, error = _get_client_or_error()
-    if error:
-        return error
-
-    report: Dict[str, Any] = {
-        "profile": get_profile(),
-        "race_predictions": get_race_predictions(),
-        "events": get_events(),
-        "weekly_stats": _weekly_stats_table(client),
-    }
-    if include_activities:
-        report["activities"] = _activities_table(
-            client, days_back, include_hr_zones=True
-        )
-    return report
+    return get_report(
+        days=days_back,
+        days_ago=0,
+        include_activities=include_activities,
+    )
 
 
 @mcp.resource("garmin://weekly-report")
 def weekly_report() -> Dict[str, Any]:
-    """Default weekly review bundle (last 7 days). Alias for get_weekly_report."""
-    return get_weekly_report()
+    """Default weekly review bundle (last 7 days). Alias for get_report."""
+    return get_report(days=7, days_ago=0)
 
 
 @mcp.resource("garmin://weekly-report/{days_back}")
 def weekly_report_for_days(days_back: int) -> Dict[str, Any]:
     """Review bundle for a custom look-back window (days_back)."""
     days_back = max(1, min(days_back, 90))
-    return get_weekly_report(days_back=days_back)
+    return get_report(days=days_back, days_ago=0)
+
+
+@mcp.resource("garmin://report/{days}")
+def report_for_days(days: int) -> Dict[str, Any]:
+    return get_report(days=days, days_ago=0)
 
 
 @mcp.tool()
