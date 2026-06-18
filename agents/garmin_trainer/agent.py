@@ -1,7 +1,8 @@
 import asyncio
 import json
 import os
-from datetime import date
+import re
+from datetime import date, timedelta
 from typing import Any, Dict, Optional, TypedDict
 
 from icecream import ic
@@ -26,7 +27,6 @@ PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             "You are a Garmin running coach. Use the profile and weekly report to provide clear, safe guidance.\n"
-            # "Profile:\n{profile}\n\nWeekly report:\n{weekly_report}\n\nDate: {date}"
             "Weekly report:\n{weekly_report}\n\nDate: {date}",
         ),
         ("human", "{input}"),
@@ -34,13 +34,32 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-class CoachState(TypedDict):
+class CoachState(TypedDict, total=False):
     user_id: str
     input: str
     profile: Dict[str, Any]
     garmin_auth: Dict[str, str]
     weekly_report: Dict[str, Any]
+    report_days: int
+    days_ago: int
     response: str
+    error: str
+
+
+def parse_report_command(user_input: str) -> tuple[str, Optional[int], Optional[int], bool]:
+    stripped = user_input.strip()
+    match = re.match(
+        r"^/report(?:\s+(\d+))?(?:\s+(\d+))?\s*(.*)$",
+        stripped,
+        re.IGNORECASE,
+    )
+    if not match:
+        return user_input, None, None, False
+
+    days = int(match.group(1)) if match.group(1) else 7
+    days_ago = int(match.group(2)) if match.group(2) else 0
+    prompt_input = match.group(3).strip()
+    return prompt_input, days, days_ago, True
 
 
 def _sanitize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -79,7 +98,6 @@ def _build_llm() -> ChatLiteLLM:
         "model": LITELLM_MODEL,
         "temperature": 0.2,
         "api_base": LITELLM_API_BASE,
-        # "max_tokens": 2048,
     }
     if LITELLM_API_KEY:
         llm_kwargs["api_key"] = LITELLM_API_KEY
@@ -104,18 +122,30 @@ async def load_profile(state: CoachState) -> Dict[str, Any]:
 
 
 async def fetch_weekly_report(state: CoachState) -> Dict[str, Any]:
+    days = state.get("report_days", 7)
+    days_ago = state.get("days_ago", 0)
+
     async with sse_client(MCP_URL) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            result = await session.call_tool("get_weekly_report", arguments={})
+            result = await session.call_tool(
+                "get_report",
+                arguments={"days": days, "days_ago": days_ago},
+            )
             if result.isError:
-                return {"error": str(result.content)}
+                return {
+                    "error": result.content[0].text
+                    if result.content
+                    else "Garmin report failed"
+                }
+
             for block in result.content:
                 if hasattr(block, "text") and block.text:
-                    payload = json.loads(block.text)
-                    if isinstance(payload, dict) and payload.get("error"):
-                        return {"error": payload["error"]}
-                    return {"weekly_report": _normalize_mcp_result(payload)}
+                    parsed = json.loads(block.text)
+                    ic("Raw MCP result:", parsed, "Type:", type(parsed))
+                    if isinstance(parsed, dict) and parsed.get("error"):
+                        return {"error": parsed["error"]}
+                    return {"weekly_report": _normalize_mcp_result(parsed)}
     return {"error": "No weekly report returned from garmin-mcp"}
 
 
@@ -123,7 +153,7 @@ async def generate_response(state: CoachState) -> Dict[str, Any]:
     ic("Generating response with state:", state)
     if state.get("error"):
         return {"response": str(state["error"])}
-    
+
     llm = _build_llm()
     messages = PROMPT.format_messages(
         profile=json.dumps(state.get("profile", {}), indent=2),
@@ -137,13 +167,10 @@ async def generate_response(state: CoachState) -> Dict[str, Any]:
 
 def build_graph(checkpointer):
     graph = StateGraph(CoachState)
-    # graph.add_node("load_profile", load_profile)
     graph.add_node("get_weekly_report", fetch_weekly_report)
     graph.add_node("generate_response", generate_response)
 
-    # graph.set_entry_point("load_profile")
     graph.set_entry_point("get_weekly_report")
-    # graph.add_edge("load_profile", "get_weekly_report")
     graph.add_edge("get_weekly_report", "generate_response")
     graph.add_edge("generate_response", END)
 
@@ -167,9 +194,38 @@ async def get_graph():
         return _GRAPH
 
 
+async def run_agent(
+    user_input: str,
+    user_id: str,
+    thread_id: Optional[str] = None,
+    report_days: int = 7,
+    days_ago: int = 0,
+) -> str:
+    prompt_input, parsed_days, parsed_days_ago, used_report_command = parse_report_command(
+        user_input
+    )
+    if used_report_command:
+        report_days = parsed_days if parsed_days is not None else report_days
+        days_ago = parsed_days_ago if parsed_days_ago is not None else days_ago
 
-async def run_agent(user_input: str, user_id: str, thread_id: Optional[str] = None) -> str:
+    if used_report_command and not prompt_input:
+        window_end = date.today() - timedelta(days=days_ago)
+        window_start = window_end - timedelta(days=report_days - 1)
+        return (
+            f"Report window set to {report_days} day(s) ending "
+            f"{window_end.isoformat()} ({window_start.isoformat()} to {window_end.isoformat()}). "
+            "Ask your next question to get coaching based on that period."
+        )
+
     config = {"configurable": {"thread_id": thread_id or user_id}}
     graph = await get_graph()
-    result = await graph.ainvoke({"input": user_input, "user_id": user_id}, config=config)
+    result = await graph.ainvoke(
+        {
+            "input": prompt_input,
+            "user_id": user_id,
+            "report_days": report_days,
+            "days_ago": days_ago,
+        },
+        config=config,
+    )
     return result["response"]
