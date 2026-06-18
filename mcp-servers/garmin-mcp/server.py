@@ -80,13 +80,6 @@ def _call_optional(client: Garmin, method: str, *args, **kwargs) -> Any:
         return getattr(client, method)(*args, **kwargs)
     except Exception as exc:
         return {"error": f"{method} failed: {exc}"}
-(client: Garmin, method: str, *args, **kwargs) -> Any:
-    if not hasattr(client, method):
-        return None
-    try:
-        return getattr(client, method)(*args, **kwargs)
-    except Exception as exc:
-        return {"error": f"{method} failed: {exc}"}
 
 
 def _calendar_item_date(item: Dict[str, Any]) -> Optional[str]:
@@ -136,7 +129,6 @@ def _find_scheduled_workout(
         if _calendar_item_workout_id(item) == workout_id:
             return item
     return None
-
 
 
 def _init_client() -> None:
