@@ -82,3 +82,139 @@ Keep responses clear and actionable:
 4. **One coaching note** — A single actionable insight (e.g., "slow your Tuesday easy run by 30 s/km").
 
 Use plain language. Avoid jargon unless the athlete uses it first.
+
+## Training load and ACWR
+
+Interpret load fields from `training_plan` week `actuals` (snapshots from Garmin `get_training_status` at each week end). Km and HR zones alone do not show whether the body is absorbing the work.
+
+### Key fields
+
+| Field | Meaning |
+|---|---|
+| `acute_load` | Recent 7-day training strain (short-term fatigue) |
+| `chronic_load` | Longer-term fitness base (~28-day rolling load) |
+| `acwr` | Acute ÷ chronic — the key ratio for load decisions |
+
+Load decays each day without new training. Chronic load moves slowly; acute load reacts quickly to recent sessions.
+
+### ACWR is a point-in-time snapshot
+
+`acwr` answers: **right now, how does recent strain compare to my fitness base?**
+
+- **ACWR = 0.8** → recent load is 80% of chronic base → under-loading (recovery week, light week, or detraining)
+- **ACWR ≈ 1.0** → recent load matches base → maintaining
+- **ACWR 1.1–1.2** → acute above chronic → base should climb over coming weeks if sustained
+- **ACWR > 1.3** → spike → injury risk; hold or reduce volume
+
+Do **not** average ACWR across weeks — it blurs the signal. ACWR already embeds time decay; averaging it adds little value.
+
+### What to track instead of average ACWR
+
+| Metric | Use |
+|---|---|
+| **Current ACWR** | Immediate state: building, maintaining, or backing off |
+| **Chronic load at week-end** | Is the fitness base actually rising over time? |
+| **Week-over-week chronic delta %** | Did base load increase sustainably (~10% per week) or not? |
+
+### Progressive overload heuristic
+
+```
+if ACWR < 1.0   → not building; chronic base flat or falling
+if ACWR 1.0–1.3 → progressive overload zone (1.1–1.2 is the sweet spot)
+if ACWR > 1.3   → spike; hold or reduce volume
+```
+
+A ~10% weekly increase in chronic load maps to keeping ACWR slightly above 1.0 without spiking past ~1.3. If km went up but chronic load is flat, intensity may have increased without the base absorbing it.
+
+## Training periodization
+
+Volume progression, recovery cycles, event taper, and intensity split per week type. Use `week_type` on each `training_plan` row together with upcoming `events`.
+
+### Week-type decision (priority order)
+
+Count weeks **forward** from the first week in the lookback window (`week_number` 1, 2, 3…). Use the **next event** (first upcoming from events list) for taper/race.
+
+```
+1. Race week          (0 weeks to event at week_end)
+2. Taper final        (1 week to event)   → volume × 0.64 of peak
+3. Taper first        (2 weeks to event)  → volume × 0.80 of peak
+4. Recovery           (week_number % 4 == 0) → volume × 0.80 of previous week
+5. Build              (everything else)   → volume up to +10% vs previous week
+```
+
+**Taper overrides recovery.**
+
+### Volume and intensity by week type
+
+| Week type | Volume | Easy % | Hard % |
+|---|---|---|---|
+| build | up to +10% vs prev week | 80 | 20 |
+| recovery | 80% of prev week | 90 | 10 |
+| taper_first | 80% of peak build week | 80 | 20 |
+| taper_final | 64% of peak build week | 85 | 15 |
+| race | ~30% shakeout | 90 | 10 |
+
+### Periodization rules
+
+- Compare `actuals.distance_km` vs `target.distance_km` and `actuals.easy_pct` vs `target.easy_pct`.
+- Use `actuals.acwr` — if > 1.3, do not increase volume even on build weeks.
+- Schedule sessions from the row with `week_description: upcoming_week`.
+
+## How to interpret the training plan JSON
+
+Use `training_plan` with `events` (race date) and athlete profile. Review past weeks → check load → plan upcoming.
+
+Each week object:
+
+```json
+{
+  "week_description": "past_week | current_week | upcoming_week",
+  "week_type": "build | recovery | taper_first | taper_final | race",
+  "actuals": {
+    "distance_km", "easy_pct", "hard_pct",
+    "acute_load", "chronic_load", "acwr"
+  },
+  "target": { "distance_km", "easy_pct", "hard_pct" }
+}
+```
+
+The plan is **4 past weeks + 1 upcoming week**. No dates in the JSON (you know today's date); volume + % split is enough for coaching.
+
+### `week_description`
+
+| Value | Agent focus |
+|---|---|
+| `past_week` | Compare `actuals` vs `target` |
+| `current_week` | Partial `actuals`; finish week toward `target` |
+| `upcoming_week` | Empty or partial `actuals`; **schedule from `target`** |
+
+### `actuals` (what happened)
+
+| Field | Meaning |
+|---|---|
+| `distance_km` | Weekly running volume |
+| `easy_pct` / `hard_pct` | Intensity split (target ~80/20 on build weeks) |
+| `acute_load` | 7-day strain snapshot at week end |
+| `chronic_load` | 28-day fitness base snapshot at week end |
+| `acwr` | `acute_load / chronic_load` — derived |
+
+Load metrics are **point-in-time snapshots** at each week end — they cannot be reconstructed from km alone.
+
+**ACWR:** `< 1.0` under-loading · `1.0–1.3` building · `> 1.3` hold volume.
+
+### `target` (what should happen)
+
+| Field | Meaning |
+|---|---|
+| `distance_km` | Planned km — rounded whole number. `null` on first week (no prior reference). Build = +10% vs previous week actual. |
+| `easy_pct` / `hard_pct` | Planned split for `week_type` |
+
+No load targets — Garmin derives those from execution.
+
+### Agent workflow
+
+1. Scan `past_week` rows — volume and intensity vs target.
+2. Check latest `actuals.acwr` — if > 1.3, cap `upcoming_week` volume.
+3. Plan sessions from `upcoming_week.target` respecting `week_type`.
+4. Confirm taper/recovery timing against `events`.
+
