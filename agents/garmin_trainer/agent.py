@@ -207,7 +207,10 @@ async def generate_response(state: CoachState) -> Dict[str, Any]:
                 "system",
                 "{coach_prompt}\n\n"
                 "Athlete profile:\n{profile}\n\n"
-                "Garmin review data ({window_label}):\n{weekly_report}\n\n"
+                "Garmin review data ({window_label}):\n"
+                "Report JSON includes profile, events, race predictions, and "
+                "`training_plan` (past/current/upcoming weeks with actuals vs targets).\n"
+                "{report_data}\n\n"
                 "Today's date: {date}",
             ),
             ("human", "{input}"),
@@ -217,7 +220,7 @@ async def generate_response(state: CoachState) -> Dict[str, Any]:
         coach_prompt=state.get("coach_prompt", ""),
         profile=json.dumps(state.get("profile", {}), indent=2),
         window_label=window_label,
-        weekly_report=json.dumps(state.get("weekly_report", {}), indent=2),
+        report_data=json.dumps(state.get("weekly_report", {}), indent=2),
         date=date.today().isoformat(),
         input=state["input"],
     )
