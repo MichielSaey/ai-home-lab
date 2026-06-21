@@ -23,6 +23,7 @@ from nutrition_matrix import (
     get_nutrition_cues as lookup_nutrition_cues,
     intensity_for_template,
 )
+from rest_shim import mount_rest_routes
 from training_plan import build_training_plan, first_event_date
 from training_status import parse_training_status
 from zones import (
@@ -548,6 +549,12 @@ def coach_prompt() -> str:
     return _load_coach_prompt()
 
 
+@mcp.resource("garmin://health")
+def health() -> Dict[str, Any]:
+    """Lightweight Garmin Connect reachability check (no weekly report)."""
+    return _garmin_health_payload()
+
+
 @mcp.resource("garmin://weekly-report")
 def weekly_report() -> Dict[str, Any]:
     """Default weekly review bundle (last 7 days). Alias for get_report."""
@@ -1034,6 +1041,8 @@ def combine_workout_templates(
             intensity=intensity_for_template(primary_template),
         )
     return upload_result
+
+mount_rest_routes(mcp)
 
 
 if __name__ == "__main__":
