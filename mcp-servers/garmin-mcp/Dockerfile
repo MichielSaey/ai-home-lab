@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY mcp-servers/garmin-mcp/errors.py /app/errors.py
 COPY mcp-servers/garmin-mcp/server.py /app/server.py
 COPY mcp-servers/garmin-mcp/zones.py /app/zones.py
+COPY mcp-servers/garmin-mcp/training_plan.py /app/training_plan.py
+COPY mcp-servers/garmin-mcp/training_status.py /app/training_status.py
 ENV MCP_HOST=0.0.0.0
 ENV MCP_PORT=8000
 CMD ["/bin/sh", "-c", "if [ -f /app/post-build.sh ]; then chmod +x /app/post-build.sh && /app/post-build.sh; fi"]
