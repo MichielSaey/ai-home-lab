@@ -1,0 +1,13 @@
+include:
+  - path: odysseus/docker-compose.yml
+    env_file: ../.env
+
+services:
+  odysseus:
+    networks:
+      - default
+      - edge
+
+networks:
+  edge:
+    driver: bridge

@@ -1,15 +1,8 @@
-import asyncio
 import os
 import sqlite3
 from typing import Any, Dict, Optional
 
-import aiosqlite
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
 DEFAULT_DB_PATH = os.environ.get("DB_PATH", "data/ai_home_lab.db")
-
-_CHECKPOINTER: Optional[AsyncSqliteSaver] = None
-_CHECKPOINTER_LOCK = asyncio.Lock()
 
 
 def _ensure_parent_dir(path: str) -> None:
@@ -41,21 +34,6 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     _init_schema(conn)
     return conn
-
-
-async def get_checkpointer(db_path: Optional[str] = None) -> AsyncSqliteSaver:
-    global _CHECKPOINTER
-    if _CHECKPOINTER is not None:
-        return _CHECKPOINTER
-
-    async with _CHECKPOINTER_LOCK:
-        if _CHECKPOINTER is not None:
-            return _CHECKPOINTER
-        path = db_path or DEFAULT_DB_PATH
-        _ensure_parent_dir(path)
-        conn = await aiosqlite.connect(path)
-        _CHECKPOINTER = AsyncSqliteSaver(conn)
-        return _CHECKPOINTER
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:

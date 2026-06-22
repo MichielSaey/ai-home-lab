@@ -9,12 +9,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "chainlit",
-    "langgraph",
-    "langgraph-checkpoint-sqlite",
-    "langchain",
-    "langchain-community",
-    "langchain-litellm",
     "botocore",
     "mcp",
     "cryptography",
@@ -52,4 +46,4 @@ explicit = true
 torch = { index = "pytorch-cu124" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["agents", "shared"]
+packages = ["shared"]
