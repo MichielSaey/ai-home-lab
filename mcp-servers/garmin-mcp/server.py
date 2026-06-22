@@ -9,6 +9,8 @@ from garminconnect import (
 )
 from mcp.server.fastmcp import FastMCP
 
+from training_plan import build_training_plan, first_event_date
+from training_status import parse_training_status
 from zones import (
     activity_date,
     normalize_hr_zones,
@@ -207,6 +209,26 @@ def _weekly_stats_table(client: Garmin, weeks: int = 4) -> Dict[str, Any] | dict
     }
 
 
+def _training_plan_table(
+    client: Garmin, events: Dict[str, Any], weeks: int = 4
+) -> list[dict[str, Any]] | dict[str, Any]:
+    stats = _weekly_stats_table(client, weeks=weeks)
+    if isinstance(stats, dict) and stats.get("error"):
+        return stats
+
+    event_rows = events.get("Garmin Events", {}).get("Rows", [])
+    event_date = first_event_date(event_rows)
+    stat_rows = stats["Garmin Weekly Stats"]["Rows"]
+
+    def load_at_week_end(week_end: date) -> dict[str, Any]:
+        raw = _call_optional(client, "get_training_status", week_end.isoformat())
+        if isinstance(raw, dict) and raw.get("error"):
+            return {}
+        return parse_training_status(raw if isinstance(raw, dict) else {})
+
+    return build_training_plan(stat_rows, event_date, load_at_week_end)
+
+
 @mcp.tool()
 def get_profile() -> Dict[str, Any]:
     client, error = _get_client_or_error()
@@ -252,17 +274,39 @@ def get_weekly_stats(weeks: int = 4) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> Dict[str, Any]:
-    """Coach review bundle: profile, predictions, events, and weekly stats. Slow — call on demand."""
+def get_training_plan(weeks: int = 4) -> list[dict[str, Any]] | Dict[str, Any]:
+    """Periodized plan: 4 past weeks + upcoming week with actuals, targets, and load."""
     client, error = _get_client_or_error()
     if error:
         return error
 
+    events = get_events()
+    if isinstance(events, dict) and events.get("error"):
+        return events
+
+    return _training_plan_table(client, events, weeks=weeks)
+
+
+@mcp.tool()
+def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> Dict[str, Any]:
+    """Coach review bundle: profile, predictions, events, and training plan. Slow — call on demand."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    events = get_events()
+    if isinstance(events, dict) and events.get("error"):
+        return events
+
+    training_plan = _training_plan_table(client, events)
+    if isinstance(training_plan, dict) and training_plan.get("error"):
+        return training_plan
+
     report: Dict[str, Any] = {
         "profile": get_profile(),
         "race_predictions": get_race_predictions(),
-        "events": get_events(),
-        "weekly_stats": _weekly_stats_table(client),
+        "events": events,
+        "training_plan": training_plan,
     }
     if include_activities:
         report["activities"] = _activities_table(
