@@ -10,13 +10,14 @@ COPY mcp-servers/garmin-mcp/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY mcp-servers/garmin-mcp/errors.py /app/errors.py
 COPY mcp-servers/garmin-mcp/hr_zones.py /app/hr_zones.py
+COPY mcp-servers/garmin-mcp/nutrition_matrix.py /app/nutrition_matrix.py
+COPY mcp-servers/garmin-mcp/rest_shim.py /app/rest_shim.py
 COPY mcp-servers/garmin-mcp/server.py /app/server.py
 COPY mcp-servers/garmin-mcp/training_plan.py /app/training_plan.py
 COPY mcp-servers/garmin-mcp/training_status.py /app/training_status.py
 COPY mcp-servers/garmin-mcp/workout_builder.py /app/workout_builder.py
 COPY mcp-servers/garmin-mcp/workout_templates.py /app/workout_templates.py
 COPY mcp-servers/garmin-mcp/zones.py /app/zones.py
-COPY mcp-servers/garmin-mcp/nutrition_matrix.py /app/nutrition_matrix.py
 COPY mcp-servers/garmin-mcp/prompts/ /app/prompts/
 ENV MCP_HOST=0.0.0.0
 ENV MCP_PORT=8000
