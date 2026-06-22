@@ -1,47 +1,81 @@
 # AI Home Lab
 
-A pure Python monorepo for home lab agents, MCP microservices, and shared utilities. This repository contains a Garmin-focused coach UI, a local-only ADHD assistant placeholder, and a Garmin MCP server on an internal Docker network.
+A Python monorepo for home-lab MCP microservices, Odysseus integration, and shared utilities.
 
 ## Architecture
-- Agents live in `agents/` and expose Chainlit UIs.
-- MCP servers live in `mcp-servers/` and are only reachable on the internal Docker network.
-- Shared utilities live in `shared/` (SQLite profiles, Fernet encryption).
+
+- **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).
+- **MCP servers** (`mcp-servers/`) — domain logic exposed over SSE on the internal Docker network.
+- **Shared utilities** (`shared/`) — SQLite profiles, Fernet encryption, audiobook helpers.
+
+See [docs/DESIGN.md](docs/DESIGN.md) for the full system design.
 
 ### Network and access model
-- `garmin-trainer` listens on port 8001 and is intended for Cloudflare Tunnel exposure.
-- `adhd-life-aid` listens on port 8002 and is intended for Tailscale-only access.
-- MCP servers are attached to the `mcp-internal` network, which is marked `internal: true` so they are not reachable from the host.
 
-### Zero-trust security model
-- User credentials are symmetrically encrypted with `cryptography.Fernet` using `MASTER_KEY` from `.env`.
-- Encrypted secrets are stored in SQLite and never hashed or logged.
-- MCP servers do not publish ports to the host; only agents can reach them.
-- Only the edge-facing agents bind host ports (8001 and 8002).
+- **edge** — Odysseus, MCP servers (SSE endpoint); internal service discovery.
+- **mcp-internal** — MCP servers only; `internal: true`, not reachable from the host.
+- Expose **Odysseus** (port 7000) and **ntfy** (port 8091) via Tailscale. Do not publish MCP ports publicly.
 
 ## Services
-- `garmin-trainer`: Chainlit UI for coaching. Port 8001.
-- `adhd-life-aid`: Local-only placeholder service. Port 8002.
-- `garmin-mcp`: MCP server exposing Garmin Connect data. Internal network only.
+
+| Service | Port | Profile | Description |
+|---------|------|---------|-------------|
+| Odysseus | 7000 | default | Agent UI, memory, MCP client |
+| ntfy | 8091 | default | Push notifications (bundled with Odysseus) |
+| garmin-mcp | 8000 (internal) | default | Garmin Connect MCP server |
+| mcp-workbench | 5173 | dev | MCP testing UI |
+| mcp-inspector | 6274/6277 | dev | Official MCP Inspector |
 
 ## Running locally
+
 1. Copy `.env.example` to `.env` and fill in values.
 2. Generate a Fernet key and set `MASTER_KEY`:
-   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-3. Start the stack:
-   `docker compose up -d --build`
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+3. Vendor Odysseus (first run only):
+   ```bash
+   ./scripts/ensure-odysseus.sh
+   ```
+4. Start the full stack:
+   ```bash
+   docker compose up -d --build
+   ```
 
-## LiteLLM proxy (optional)
-If you use a self-hosted LiteLLM proxy, set these environment variables in `.env`:
-- `LITELLM_API_BASE` (example: `http://your-proxy:4000/v1`)
-- `LITELLM_API_KEY`
-- `LITELLM_MODEL`
-When set, the Garmin trainer routes requests through the LiteLLM proxy.
+### Spin up sections independently
 
-## Self-hosted GitHub Actions
-1. Install a GitHub Actions runner on your host and register it to this repo.
+```bash
+# MCP servers only
+docker compose -f mcp-servers/docker-compose.yml up -d --build
+
+# Odysseus stack only (run ensure-odysseus.sh first)
+docker compose -f services/docker-compose.yml up -d --build
+
+# Dev tooling (MCP workbench + inspector)
+docker compose --profile dev up -d --build
+```
+
+## Odysseus setup
+
+After the stack is running:
+
+1. Open Odysseus at `http://localhost:7000` (or your Tailscale address).
+2. Configure LLM provider in Settings.
+3. Add MCP server: `http://garmin-mcp:8000/sse` (Admin → MCP Servers).
+
+## Self-hosted GitHub Actions (CasaOS)
+
+1. Install a GitHub Actions runner on your CasaOS server and register it to this repo.
 2. Ensure the runner has the `self-hosted` and `linux` labels.
 3. Make sure the runner user can run Docker.
-4. Push to `main` or trigger the workflow manually to deploy via Docker Compose.
+4. Place a `.env` file in the repo checkout directory on the server (the workflow does not create secrets).
+5. Push to `master` or trigger the workflow manually to deploy via Docker Compose.
 
-## Langflow migration note
-The Garmin coach baseline mirrors the original Langflow graph by pulling a weekly Garmin report and combining it with user profile context inside a LangGraph `StateGraph`.
+## Compose layout
+
+```
+docker-compose.yml              # root — includes mcp + services
+mcp-servers/docker-compose.yml  # garmin-mcp (+ dev tooling)
+services/docker-compose.yml     # includes vendored Odysseus compose
+services/odysseus/              # cloned by scripts/ensure-odysseus.sh (gitignored)
+```

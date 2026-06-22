@@ -82,22 +82,8 @@ in
   '';
   tasks."jupyter:kernel".after = [ "cuda:preload" ];
 
-  processes.agent-hub = {
-    ports.http.allocate = 8001;
-    exec = ''
-      chainlit run agents/agent_hub/app.py \
-        --host 0.0.0.0 \
-        --port ${toString config.processes.agent-hub.ports.http.value}
-    '';
-  };
-
-  scripts.run_agent_hub.exec = ''
-    chainlit run agents/agent_hub/app.py --host 0.0.0.0 --port 8001
-  '';
-
   enterShell = ''
     echo "Jupyter kernel: ai-home-lab (devenv)"
-    echo "Agent hub: devenv up  (or run_agent_hub)"
   '';
 
   enterTest = ''
