@@ -341,9 +341,11 @@ def get_profile() -> Dict[str, Any]:
         return error
 
     raw = _call_optional(client, "get_user_profile")
-    if isinstance(raw, dict) and raw.get("error"):
+    if not isinstance(raw, dict):
+        return {"error": "No profile returned from Garmin"}
+    if raw.get("error"):
         return raw
-    profile = (raw or {}).get("userData", {})
+    profile = raw.get("userData") or {}
     return {
         "weight": round(profile.get("weight", 0) / 1000, 2),
         "height": profile.get("height"),
