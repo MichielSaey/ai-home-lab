@@ -106,25 +106,26 @@ def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
         patch.object(server, "get_events", return_value={"Garmin Events": {}}),
         patch.object(
             server,
-            "_weekly_stats_table",
-            return_value={"Garmin Weekly Stats": {"Headers": [], "Rows": []}},
+            "_training_plan_table",
+            return_value=[{"week_description": "upcoming_week"}],
         ),
         patch.object(server, "_activities_table") as activities_table,
     ):
         result = server.get_weekly_report()
 
-    assert "weekly_stats" in result
+    assert "training_plan" in result
+    assert "weekly_stats" not in result
     assert "activities" not in result
     activities_table.assert_not_called()
 
 
 def test_weekly_report_resource_aliases_get_weekly_report() -> None:
     with patch.object(
-        server, "get_weekly_report", return_value={"profile": {}, "weekly_stats": {}}
+        server, "get_weekly_report", return_value={"profile": {}, "training_plan": []}
     ) as get_weekly_report:
         result = server.weekly_report()
 
-    assert result == {"profile": {}, "weekly_stats": {}}
+    assert result == {"profile": {}, "training_plan": []}
     get_weekly_report.assert_called_once_with()
 
 
@@ -154,7 +155,7 @@ def test_get_weekly_report_can_include_activities() -> None:
         patch.object(server, "get_profile", return_value={}),
         patch.object(server, "get_race_predictions", return_value={}),
         patch.object(server, "get_events", return_value={}),
-        patch.object(server, "_weekly_stats_table", return_value={}),
+        patch.object(server, "_training_plan_table", return_value=[]),
         patch.object(server, "_activities_table", return_value={"Garmin Activities": {}}) as activities_table,
     ):
         result = server.get_weekly_report(include_activities=True)
