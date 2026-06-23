@@ -9,10 +9,13 @@ in
     enable = true;
   };
 
+  devcontainer.enable = true;
+
   packages = [
     cudaToolkit
     pkgs.ffmpeg
     pkgs.espeak-ng
+    pkgs.gh
   ];
 
   env = {
@@ -82,8 +85,14 @@ in
   '';
   tasks."jupyter:kernel".after = [ "cuda:preload" ];
 
+  scripts.odysseus-up.exec = ''
+    ./scripts/ensure-odysseus.sh
+    docker compose up -d --build
+  '';
+
   enterShell = ''
     echo "Jupyter kernel: ai-home-lab (devenv)"
+    echo "Odysseus stack: odysseus-up  (http://localhost:7000)"
   '';
 
   enterTest = ''
