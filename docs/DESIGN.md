@@ -99,7 +99,7 @@ Solid lines: implemented or bundled today. Dashed components in the diagram are 
 
 ### Odysseus (implemented)
 
-Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysseus)). Vendored at `vendor/odysseus`.
+Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysseus)). Vendored at `services/odysseus` (cloned via `scripts/ensure-odysseus.sh`).
 
 - Chat, agents, memory, presets, MCP client.
 - Bundles ChromaDB, SearXNG, ntfy in compose.
@@ -210,9 +210,9 @@ Personal finance server on homelab. Local-first; **no native webhooks**.
 | Q9 | Fixed-rule transfers in n8n vs always Odysseus |
 | Q10 | Failure modes (server down, sync conflict) |
 
-### Legacy agents (retiring)
+### Legacy agents (removed)
 
-`agent_hub` (Chainlit) removed. `garmin_trainer` (LangGraph) remains until Odysseus Garmin preset is validated.
+Chainlit `agent_hub` and LangGraph `garmin_trainer` have been removed. All interactive work happens in Odysseus.
 
 | Was | Now |
 |-----|-----|
@@ -220,8 +220,6 @@ Personal finance server on homelab. Local-first; **no native webhooks**.
 | LangGraph orchestration | Odysseus agent loop + MCP |
 | Coach prompt in Python | MCP prompt resource (planned) |
 | Agent-side MCP client | Odysseus native MCP |
-
-Delete `src/agents/`, Chainlit/LangGraph deps, `.chainlit/` after cutover. See [PLAN.md](./PLAN.md) Track A.
 
 ## 8. Tools
 

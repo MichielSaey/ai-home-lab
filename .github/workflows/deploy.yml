@@ -2,7 +2,7 @@ name: deploy
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,34 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure Odysseus vendor checkout
-        run: ./scripts/ensure-odysseus.sh
+
+      - name: Ensure .env exists
+        run: |
+          if [ ! -f .env ]; then
+            echo "ERROR: .env not found in repo checkout. Create it on the CasaOS server before deploying."
+            exit 1
+          fi
+
+      - name: Vendor Odysseus
+        run: chmod +x scripts/ensure-odysseus.sh && ./scripts/ensure-odysseus.sh
+
       - name: Build and start services
-        run: docker compose up -d --build
+        run: docker compose up -d --build --remove-orphans --wait --wait-timeout 600
+
+      - name: Wait for stack health
+        run: chmod +x scripts/wait-for-stack.sh && ./scripts/wait-for-stack.sh
+
+      - name: Show service status
+        run: docker compose ps
+
+      - name: Notify deploy success
+        if: success()
+        run: |
+          chmod +x scripts/notify-deploy.sh
+          ./scripts/notify-deploy.sh success "Deploy $(git rev-parse --short HEAD) succeeded on $(hostname)"
+
+      - name: Notify deploy failure
+        if: failure()
+        run: |
+          chmod +x scripts/notify-deploy.sh
+          ./scripts/notify-deploy.sh failure "Deploy $(git rev-parse --short HEAD) failed on $(hostname)"

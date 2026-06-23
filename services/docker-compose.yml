@@ -1,0 +1,25 @@
+name: ai-home-lab-services
+
+include:
+  - path: odysseus/docker-compose.yml
+    env_file: ../.env
+
+services:
+  odysseus:
+    networks:
+      - default
+      - edge
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/', timeout=5).read(1)\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+networks:
+  edge:
+    driver: bridge

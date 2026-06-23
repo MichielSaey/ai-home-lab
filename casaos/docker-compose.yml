@@ -1,0 +1,32 @@
+name: ai-home-lab
+
+include:
+  - path: ../docker-compose.yml
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  author: MichielSaey
+  category: AI
+  description:
+    en_us: |
+      Personal AI home lab: Odysseus agent UI, garmin-mcp, ntfy, ChromaDB, and SearXNG.
+
+      Before first start, copy `.env.example` to `.env` in the repo root and run `./scripts/ensure-odysseus.sh`.
+  developer: ai-home-lab
+  icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/odyssey.png
+  index: /
+  main: odysseus
+  port_map: "7000"
+  scheme: http
+  store_app_id: ai_home_lab
+  tagline:
+    en_us: Odysseus + Garmin MCP for personal homelab use
+  tips:
+    before_install:
+      en_us: |
+        Requires a `.env` file at the repo root and an Odysseus clone under `services/odysseus/`.
+        GitHub Actions deploy on the CasaOS runner handles both automatically.
+  title:
+    en_us: AI Home Lab

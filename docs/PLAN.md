@@ -13,7 +13,7 @@ Checklists, milestones, and GitHub issues. Architecture: [DESIGN.md](./DESIGN.md
 | Odysseus + compose | Implemented |
 | garmin-mcp core tools | Implemented |
 | Chainlit `agent_hub` | Removed |
-| `garmin_trainer` | Retiring (A.6) |
+| `garmin_trainer` | Removed (A.6) |
 | ntfy | Bundled; mobile setup open (Track D) |
 | n8n, Proton bridge, actual-mcp | Planned |
 | epub2audiobook | Implemented; #1 #2 open |
@@ -81,7 +81,7 @@ flowchart TB
 | A.3 | user | — | LiteLLM / models in Odysseus Settings | Coach preset replies |
 | A.4 | agent | [#9](https://github.com/MichielSaey/ai-home-lab/issues/9) | Garmin Coach preset in `workflows/odysseus/presets/` | Preset file versioned in repo |
 | A.5 | user | — | Enable garmin-mcp + Garmin Coach preset in Odysseus | Chat uses MCP tools/resources |
-| A.6 | agent | [#7](https://github.com/MichielSaey/ai-home-lab/issues/7) | Remove `src/agents/`, Chainlit/LangGraph | Legacy agents gone |
+| A.6 | agent | [#7](https://github.com/MichielSaey/ai-home-lab/issues/7) | Remove `agents/`, Chainlit/LangGraph | Legacy agents gone |
 
 ---
 
