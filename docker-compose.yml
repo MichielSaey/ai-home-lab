@@ -14,8 +14,65 @@ services:
     expose:
       - "8000"
 
+<<<<<<< HEAD
   # Reach garmin-mcp on the shared edge network (configure MCP URL in Odysseus admin).
   odysseus:
+=======
+  mcp-workbench:
+    profiles:
+      - dev
+    build:
+      context: .
+      dockerfile: mcp-servers/mcp-workbench/Dockerfile
+    environment:
+      PORT: "3001"
+      MCP_WORKBENCH_WEB_PORT: "5173"
+      GARMIN_MCP_SSE_URL: http://garmin-mcp:8000/sse
+    ports:
+      - "5173:5173"
+    networks:
+      - edge
+    depends_on:
+      - garmin-mcp
+
+  mcp-inspector:
+    profiles:
+      - dev
+    image: ghcr.io/modelcontextprotocol/inspector:latest
+    ports:
+      - "6274:6274"
+      - "6277:6277"
+    environment:
+      HOST: 0.0.0.0
+      MCP_AUTO_OPEN_ENABLED: "false"
+      DANGEROUSLY_OMIT_AUTH: "true"
+      MCP_SERVER_REQUEST_TIMEOUT: "300000"
+    networks:
+      - edge
+    depends_on:
+      - garmin-mcp
+
+  # Bookmark this URL — opens Inspector with garmin-mcp pre-filled.
+  garmin-mcp-ui:
+    profiles:
+      - dev
+    image: caddy:2-alpine
+    ports:
+      - "6280:6280"
+    volumes:
+      - ./mcp-servers/mcp-workbench/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./mcp-servers/mcp-workbench/landing.html:/srv/index.html:ro
+    networks:
+      - edge
+    depends_on:
+      - mcp-inspector
+      
+  agent_hub:
+    build:
+      context: .
+      dockerfile: agents/agent_hub/Dockerfile
+    env_file: .env
+>>>>>>> refs/remotes/Y/master
     networks:
       - default
       - edge
