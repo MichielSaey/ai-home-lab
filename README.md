@@ -18,13 +18,11 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full system design.
 
 ## Services
 
-| Service | Port | Profile | Description |
-|---------|------|---------|-------------|
-| Odysseus | 7000 | default | Agent UI, memory, MCP client |
-| ntfy | 8091 | default | Push notifications (bundled with Odysseus) |
-| garmin-mcp | 8000 (internal) | default | Garmin Connect MCP server |
-| mcp-workbench | 5173 | dev | MCP testing UI |
-| mcp-inspector | 6274/6277 | dev | Official MCP Inspector |
+| Service | Port | Description |
+|---------|------|-------------|
+| Odysseus | 7000 | Agent UI, memory, MCP client |
+| ntfy | 8091 | Push notifications (bundled with Odysseus) |
+| garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
 
 ## Running locally
 
@@ -50,9 +48,6 @@ docker compose -f mcp-servers/docker-compose.yml up -d --build
 
 # Odysseus stack only (run ensure-odysseus.sh first)
 docker compose -f services/docker-compose.yml up -d --build
-
-# Dev tooling (MCP workbench + inspector)
-docker compose --profile dev up -d --build
 ```
 
 ## Odysseus setup
@@ -72,6 +67,10 @@ After the stack is running:
 5. Push to `master` or trigger the workflow manually to deploy via Docker Compose.
 
 The deploy workflow vendors Odysseus, starts the stack, waits for health checks, and optionally sends an ntfy ping when `NTFY_DEPLOY_TOPIC` is set in `.env`.
+
+### CasaOS dashboard (optional)
+
+To add a CasaOS tile pointing at Odysseus, import `casaos/docker-compose.yml` via **App Store → Custom app → Install a customized app**. The GitHub Actions runner deploy is the primary path; the CasaOS import is optional for dashboard access.
 
 ### Pinning Odysseus
 
@@ -97,7 +96,8 @@ Include these paths in your CasaOS or homelab backup routine.
 
 ```
 docker-compose.yml              # root — includes mcp + services
-mcp-servers/docker-compose.yml  # garmin-mcp (+ dev tooling)
+mcp-servers/docker-compose.yml  # garmin-mcp
 services/docker-compose.yml     # includes vendored Odysseus compose
+casaos/docker-compose.yml       # optional CasaOS dashboard import
 services/odysseus/              # cloned by scripts/ensure-odysseus.sh (gitignored)
 ```
