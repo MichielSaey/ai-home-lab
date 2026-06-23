@@ -2,7 +2,9 @@ name: ai-home-lab
 
 include:
   - path: src/mcp-servers/docker-compose.yml
+    env_file: .env
   - path: services/docker-compose.yml
+    env_file: .env
 
 networks:
   edge:

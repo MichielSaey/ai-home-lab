@@ -27,7 +27,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 
 ## Running locally
 
-1. Copy `.env.example` to `.env` and fill in values.
+1. Copy `.env.example` to `.env` at the **repo root** and fill in values. This one file configures garmin-mcp and Odysseus — you do not need `services/odysseus/.env`.
 2. Vendor Odysseus (first run only):
    ```bash
    ./scripts/ensure-odysseus.sh

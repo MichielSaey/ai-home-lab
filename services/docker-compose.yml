@@ -1,6 +1,7 @@
 name: ai-home-lab-services
 
 # Odysseus is vendored at services/odysseus/ (see scripts/ensure-odysseus.sh).
+# Use the repo-root .env only — do not create services/odysseus/.env.
 
 include:
   - path: odysseus/docker-compose.yml
@@ -21,6 +22,12 @@ services:
       timeout: 10s
       retries: 10
       start_period: 120s
+
+  # Bundled search/vector DB — internal to the Odysseus stack only.
+  searxng:
+    ports: !reset []
+  chromadb:
+    ports: !reset []
 
 networks:
   edge:
