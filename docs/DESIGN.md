@@ -95,11 +95,7 @@ Solid lines: implemented or bundled today. Dashed components in the diagram are 
 
 ---
 
-<<<<<<< HEAD
-## 4. Components
-=======
 ## 4. Orchestration
->>>>>>> refs/remotes/Y/master
 
 ### Odysseus (implemented)
 
@@ -110,8 +106,6 @@ Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysse
 - Port `7000`. All **interactive** work happens here.
 - Connects to MCP servers over SSE on the `edge` network.
 
-<<<<<<< HEAD
-=======
 ### n8n (planned)
 
 Workflow orchestration in compose.
@@ -125,7 +119,6 @@ Odysseus can do cron and webhooks but lacks reliable branching; task webhooks ta
 
 ## 5. MCP Servers
 
->>>>>>> refs/remotes/Y/master
 ### garmin-mcp (implemented)
 
 MCP server for Garmin Connect (`src/mcp-servers/garmin-mcp`).
@@ -139,16 +132,6 @@ MCP server for Garmin Connect (`src/mcp-servers/garmin-mcp`).
 
 **Planned extensions**
 
-<<<<<<< HEAD
-- HR zone time per activity and weekly rollup
-- Prompt resource `garmin://coach-prompt` (80/20 training rules)
-- Profile tools: goals, injuries, preferences; variable `days_back` / `get_review_since`
-- `garmin://health` with structured errors
-- Workout create/schedule and nutrition suggestion tools
-- REST shim (`/health`, `/weekly-report`) for n8n HTTP nodes
-
-Coach instructions move to MCP prompt resource; Odysseus preset stays thin.
-=======
 ##### Phase 1
 - HR zone time per activity and weekly rollup
 - Prompt resource `garmin://coach-prompt` (80/20 training rules)
@@ -182,7 +165,6 @@ OSS MCP server for Actual Budget ([actual-mcp](https://github.com/s-stefanov/act
 - n8n uses REST bridge, not MCP.
 
 ## 6. Services
->>>>>>> refs/remotes/Y/master
 
 ### ntfy (implemented)
 
@@ -191,47 +173,22 @@ Bundled with Odysseus compose. One-way push to phone.
 - n8n and scripts POST notifications; user taps action URL to open Odysseus.
 - Not a chat channel.
 
-<<<<<<< HEAD
-### n8n (planned)
-
-Workflow orchestration in compose.
-
-- Cron, webhooks, if/else, IMAP poll, HTTP to external APIs.
-- Owns all **unattended** automation.
-- Workflow JSON versioned under `workflows/n8n/` (planned).
-- `garmin-mcp` speaks MCP/SSE only; n8n needs REST shim or HTTP bridge for Garmin data.
-
-Odysseus can do cron and webhooks but lacks reliable branching; task webhooks target n8n by design.
-
-=======
->>>>>>> refs/remotes/Y/master
 ### Proton Mail Bridge (planned)
 
 Headless IMAP/SMTP bridge to Proton Mail. Docker internal only (`edge`).
 
 - n8n polls IMAP at `proton-mail-bridge:1143` (typical).
-<<<<<<< HEAD
-- Odysseus email/IMAP is **not** used for ingest (no duplicate polling).
-
-### Paperless-ngx (external)
-
-=======
 - Odysseus email/IMAP is **not** used for ingest (no duplicate polling). (LETS TRY ANYWAY )
 
 ## 7. External Services
 
 ### Paperless-ngx
->>>>>>> refs/remotes/Y/master
 Document store on homelab. Not in this repo.
 
 - n8n posts attachments to `/api/documents/post_document/`.
 - Flow: IMAP → filter PDF/images → Paperless → ntfy → mark read.
 
-<<<<<<< HEAD
-### Actual Budget (external)
-=======
 ### Actual Budget
->>>>>>> refs/remotes/Y/master
 
 Personal finance server on homelab. Local-first; **no native webhooks**.
 
@@ -253,16 +210,6 @@ Personal finance server on homelab. Local-first; **no native webhooks**.
 | Q9 | Fixed-rule transfers in n8n vs always Odysseus |
 | Q10 | Failure modes (server down, sync conflict) |
 
-<<<<<<< HEAD
-### actual-mcp (planned)
-
-OSS MCP server for Actual Budget ([actual-mcp](https://github.com/s-stefanov/actual-mcp)). SSE in compose; points at external Actual server.
-
-- Odysseus finance preset uses this for **interactive** clearing only.
-- n8n uses REST bridge, not MCP.
-
-=======
->>>>>>> refs/remotes/Y/master
 ### Legacy agents (retiring)
 
 `agent_hub` (Chainlit) removed. `garmin_trainer` (LangGraph) remains until Odysseus Garmin preset is validated.
@@ -276,11 +223,8 @@ OSS MCP server for Actual Budget ([actual-mcp](https://github.com/s-stefanov/act
 
 Delete `src/agents/`, Chainlit/LangGraph deps, `.chainlit/` after cutover. See [PLAN.md](./PLAN.md) Track A.
 
-<<<<<<< HEAD
-=======
 ## 8. Tools
 
->>>>>>> refs/remotes/Y/master
 ### epub2audiobook (implemented)
 
 Standalone Python tool under `src/tools/epub2audiobook`. Not part of the Docker stack. See [epub2audiobook.md](./epub2audiobook.md).
@@ -298,11 +242,7 @@ Secrets in n8n credentials and `.env` only.
 
 ---
 
-<<<<<<< HEAD
-## 5. Security
-=======
 ## 9. Security
->>>>>>> refs/remotes/Y/master
 
 | Asset | Exposure |
 |-------|----------|
@@ -315,11 +255,7 @@ Secrets in n8n credentials and `.env` only.
 
 ---
 
-<<<<<<< HEAD
-## 6. Out of scope
-=======
 ## 10. Out of scope
->>>>>>> refs/remotes/Y/master
 
 | Item | Notes |
 |------|-------|
@@ -331,11 +267,7 @@ Secrets in n8n credentials and `.env` only.
 
 ---
 
-<<<<<<< HEAD
-## 7. References
-=======
 ## 11. References
->>>>>>> refs/remotes/Y/master
 
 - [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus)
 - [Actual Budget API](https://actualbudget.org/docs/api/)
