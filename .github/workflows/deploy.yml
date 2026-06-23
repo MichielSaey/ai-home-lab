@@ -22,7 +22,22 @@ jobs:
         run: chmod +x scripts/ensure-odysseus.sh && ./scripts/ensure-odysseus.sh
 
       - name: Build and start services
-        run: docker compose up -d --build --remove-orphans
+        run: docker compose up -d --build --remove-orphans --wait --wait-timeout 600
+
+      - name: Wait for stack health
+        run: chmod +x scripts/wait-for-stack.sh && ./scripts/wait-for-stack.sh
 
       - name: Show service status
         run: docker compose ps
+
+      - name: Notify deploy success
+        if: success()
+        run: |
+          chmod +x scripts/notify-deploy.sh
+          ./scripts/notify-deploy.sh success "Deploy $(git rev-parse --short HEAD) succeeded on $(hostname)"
+
+      - name: Notify deploy failure
+        if: failure()
+        run: |
+          chmod +x scripts/notify-deploy.sh
+          ./scripts/notify-deploy.sh failure "Deploy $(git rev-parse --short HEAD) failed on $(hostname)"
