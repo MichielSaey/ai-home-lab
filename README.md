@@ -71,6 +71,28 @@ After the stack is running:
 4. Place a `.env` file in the repo checkout directory on the server (the workflow does not create secrets).
 5. Push to `master` or trigger the workflow manually to deploy via Docker Compose.
 
+The deploy workflow vendors Odysseus, starts the stack, waits for health checks, and optionally sends an ntfy ping when `NTFY_DEPLOY_TOPIC` is set in `.env`.
+
+### Pinning Odysseus
+
+Set `ODYSSEUS_REF` in `.env` to a branch, tag, or commit SHA. To update an existing clone:
+
+```bash
+ODYSSEUS_UPDATE=1 ./scripts/ensure-odysseus.sh
+```
+
+### Backups
+
+Persisted data lives outside git:
+
+| Path | Contents |
+|------|----------|
+| `services/odysseus/data/` | Odysseus DB, uploads, SSH keys, model cache |
+| `services/odysseus/logs/` | Odysseus logs |
+| Docker volumes | ChromaDB, SearXNG, ntfy (created by Odysseus compose) |
+
+Include these paths in your CasaOS or homelab backup routine.
+
 ## Compose layout
 
 ```
