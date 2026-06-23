@@ -29,3 +29,4 @@ src/tools/epub2audiobook/data/**
 services/odysseus/**
 !services/odysseus/
 !services/odysseus/.gitkeep
+.env
