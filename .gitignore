@@ -31,3 +31,6 @@ src/epub-to-audiobook/data/**/*
 src/epub2audiobook/data/**
 src/epub2audiobook/data/**/*
 !src/epub2audiobook/data/**/.gitkeep
+src/tools/epub2audiobook/data/**
+!src/tools/epub2audiobook/data/**/
+!src/tools/epub2audiobook/data/**/.gitkeep
