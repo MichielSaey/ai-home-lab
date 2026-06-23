@@ -1,14 +1,9 @@
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
 
 import pytest
 
-import server  # noqa: E402
+import server
 
 
 def test_report_window_default_seven_days_ending_today() -> None:

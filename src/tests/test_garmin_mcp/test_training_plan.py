@@ -1,16 +1,11 @@
-import sys
 from datetime import date
-from pathlib import Path
 
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
-
-from training_plan import (  # noqa: E402
+from training_plan import (
     build_training_plan,
     classify_week_type,
     first_event_date,
 )
-from training_status import parse_training_status  # noqa: E402
+from training_status import parse_training_status
 
 
 def test_classify_week_type_recovery_on_week_four() -> None:

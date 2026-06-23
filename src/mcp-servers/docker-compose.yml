@@ -3,9 +3,9 @@ name: ai-home-lab-mcp
 services:
   garmin-mcp:
     build:
-      context: ..
+      context: ../..
       dockerfile: src/mcp-servers/garmin-mcp/Dockerfile
-    env_file: ../.env
+    env_file: ../../.env
     networks:
       - mcp-internal
       - edge

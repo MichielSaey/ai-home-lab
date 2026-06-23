@@ -1,5 +1,7 @@
 name: ai-home-lab-services
 
+# Odysseus is vendored at services/odysseus/ (see scripts/ensure-odysseus.sh).
+
 include:
   - path: odysseus/docker-compose.yml
     env_file: ../.env

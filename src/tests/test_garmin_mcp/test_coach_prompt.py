@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
-
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
-
-import server  # noqa: E402
+import server
 
 
 def test_load_coach_prompt_returns_80_20_guidance() -> None:

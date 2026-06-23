@@ -1,9 +1,4 @@
-import sys
 from datetime import date
-from pathlib import Path
-
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
 
 from zones import (
     activity_date,

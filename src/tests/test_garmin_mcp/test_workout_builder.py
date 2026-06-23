@@ -1,12 +1,6 @@
-import sys
-from pathlib import Path
-
 import pytest
 
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
-
-from workout_builder import (  # noqa: E402
+from workout_builder import (
     build_running_workout,
     build_workout_steps,
     estimate_duration_seconds,

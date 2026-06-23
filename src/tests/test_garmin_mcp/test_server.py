@@ -1,12 +1,7 @@
-import sys
 from datetime import date
-from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
-GARMIN_MCP_DIR = Path(__file__).resolve().parents[3] / "mcp-servers" / "garmin-mcp"
-sys.path.insert(0, str(GARMIN_MCP_DIR))
-
-import server  # noqa: E402
+import server
 
 
 def test_get_activities_uses_readable_headers_and_zone_minutes() -> None:

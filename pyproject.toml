@@ -9,11 +9,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "botocore",
     "mcp",
-    "cryptography",
-    "aiosqlite",
-    "icecream",
 ]
 
 [project.scripts]
@@ -23,6 +19,8 @@ epub2audiobook = "epub2audiobook.cli:main"
 dev = [
     "ipykernel",
     "ipywidgets",
+    "pytest",
+    "garminconnect==0.3.6",
 ]
 epub-audiobook = [
     "en-core-web-sm",

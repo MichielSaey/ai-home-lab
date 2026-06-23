@@ -8,7 +8,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 
 - **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).
 - **MCP servers** (`src/mcp-servers/`) — domain logic exposed over SSE on the internal Docker network.
-- **Shared utilities** (`src/shared/`) — SQLite profiles, Fernet encryption, audiobook helpers.
+- **Shared utilities** (`src/shared/`) — CUDA bootstrap and ffmpeg helpers for epub2audiobook.
 
 ### Network and access model
 
@@ -45,7 +45,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 
 ```bash
 # MCP servers only
-docker compose -f mcp-servers/docker-compose.yml up -d --build
+docker compose -f src/mcp-servers/docker-compose.yml up -d --build
 
 # Odysseus stack only (run ensure-odysseus.sh first)
 docker compose -f services/docker-compose.yml up -d --build
@@ -96,9 +96,9 @@ Include these paths in your CasaOS or homelab backup routine.
 ## Compose layout
 
 ```
-docker-compose.yml              # root — includes mcp + services
-mcp-servers/docker-compose.yml  # garmin-mcp
-services/docker-compose.yml     # includes vendored Odysseus compose
-casaos/docker-compose.yml       # optional CasaOS dashboard import
-services/odysseus/              # cloned by scripts/ensure-odysseus.sh (gitignored)
+docker-compose.yml                    # root — includes mcp + services
+src/mcp-servers/docker-compose.yml    # garmin-mcp (code lives alongside)
+services/docker-compose.yml           # Odysseus stack (includes vendored compose)
+casaos/docker-compose.yml             # optional CasaOS dashboard import
+services/odysseus/                    # cloned by scripts/ensure-odysseus.sh (gitignored except .gitkeep)
 ```
