@@ -16,12 +16,16 @@ dependencies = [
     "icecream",
 ]
 
+[project.scripts]
+epub2audiobook = "epub2audiobook.cli:main"
+
 [dependency-groups]
 dev = [
     "ipykernel",
     "ipywidgets",
 ]
 epub-audiobook = [
+    "en-core-web-sm",
     "ipywidgets",
     "ebooklib",
     "beautifulsoup4",
@@ -44,6 +48,11 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["shared"]
+packages = ["src/shared", "src/tools/epub2audiobook/src/epub2audiobook"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/shared" = "shared"
+"src/tools/epub2audiobook/src/epub2audiobook" = "epub2audiobook"

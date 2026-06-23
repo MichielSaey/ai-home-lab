@@ -1,14 +1,14 @@
 # AI Home Lab
 
-A Python monorepo for home-lab MCP microservices, Odysseus integration, and shared utilities.
+Pure Python monorepo for home-lab MCP microservices, Odysseus integration, shared utilities, and tools. Chat and agents run on [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus); domain logic lives in MCP servers under `src/mcp-servers/`.
+
+Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md](docs/PLAN.md) (execution and issues).
 
 ## Architecture
 
 - **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).
-- **MCP servers** (`mcp-servers/`) — domain logic exposed over SSE on the internal Docker network.
-- **Shared utilities** (`shared/`) — SQLite profiles, Fernet encryption, audiobook helpers.
-
-See [docs/DESIGN.md](docs/DESIGN.md) for the full system design.
+- **MCP servers** (`src/mcp-servers/`) — domain logic exposed over SSE on the internal Docker network.
+- **Shared utilities** (`src/shared/`) — SQLite profiles, Fernet encryption, audiobook helpers.
 
 ### Network and access model
 
@@ -23,22 +23,23 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full system design.
 | Odysseus | 7000 | Agent UI, memory, MCP client |
 | ntfy | 8091 | Push notifications (bundled with Odysseus) |
 | garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
+| chromadb / searxng | bundled with Odysseus | Vector store, search |
 
 ## Running locally
 
 1. Copy `.env.example` to `.env` and fill in values.
-2. Generate a Fernet key and set `MASTER_KEY`:
-   ```bash
-   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   ```
-3. Vendor Odysseus (first run only):
+2. Vendor Odysseus (first run only):
    ```bash
    ./scripts/ensure-odysseus.sh
    ```
-4. Start the full stack:
+3. Start the full stack:
    ```bash
    docker compose up -d --build
    ```
+4. Open `http://localhost:7000`
+5. Admin password: `docker compose logs odysseus | grep -i password`
+6. Odysseus admin → MCP → add `http://garmin-mcp:8000/sse`
+7. Configure models in Odysseus (or `OLLAMA_BASE_URL` in `.env`)
 
 ### Spin up sections independently
 
@@ -50,13 +51,13 @@ docker compose -f mcp-servers/docker-compose.yml up -d --build
 docker compose -f services/docker-compose.yml up -d --build
 ```
 
-## Odysseus setup
+## Python tools (devenv)
 
-After the stack is running:
+```bash
+devenv shell
+```
 
-1. Open Odysseus at `http://localhost:7000` (or your Tailscale address).
-2. Configure LLM provider in Settings.
-3. Add MCP server: `http://garmin-mcp:8000/sse` (Admin → MCP Servers).
+For epub2audiobook and Jupyter — not the Docker stack. See [docs/epub2audiobook.md](docs/epub2audiobook.md).
 
 ## Self-hosted GitHub Actions (CasaOS)
 
