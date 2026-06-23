@@ -1,4 +1,0 @@
-:6280 {
-	root * /srv
-	file_server
-}
