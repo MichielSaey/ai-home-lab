@@ -18,7 +18,32 @@ if [[ -f "${ODYSSEUS_DIR}/docker-compose.yml" ]]; then
 fi
 
 echo "Cloning Odysseus (${ODYSSEUS_REF}) into ${ODYSSEUS_DIR}..."
-mkdir -p "$(dirname "${ODYSSEUS_DIR}")"
-git clone --depth 1 --branch "${ODYSSEUS_REF}" "${ODYSSEUS_REPO}" "${ODYSSEUS_DIR}"
+mkdir -p "${ODYSSEUS_DIR}"
+
+# The repo tracks services/odysseus/.gitkeep, so the directory may exist but
+# not be a clone yet. Keep persisted data/logs; remove everything else.
+if [[ -d "${ODYSSEUS_DIR}" ]]; then
+  shopt -s dotglob nullglob
+  for entry in "${ODYSSEUS_DIR}"/*; do
+    [[ -e "${entry}" ]] || continue
+    base="$(basename "${entry}")"
+    if [[ "${base}" == "data" || "${base}" == "logs" ]]; then
+      continue
+    fi
+    rm -rf "${entry}"
+  done
+  shopt -u dotglob nullglob
+fi
+
+clone_dir="$(mktemp -d)"
+trap 'rm -rf "${clone_dir}"' EXIT
+git clone --depth 1 --branch "${ODYSSEUS_REF}" "${ODYSSEUS_REPO}" "${clone_dir}"
+shopt -s dotglob
+for entry in "${clone_dir}"/*; do
+  mv "${entry}" "${ODYSSEUS_DIR}/"
+done
+shopt -u dotglob
+trap - EXIT
+rm -rf "${clone_dir}"
 
 echo "Odysseus ready."
