@@ -10,6 +10,19 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
+        id: checkout
+        with:
+          submodules: false
+          clean: false
+
+      - name: Check runner disk space
+        run: |
+          df -h .
+          free_mb="$(df -Pm . | awk 'NR==2 {print $4}')"
+          if [ "${free_mb}" -lt 1024 ]; then
+            echo "ERROR: less than 1 GB free on the runner filesystem (${free_mb} MB). Free space before deploying."
+            exit 1
+          fi
 
       - name: Ensure .env exists
         run: |
@@ -37,7 +50,7 @@ jobs:
           ./scripts/notify-deploy.sh success "Deploy $(git rev-parse --short HEAD) succeeded on $(hostname)"
 
       - name: Notify deploy failure
-        if: failure()
+        if: failure() && steps.checkout.outcome == 'success'
         run: |
           chmod +x scripts/notify-deploy.sh
           ./scripts/notify-deploy.sh failure "Deploy $(git rev-parse --short HEAD) failed on $(hostname)"

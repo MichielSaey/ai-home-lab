@@ -26,7 +26,6 @@ src/tools/epub2audiobook/data/**
 !src/tools/epub2audiobook/data/**/.gitkeep
 
 # vendored Odysseus (cloned by scripts/ensure-odysseus.sh)
-services/odysseus/**
-!services/odysseus/
+services/odysseus/*
 !services/odysseus/.gitkeep
 .env
