@@ -104,7 +104,7 @@ Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysse
 - Chat, agents, memory, presets, MCP client.
 - Bundles ChromaDB, SearXNG, ntfy in compose.
 - Port `7000`. All **interactive** work happens here.
-- Connects to MCP servers over SSE on the `edge` network.
+- Connects to MCP servers over Streamable HTTP on the `edge` network.
 
 ### n8n (planned)
 
@@ -113,7 +113,7 @@ Workflow orchestration in compose.
 - Cron, webhooks, if/else, IMAP poll, HTTP to external APIs.
 - Owns all **unattended** automation.
 - Workflow JSON versioned under `workflows/n8n/` (planned).
-- `garmin-mcp` speaks MCP/SSE only; n8n needs REST shim or HTTP bridge for Garmin data.
+- `garmin-mcp` speaks MCP/Streamable HTTP; n8n uses the REST shim for Garmin data.
 
 Odysseus can do cron and webhooks but lacks reliable branching; task webhooks target n8n by design.
 
@@ -128,7 +128,7 @@ MCP server for Garmin Connect (`src/mcp-servers/garmin-mcp`).
 - Tools: `get_profile`, `get_activities`, `get_events`, `get_race_predictions`, `get_weekly_mileage`
 - Resource: `garmin://weekly-report`
 - Auth via `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env`
-- SSE on port 8000; hostname `garmin-mcp` on `edge` + `mcp-internal`
+- Streamable HTTP on port 8000 (`/mcp`); hostname `garmin-mcp` on `edge` + `mcp-internal`
 
 **Planned extensions**
 

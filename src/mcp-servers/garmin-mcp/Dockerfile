@@ -21,4 +21,5 @@ COPY src/mcp-servers/garmin-mcp/zones.py /app/zones.py
 COPY src/mcp-servers/garmin-mcp/prompts/ /app/prompts/
 ENV MCP_HOST=0.0.0.0
 ENV MCP_PORT=8000
+ENV MCP_TRANSPORT=streamable-http
 CMD ["/bin/sh", "-c", "if [ -f /app/post-build.sh ]; then chmod +x /app/post-build.sh && /app/post-build.sh; fi"]

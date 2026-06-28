@@ -6,6 +6,8 @@ services:
       context: ../..
       dockerfile: src/mcp-servers/garmin-mcp/Dockerfile
     env_file: ../../.env
+    environment:
+      MCP_TRANSPORT: streamable-http
     networks:
       - mcp-internal
       - edge
@@ -15,7 +17,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import socket; s=socket.create_connection(('127.0.0.1',8000),5); s.close()\"",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\"",
         ]
       interval: 15s
       timeout: 5s

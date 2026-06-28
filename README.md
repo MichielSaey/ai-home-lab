@@ -7,14 +7,16 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 ## Architecture
 
 - **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).
-- **MCP servers** (`src/mcp-servers/`) — domain logic exposed over SSE on the internal Docker network.
+- **MCP servers** (`src/mcp-servers/`) — domain logic exposed over Streamable HTTP on the internal Docker network.
 - **Shared utilities** (`src/shared/`) — CUDA bootstrap and ffmpeg helpers for epub2audiobook.
 
 ### Network and access model
 
-- **edge** — Odysseus, MCP servers (SSE endpoint); internal service discovery.
+- **edge** — Odysseus, MCP servers (HTTP endpoint); internal service discovery.
 - **mcp-internal** — MCP servers only; `internal: true`, not reachable from the host.
-- Expose **Odysseus** (port 7000) and **ntfy** (port 8091) via Tailscale. Do not publish MCP ports publicly.
+- Expose **Odysseus** (port 7000) and **ntfy** (port 8091) via Tailscale or your LAN. Do not publish MCP ports publicly.
+
+`APP_BIND` controls which **host** address Docker publishes Odysseus on. The default `127.0.0.1` only allows access from the server itself (`http://localhost:7000`). Uvicorn inside the container may log `0.0.0.0:7000`; that is normal — the host bind is what matters for browsers on other machines.
 
 ## Services
 
@@ -36,9 +38,12 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
    ```bash
    docker compose up -d --build
    ```
-4. Open `http://localhost:7000`
+4. Open `http://localhost:7000` (or your server IP if `APP_BIND` is not loopback — see [LAN access](#lan-access-casaos--homelab))
 5. Admin password: `docker compose logs odysseus | grep -i password`
-6. Odysseus admin → MCP → add `http://garmin-mcp:8000/sse`
+6. Odysseus admin → MCP → add server:
+   - **Transport:** Streamable HTTP
+   - **URL:** `http://garmin-mcp:8000/mcp`
+   - If you previously added the SSE endpoint (`…/sse`), delete that server and re-add with HTTP — SSE connections list tools but tool calls fail in Odysseus.
 7. Configure models in Odysseus (or `OLLAMA_BASE_URL` in `.env`)
 
 ### Spin up sections independently
@@ -65,7 +70,7 @@ For epub2audiobook and Jupyter — not the Docker stack. See [docs/epub2audioboo
 2. Ensure the runner has the `self-hosted` and `linux` labels.
 3. Make sure the runner user can run Docker.
 4. Place a `.env` file in the repo checkout directory on the server (the workflow does not create secrets).
-5. Push to `master` or trigger the workflow manually to deploy via Docker Compose.
+5. Push to `main` or trigger the workflow manually to deploy via Docker Compose.
 
 The deploy workflow vendors Odysseus, starts the stack, waits for health checks, and optionally sends an ntfy ping when `NTFY_DEPLOY_TOPIC` is set in `.env`.
 
@@ -80,6 +85,39 @@ Set `ODYSSEUS_REF` in `.env` to a branch, tag, or commit SHA. To update an exist
 ```bash
 ODYSSEUS_UPDATE=1 ./scripts/ensure-odysseus.sh
 ```
+
+### Sending `.env` to CasaOS (for GitHub Actions runner)
+
+The deploy workflow expects `.env` at the runner checkout root (not in git):
+
+```
+/mnt/Storage2/home/casaos/actions-runner/_work/ai-home-lab/ai-home-lab/.env
+```
+
+```bash
+scp /path/to/ai-home-lab/.env \
+  casaos@192.168.0.110:/mnt/Storage2/home/casaos/actions-runner/_work/ai-home-lab/ai-home-lab/.env
+```
+
+### LAN access (CasaOS / homelab)
+
+Containers can show as running in Portainer/CasaOS while Odysseus is unreachable from other machines if `APP_BIND=127.0.0.1`. Set in the server `.env`:
+
+```bash
+APP_BIND=0.0.0.0
+ALLOWED_ORIGINS=http://192.168.0.110:7000
+NTFY_BIND=0.0.0.0
+NTFY_BASE_URL=http://192.168.0.110:8091
+```
+
+Replace `192.168.0.110` with your server’s LAN IP. Restart Odysseus:
+
+```bash
+cd /mnt/Storage2/home/casaos/actions-runner/_work/ai-home-lab/ai-home-lab
+docker compose up -d odysseus
+```
+
+Then open `http://192.168.0.110:7000` from a machine on the same network. Set `ODYSSEUS_ADMIN_PASSWORD` to a strong value before exposing on the LAN.
 
 ### Backups
 

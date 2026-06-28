@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional MCP SSE test for garmin-mcp with hard timeouts."""
+"""Functional MCP test for garmin-mcp (Streamable HTTP by default)."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import sys
 from typing import Any
 
 from mcp import ClientSession
-from mcp.client.sse import sse_client
 
-MCP_URL = os.environ.get("GARMIN_MCP_URL", "http://127.0.0.1:8000/sse")
+MCP_URL = os.environ.get("GARMIN_MCP_URL", "http://127.0.0.1:8000/mcp")
+MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "streamable-http").lower()
 CONNECT_TIMEOUT = 30
 TOOL_TIMEOUT = 180
 
@@ -33,10 +33,24 @@ def _tool_payload(result: Any) -> dict[str, Any] | list[Any]:
     return parsed
 
 
+def _connect(url: str):
+    if MCP_TRANSPORT == "sse":
+        from mcp.client.sse import sse_client
+
+        return sse_client(url)
+    from mcp.client.streamable_http import streamablehttp_client
+
+    return streamablehttp_client(url)
+
+
 async def _run() -> None:
-    print(f"Connecting to {MCP_URL} ...")
+    print(f"Connecting to {MCP_URL} (transport={MCP_TRANSPORT}) ...")
     async with asyncio.timeout(CONNECT_TIMEOUT):
-        async with sse_client(MCP_URL) as (read, write):
+        async with _connect(MCP_URL) as transport:
+            if MCP_TRANSPORT == "sse":
+                read, write = transport
+            else:
+                read, write, _get_session_id = transport
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
@@ -83,7 +97,7 @@ async def _run() -> None:
                     f"profile keys={list(report.get('profile', {}).keys())[:3]})"
                 )
 
-    print("ALL MCP SSE FUNCTIONAL TESTS PASSED")
+    print("ALL MCP FUNCTIONAL TESTS PASSED")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ def reset_client_state() -> None:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(server.mcp.sse_app())
+    return TestClient(server.mcp.streamable_http_app())
 
 
 def test_http_status_for_error_mapping() -> None:
@@ -221,9 +221,12 @@ def test_get_training_plan_invalid_weeks_returns_400(client: TestClient) -> None
     assert "weeks" in response.json()["error"]
 
 
-def test_rest_routes_mounted_on_sse_app(client: TestClient) -> None:
-    paths = {getattr(route, "path", None) for route in server.mcp.sse_app().routes}
+def test_rest_routes_mounted_on_streamable_http_app(client: TestClient) -> None:
+    paths = {
+        getattr(route, "path", None)
+        for route in server.mcp.streamable_http_app().routes
+    }
     assert "/health" in paths
     assert "/weekly-report" in paths
     assert "/training-plan" in paths
-    assert "/sse" in paths
+    assert "/mcp" in paths

@@ -1046,5 +1046,8 @@ mount_rest_routes(mcp)
 
 
 if __name__ == "__main__":
-    transport = os.environ.get("MCP_TRANSPORT", "sse")
+    # Streamable HTTP avoids Odysseus SSE stale-session failures (list_tools works,
+    # call_tool dies on a closed anyio stream). Odysseus: transport "http",
+    # URL http://garmin-mcp:8000/mcp
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
     mcp.run(transport=transport)  # type: ignore[arg-type]

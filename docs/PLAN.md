@@ -77,7 +77,7 @@ flowchart TB
 | Step | Assignee | Issue | Work | Done when |
 |------|----------|-------|------|-----------|
 | A.1 | — | done | `ensure-odysseus.sh` + `docker compose up` | Odysseus healthy on `:7000` |
-| A.2 | user | — | Odysseus admin → MCP → `http://garmin-mcp:8000/sse` | Tools + weekly report visible |
+| A.2 | user | — | Odysseus admin → MCP → `http://garmin-mcp:8000/mcp` (Streamable HTTP) | Tools + weekly report visible |
 | A.3 | user | — | LiteLLM / models in Odysseus Settings | Coach preset replies |
 | A.4 | agent | [#9](https://github.com/MichielSaey/ai-home-lab/issues/9) | Garmin Coach preset in `workflows/odysseus/presets/` | Preset file versioned in repo |
 | A.5 | user | — | Enable garmin-mcp + Garmin Coach preset in Odysseus | Chat uses MCP tools/resources |

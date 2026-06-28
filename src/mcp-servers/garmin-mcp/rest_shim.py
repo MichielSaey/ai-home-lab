@@ -1,4 +1,4 @@
-"""REST shim routes for n8n HTTP access alongside FastMCP SSE."""
+"""REST shim routes for n8n HTTP access alongside the FastMCP HTTP transport."""
 
 from typing import Any, Dict, Optional
 
@@ -117,7 +117,7 @@ async def training_plan_handler(request: Request) -> Response:
 
 
 def mount_rest_routes(mcp_instance: Any) -> None:
-    """Register REST shim routes on the same Starlette app as FastMCP SSE."""
+    """Register REST shim routes on the same Starlette app as the MCP endpoint."""
     mcp_instance.custom_route("/health", methods=["GET"])(health_handler)
     mcp_instance.custom_route("/weekly-report", methods=["GET"])(weekly_report_handler)
     mcp_instance.custom_route("/training-plan", methods=["GET"])(training_plan_handler)
