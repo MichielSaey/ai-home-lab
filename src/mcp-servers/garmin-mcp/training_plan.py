@@ -1,12 +1,14 @@
 from datetime import date, timedelta
 from typing import Any, Callable
 
+# Polarized targets: medium (Zone 3) should always be ~0 — it is the gray zone
+# to minimize. easy_pct + hard_pct therefore sum to 100 for every week type.
 WEEK_TYPE_SPECS = {
-    "build": {"multiplier": 1.10, "easy_pct": 80, "hard_pct": 20, "ref": "prev"},
-    "recovery": {"multiplier": 0.80, "easy_pct": 90, "hard_pct": 10, "ref": "prev"},
-    "taper_first": {"multiplier": 0.80, "easy_pct": 80, "hard_pct": 20, "ref": "peak"},
-    "taper_final": {"multiplier": 0.64, "easy_pct": 85, "hard_pct": 15, "ref": "peak"},
-    "race": {"multiplier": 0.30, "easy_pct": 90, "hard_pct": 10, "ref": "prev"},
+    "build": {"multiplier": 1.10, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "prev"},
+    "recovery": {"multiplier": 0.80, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "prev"},
+    "taper_first": {"multiplier": 0.80, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "peak"},
+    "taper_final": {"multiplier": 0.64, "easy_pct": 85, "medium_pct": 0, "hard_pct": 15, "ref": "peak"},
+    "race": {"multiplier": 0.30, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "prev"},
 }
 
 
@@ -65,6 +67,7 @@ def build_target(
     return {
         "distance_km": calc_distance_target(week_type, prev_km, peak_km),
         "easy_pct": spec["easy_pct"],
+        "medium_pct": spec["medium_pct"],
         "hard_pct": spec["hard_pct"],
     }
 
@@ -76,13 +79,18 @@ def calc_acwr(acute: Any, chronic: Any) -> float | None:
 
 
 def actuals_from_stat_row(row: list[Any], load: dict[str, Any]) -> dict[str, Any]:
-    easy_pct = row[10]
+    # Row layout (weekly_stats_rows): start, end, distance, z1..z5,
+    # easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct
+    easy_pct = row[11]
+    medium_pct = row[12]
+    hard_pct = row[13]
     acute = load.get("acute_load")
     chronic = load.get("chronic_load")
     return {
         "distance_km": row[2],
         "easy_pct": easy_pct,
-        "hard_pct": round(100 - easy_pct, 1) if easy_pct is not None else None,
+        "medium_pct": medium_pct,
+        "hard_pct": hard_pct,
         "acute_load": acute,
         "chronic_load": chronic,
         "acwr": calc_acwr(acute, chronic),
@@ -93,6 +101,7 @@ def empty_actuals() -> dict[str, Any]:
     return {
         "distance_km": None,
         "easy_pct": None,
+        "medium_pct": None,
         "hard_pct": None,
         "acute_load": None,
         "chronic_load": None,

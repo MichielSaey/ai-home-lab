@@ -86,8 +86,11 @@ WEEKLY_STATS_HEADERS = [
     "zone_4_min",
     "zone_5_min",
     "easy_min",
+    "medium_min",
     "hard_min",
     "easy_pct",
+    "medium_pct",
+    "hard_pct",
 ]
 
 

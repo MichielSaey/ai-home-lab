@@ -2,7 +2,7 @@ from datetime import date
 
 from zones import (
     activity_date,
-    easy_hard_from_zones,
+    intensity_split_from_zones,
     normalize_hr_zones,
     weekly_hr_zone_rows,
     weekly_stats_rows,
@@ -29,19 +29,30 @@ def test_zones_to_minute_columns_returns_none_when_missing() -> None:
     assert zones_to_minute_columns({1: 90, 3: 30}) == [1.5, 0.0, 0.5, 0.0, 0.0]
 
 
-def test_easy_hard_from_zones_computes_80_20_split() -> None:
+def test_intensity_split_separates_medium_gray_zone() -> None:
     zones = {1: 600, 2: 600, 3: 300, 4: 60, 5: 40}
-    easy_min, hard_min, easy_pct = easy_hard_from_zones(zones)
+    easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct = (
+        intensity_split_from_zones(zones)
+    )
     assert easy_min == 20.0
-    assert hard_min == 6.67
+    assert medium_min == 5.0
+    assert hard_min == 1.67
+    # Percentages span all tracked time (Z1-5) and sum to 100.
     assert easy_pct == 75.0
+    assert medium_pct == 18.8
+    assert hard_pct == 6.2
 
 
-def test_easy_hard_from_zones_returns_none_pct_without_data() -> None:
-    easy_min, hard_min, easy_pct = easy_hard_from_zones({})
+def test_intensity_split_returns_none_pct_without_data() -> None:
+    easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct = (
+        intensity_split_from_zones({})
+    )
     assert easy_min == 0.0
+    assert medium_min == 0.0
     assert hard_min == 0.0
     assert easy_pct is None
+    assert medium_pct is None
+    assert hard_pct is None
 
 
 def test_activity_date_parses_start_time_local() -> None:
@@ -83,9 +94,14 @@ def test_weekly_hr_zone_rows_rolls_up_by_calendar_week() -> None:
     assert current_week[0] == "2026-06-11"
     assert current_week[1] == "2026-06-17"
     assert current_week[2:7] == [10.0, 0.0, 0.0, 0.0, 0.0]
-    assert current_week[7:10] == [10.0, 0.0, 100.0]
+    # easy_min, medium_min, hard_min
+    assert current_week[7:10] == [10.0, 0.0, 0.0]
+    # easy_pct, medium_pct, hard_pct
+    assert current_week[10:13] == [100.0, 0.0, 0.0]
 
     assert prior_week[0] == "2026-06-04"
     assert prior_week[1] == "2026-06-10"
     assert prior_week[2:7] == [0.0, 0.0, 20.0, 0.0, 0.0]
+    # all Zone 3 → medium bucket only
     assert prior_week[7:10] == [0.0, 20.0, 0.0]
+    assert prior_week[10:13] == [0.0, 100.0, 0.0]

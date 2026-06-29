@@ -173,7 +173,7 @@ Count weeks **forward** from the first week in the lookback window (`week_number
 
 ### Periodization rules
 
-- Compare `actuals.distance_km` vs `target.distance_km` and `actuals.easy_pct` vs `target.easy_pct`.
+- Compare `actuals.distance_km` vs `target.distance_km` and `actuals.easy_pct` vs `target.easy_pct`. Flag a high `actuals.medium_pct` (Zone 3 gray-zone creep) — the polarized target is ~0.
 - Use `actuals.acwr` — if > 1.3, do not increase volume even on build weeks.
 - Schedule sessions from the row with `week_description: upcoming_week`.
 
@@ -188,10 +188,10 @@ Each week object:
   "week_description": "past_week | current_week | upcoming_week",
   "week_type": "build | recovery | taper_first | taper_final | race",
   "actuals": {
-    "distance_km", "easy_pct", "hard_pct",
+    "distance_km", "easy_pct", "medium_pct", "hard_pct",
     "acute_load", "chronic_load", "acwr"
   },
-  "target": { "distance_km", "easy_pct", "hard_pct" }
+  "target": { "distance_km", "easy_pct", "medium_pct", "hard_pct" }
 }
 ```
 
@@ -210,7 +210,7 @@ The plan is **4 past weeks + 1 upcoming week**. No dates in the JSON (you know t
 | Field | Meaning |
 |---|---|
 | `distance_km` | Weekly running volume |
-| `easy_pct` / `hard_pct` | Intensity split (target ~80/20 on build weeks) |
+| `easy_pct` / `medium_pct` / `hard_pct` | Three-way intensity split (Z1-2 / Z3 / Z4-5), sums to 100. Target ~80/0/20 on build weeks |
 | `acute_load` | 7-day strain snapshot at week end |
 | `chronic_load` | 28-day fitness base snapshot at week end |
 | `acwr` | `acute_load / chronic_load` — derived |
@@ -224,7 +224,7 @@ Load metrics are **point-in-time snapshots** at each week end — they cannot be
 | Field | Meaning |
 |---|---|
 | `distance_km` | Planned km — rounded whole number. `null` on first week (no prior reference). Build = +10% vs previous week actual. |
-| `easy_pct` / `hard_pct` | Planned split for `week_type` |
+| `easy_pct` / `medium_pct` / `hard_pct` | Planned split for `week_type` (`medium_pct` is always 0 — the gray zone to minimize) |
 
 No load targets — Garmin derives those from execution.
 

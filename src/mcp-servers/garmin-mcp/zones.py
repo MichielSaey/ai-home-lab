@@ -19,14 +19,34 @@ def zones_to_minute_columns(zones: dict[int, float]) -> list[float | None]:
     return [round(zones.get(zone, 0) / 60, 2) for zone in range(1, 6)]
 
 
-def easy_hard_from_zones(
+def intensity_split_from_zones(
     zones: dict[int, float],
-) -> tuple[float, float, float | None]:
+) -> tuple[float, float, float, float | None, float | None, float | None]:
+    """Split zone time into the polarized buckets: easy (Z1-2), medium (Z3,
+    the gray zone to minimize), and hard (Z4-5).
+
+    Returns (easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct).
+    Percentages are over total tracked time (easy + medium + hard) and are None
+    when there is no data.
+    """
     easy_secs = zones.get(1, 0) + zones.get(2, 0)
-    hard_secs = zones.get(3, 0) + zones.get(4, 0) + zones.get(5, 0)
-    total_secs = easy_secs + hard_secs
-    easy_pct = round(100 * easy_secs / total_secs, 1) if total_secs else None
-    return round(easy_secs / 60, 2), round(hard_secs / 60, 2), easy_pct
+    medium_secs = zones.get(3, 0)
+    hard_secs = zones.get(4, 0) + zones.get(5, 0)
+    total_secs = easy_secs + medium_secs + hard_secs
+    if total_secs:
+        easy_pct = round(100 * easy_secs / total_secs, 1)
+        medium_pct = round(100 * medium_secs / total_secs, 1)
+        hard_pct = round(100 * hard_secs / total_secs, 1)
+    else:
+        easy_pct = medium_pct = hard_pct = None
+    return (
+        round(easy_secs / 60, 2),
+        round(medium_secs / 60, 2),
+        round(hard_secs / 60, 2),
+        easy_pct,
+        medium_pct,
+        hard_pct,
+    )
 
 
 def activity_date(activity: dict[str, Any]) -> date | None:
@@ -60,7 +80,9 @@ def weekly_stats_rows(
             for zone, secs in zones.items():
                 if 1 <= zone <= 5:
                     block_zones[zone] += secs
-        easy_min, hard_min, easy_pct = easy_hard_from_zones(block_zones)
+        easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct = (
+            intensity_split_from_zones(block_zones)
+        )
         rows.append(
             [
                 block_start.isoformat(),
@@ -68,8 +90,11 @@ def weekly_stats_rows(
                 round(block_distance_km, 2),
                 *[round(block_zones[zone] / 60, 2) for zone in range(1, 6)],
                 easy_min,
+                medium_min,
                 hard_min,
                 easy_pct,
+                medium_pct,
+                hard_pct,
             ]
         )
     return rows
@@ -90,15 +115,20 @@ def weekly_hr_zone_rows(
                 for zone, secs in zones.items():
                     if 1 <= zone <= 5:
                         block_zones[zone] += secs
-        easy_min, hard_min, easy_pct = easy_hard_from_zones(block_zones)
+        easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct = (
+            intensity_split_from_zones(block_zones)
+        )
         rows.append(
             [
                 block_start.isoformat(),
                 block_end.isoformat(),
                 *[round(block_zones[zone] / 60, 2) for zone in range(1, 6)],
                 easy_min,
+                medium_min,
                 hard_min,
                 easy_pct,
+                medium_pct,
+                hard_pct,
             ]
         )
     return rows

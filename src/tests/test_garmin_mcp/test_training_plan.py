@@ -28,11 +28,13 @@ def test_first_event_date_picks_earliest_upcoming() -> None:
 
 
 def test_build_training_plan_includes_upcoming_week() -> None:
+    # Layout: start, end, distance, z1..z5, easy_min, medium_min, hard_min,
+    # easy_pct, medium_pct, hard_pct
     stat_rows = [
-        ["2026-05-05", "2026-05-11", 40.0, 0, 0, 0, 0, 0, 0, 0, 80.0],
-        ["2026-05-12", "2026-05-18", 44.0, 0, 0, 0, 0, 0, 0, 0, 82.0],
-        ["2026-05-19", "2026-05-25", 48.0, 0, 0, 0, 0, 0, 0, 0, 78.0],
-        ["2026-05-26", "2026-06-01", 30.0, 0, 0, 0, 0, 0, 0, 0, 85.0],
+        ["2026-05-05", "2026-05-11", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+        ["2026-05-12", "2026-05-18", 44.0, 0, 0, 0, 0, 0, 0, 0, 0, 82.0, 0.0, 18.0],
+        ["2026-05-19", "2026-05-25", 48.0, 0, 0, 0, 0, 0, 0, 0, 0, 78.0, 0.0, 22.0],
+        ["2026-05-26", "2026-06-01", 30.0, 0, 0, 0, 0, 0, 0, 0, 0, 85.0, 0.0, 15.0],
     ]
 
     def load_at(_week_end: date) -> dict:
@@ -45,6 +47,10 @@ def test_build_training_plan_includes_upcoming_week() -> None:
     assert plan[-1]["week_description"] == "upcoming_week"
     assert plan[-1]["actuals"]["distance_km"] is None
     assert plan[-1]["target"]["distance_km"] is not None
+    # Medium (Zone 3) bucket flows through actuals and targets.
+    assert plan[0]["actuals"]["medium_pct"] == 0.0
+    assert plan[0]["actuals"]["hard_pct"] == 20.0
+    assert plan[-1]["target"]["medium_pct"] == 0
 
 
 def test_parse_training_status_extracts_load() -> None:
