@@ -26,6 +26,7 @@ from nutrition_matrix import (
 from rest_shim import mount_rest_routes
 from training_plan import build_training_plan, first_event_date
 from training_status import parse_training_status
+from weather import fetch_daily_weather
 from zones import (
     activity_date,
     normalize_hr_zones,
@@ -49,6 +50,21 @@ mcp = FastMCP("garmin-mcp", host=MCP_HOST, port=MCP_PORT)
 
 DEFAULT_GARMIN_USERNAME = os.environ.get("GARMIN_EMAIL")
 DEFAULT_GARMIN_PASSWORD = os.environ.get("GARMIN_PASSWORD")
+
+
+def _env_float(name: str) -> Optional[float]:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+# Optional home location for weather lookups. When unset, weather is omitted.
+GARMIN_HOME_LAT = _env_float("GARMIN_HOME_LAT")
+GARMIN_HOME_LON = _env_float("GARMIN_HOME_LON")
 
 _CLIENT: Optional[Garmin] = None
 _CLIENT_ERROR: Optional[Dict[str, Any]] = None
@@ -398,7 +414,29 @@ def _training_plan_table(
             return {}
         return parse_training_status(raw if isinstance(raw, dict) else {})
 
-    return build_training_plan(stat_rows, event_date, load_at_week_end)
+    daily_weather = _weather_for_plan(stat_rows)
+
+    return build_training_plan(stat_rows, event_date, load_at_week_end, daily_weather)
+
+
+def _weather_for_plan(
+    stat_rows: list[list[Any]],
+) -> Optional[dict[str, dict[str, Any]]]:
+    """Fetch daily weather spanning the lookback weeks plus the upcoming week.
+
+    Returns None when no home location is configured, so the plan omits weather.
+    """
+    if GARMIN_HOME_LAT is None or GARMIN_HOME_LON is None or not stat_rows:
+        return None
+
+    window_start = stat_rows[0][0]
+    # End covers the forecast upcoming week (last week end + up to ~13 days).
+    last_end = date.fromisoformat(stat_rows[-1][1])
+    window_end = (last_end + timedelta(days=14)).isoformat()
+
+    return fetch_daily_weather(
+        GARMIN_HOME_LAT, GARMIN_HOME_LON, window_start, window_end
+    )
 
 
 @mcp.tool()

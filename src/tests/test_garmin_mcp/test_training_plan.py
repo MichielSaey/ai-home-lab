@@ -53,6 +53,68 @@ def test_build_training_plan_includes_upcoming_week() -> None:
     assert plan[-1]["target"]["medium_pct"] == 0
 
 
+def test_build_training_plan_enriches_weather() -> None:
+    stat_rows = [
+        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+        ["2026-06-02", "2026-06-08", 44.0, 0, 0, 0, 0, 0, 0, 0, 0, 82.0, 0.0, 18.0],
+    ]
+
+    def load_at(_week_end: date) -> dict:
+        return {}
+
+    daily_weather = {
+        "2026-05-26": {"temp_c": 20.0, "weather_code": 0, "description": "Clear sky"},
+        "2026-05-27": {"temp_c": 22.0, "weather_code": 3, "description": "Overcast"},
+        "2026-06-02": {"temp_c": 30.0, "weather_code": 0, "description": "Clear sky"},
+        "2026-06-08": {"temp_c": 34.0, "weather_code": 0, "description": "Clear sky"},
+    }
+
+    plan = build_training_plan(
+        stat_rows, event_date=None, load_at_week_end=load_at, daily_weather=daily_weather
+    )
+
+    past_week = plan[0]
+    current_week = plan[1]
+    upcoming_week = plan[2]
+
+    # Past week: averaged temperature, no per-day blocks.
+    assert past_week["week_description"] == "past_week"
+    assert past_week["avg_temp_c"] == 21.0
+    assert "days" not in past_week
+
+    # Current week: per-day blocks for each of its seven dates.
+    assert current_week["week_description"] == "current_week"
+    assert current_week["avg_temp_c"] == 32.0
+    assert [d["date"] for d in current_week["days"]] == [
+        "2026-06-02",
+        "2026-06-03",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-06",
+        "2026-06-07",
+        "2026-06-08",
+    ]
+    assert current_week["days"][0]["weather"] == "Clear sky"
+
+    # Upcoming week is forecast-only but still gets per-day blocks.
+    assert upcoming_week["week_description"] == "upcoming_week"
+    assert "days" in upcoming_week
+
+
+def test_build_training_plan_omits_weather_when_none() -> None:
+    stat_rows = [
+        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+    ]
+
+    plan = build_training_plan(
+        stat_rows, event_date=None, load_at_week_end=lambda _e: {}
+    )
+
+    for block in plan:
+        assert "avg_temp_c" not in block
+        assert "days" not in block
+
+
 def test_parse_training_status_extracts_load() -> None:
     raw = {
         "mostRecentTrainingStatus": {

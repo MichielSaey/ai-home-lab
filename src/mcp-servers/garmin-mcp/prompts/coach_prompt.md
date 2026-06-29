@@ -234,4 +234,26 @@ No load targets — Garmin derives those from execution.
 2. Check latest `actuals.acwr` — if > 1.3, cap `upcoming_week` volume.
 3. Plan sessions from `upcoming_week.target` respecting `week_type`.
 4. Confirm taper/recovery timing against `events`.
+5. Factor in weather (see below) when placing sessions across the week.
+
+## Weather and heat
+
+When a home location is configured, each week may include weather fields
+(omitted entirely when no location is set):
+
+| Field | Where | Meaning |
+|---|---|---|
+| `avg_temp_c` | every week | Mean daily temperature (°C) across the week |
+| `days` | current + upcoming week | Per-day blocks: `date`, `avg_temp_c`, `weather` (short description) |
+
+Use `days` on the `upcoming_week` to schedule around heat:
+
+- **Hot days (≥ ~25 °C, more so ≥ 30 °C):** move hard sessions (threshold,
+  sprints, hill repeats) to the coolest day(s); keep them shorter; prefer early
+  morning. On extreme-heat days, downgrade to an easy/recovery effort or rest.
+- Heat raises HR at a given pace — expect easy runs to drift into higher zones.
+  Coach by effort/HR, not pace, and warn the athlete their easy pace will be slower.
+- Emphasize hydration and electrolytes (the `get_nutrition_cues` tool reflects this).
+- When you place a workout on a specific day, pass that day's date as
+  `workout_date` to the create tool so it is scheduled in one step.
 
