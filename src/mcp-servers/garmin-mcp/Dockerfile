@@ -15,6 +15,7 @@ COPY src/mcp-servers/garmin-mcp/rest_shim.py /app/rest_shim.py
 COPY src/mcp-servers/garmin-mcp/server.py /app/server.py
 COPY src/mcp-servers/garmin-mcp/training_plan.py /app/training_plan.py
 COPY src/mcp-servers/garmin-mcp/training_status.py /app/training_status.py
+COPY src/mcp-servers/garmin-mcp/weather.py /app/weather.py
 COPY src/mcp-servers/garmin-mcp/workout_builder.py /app/workout_builder.py
 COPY src/mcp-servers/garmin-mcp/workout_templates.py /app/workout_templates.py
 COPY src/mcp-servers/garmin-mcp/zones.py /app/zones.py
