@@ -545,13 +545,23 @@ def health() -> Dict[str, Any]:
 
 @mcp.resource("garmin://coach-prompt")
 def coach_prompt() -> str:
-    """Coach instructions including 80/20 polarized training rules and session workflow."""
+    """Coach instructions including polarized training rules and session workflow."""
     return _load_coach_prompt()
 
 
-@mcp.resource("garmin://health")
-def health() -> Dict[str, Any]:
-    """Lightweight Garmin Connect reachability check (no weekly report)."""
+# Tool wrappers for the resources above. MCP clients that cannot read resources
+# (e.g. Odysseus) reach the same content through these tools. Keep both: the
+# resources stay for clients that do support resource reads.
+@mcp.tool()
+def get_coach_prompt() -> str:
+    """Return the running coach instructions (polarized training rules, session
+    workflow, output format). Call this first when acting as the coach."""
+    return _load_coach_prompt()
+
+
+@mcp.tool()
+def get_garmin_health() -> Dict[str, Any]:
+    """Lightweight Garmin Connect reachability/auth check (no weekly report)."""
     return _garmin_health_payload()
 
 

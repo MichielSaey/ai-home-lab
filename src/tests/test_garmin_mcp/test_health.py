@@ -111,6 +111,17 @@ def test_health_ok_when_garmin_reachable() -> None:
     assert result["checkedAt"].endswith("+00:00")
 
 
+def test_get_garmin_health_tool_matches_resource() -> None:
+    mock_client = MagicMock()
+    mock_client.get_user_profile.return_value = {"userData": {"displayName": "Runner"}}
+
+    with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
+        tool_result = server.get_garmin_health()
+
+    assert tool_result["status"] == "ok"
+    assert tool_result["garmin"] == {"reachable": True, "authenticated": True}
+
+
 def test_health_error_when_credentials_missing() -> None:
     with patch.object(server, "DEFAULT_GARMIN_USERNAME", None), patch.object(
         server, "DEFAULT_GARMIN_PASSWORD", None

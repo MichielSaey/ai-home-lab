@@ -14,3 +14,10 @@ def test_load_coach_prompt_returns_80_20_guidance() -> None:
 
 def test_coach_prompt_resource_aliases_loader() -> None:
     assert server.coach_prompt() == server._load_coach_prompt()
+
+
+def test_get_coach_prompt_tool_matches_resource() -> None:
+    # Odysseus cannot read MCP resources, so the tool wrapper must return the
+    # same content as the garmin://coach-prompt resource.
+    assert server.get_coach_prompt() == server._load_coach_prompt()
+    assert server.get_coach_prompt() == server.coach_prompt()
