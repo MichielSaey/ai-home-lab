@@ -98,15 +98,16 @@ NUTRITION_MATRIX: tuple[NutritionBucket, ...] = (
 
 INTENSITY_ALIASES: dict[str, str] = {
     "easy": "easy",
+    "base": "easy",
     "recovery": "easy",
     "long_run": "easy",
     "long": "easy",
+    "weighted_pack": "easy",
     "moderate": "moderate",
-    "tempo": "moderate",
     "hard": "hard",
     "threshold": "hard",
-    "strides": "hard",
     "sprint": "hard",
+    "hill_repeats": "hard",
 }
 
 INTENSITY_ADJUSTMENTS: dict[str, dict[str, str]] = {
@@ -123,13 +124,13 @@ INTENSITY_ADJUSTMENTS: dict[str, dict[str, str]] = {
 }
 
 TEMPLATE_INTENSITY: dict[str, str] = {
-    "easy": "easy",
+    "base": "easy",
     "long_run": "easy",
     "recovery": "easy",
-    "tempo": "moderate",
+    "weighted_pack": "easy",
     "threshold": "hard",
-    "strides": "hard",
     "sprint": "hard",
+    "hill_repeats": "hard",
 }
 
 

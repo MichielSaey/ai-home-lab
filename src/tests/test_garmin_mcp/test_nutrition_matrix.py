@@ -43,7 +43,7 @@ def test_nutrition_cue_steps_include_phase_labels() -> None:
 
 
 def test_inject_nutrition_cues_inserts_before_midpoint_and_after() -> None:
-    base = [{"type": "interval", "duration_minutes": 20, "workout_type": "easy"}]
+    base = [{"type": "interval", "duration_minutes": 20, "workout_type": "base"}]
     injected = inject_nutrition_cues(base, 60)
 
     assert injected[0]["type"] == "cue"
@@ -55,7 +55,7 @@ def test_build_workout_steps_supports_cue_type() -> None:
     steps = build_workout_steps(
         [
             {"type": "cue", "message": "Take gel now"},
-            {"type": "interval", "duration_minutes": 10, "workout_type": "easy"},
+            {"type": "interval", "duration_minutes": 10, "workout_type": "base"},
         ]
     )
 
@@ -66,7 +66,7 @@ def test_build_workout_steps_supports_cue_type() -> None:
 
 
 def test_build_template_workout_can_embed_nutrition_cues() -> None:
-    workout = build_template_workout("Fuelled Easy", "easy", {"duration_minutes": 60}, include_nutrition_cues=True)
+    workout = build_template_workout("Fuelled Base", "base", {"duration_minutes": 60}, include_nutrition_cues=True)
     step_types = [
         step.model_dump().get("stepType", {}).get("stepTypeKey")
         for step in workout.workoutSegments[0].workoutSteps

@@ -759,21 +759,28 @@ def workout(
     name: str,
     steps: List[Dict[str, Any]],
     description: Optional[str] = None,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a running workout from an ordered list of adjacent steps.
 
     Each step is a dict with:
     - type: warmup | interval | recovery | cooldown | repeat
     - duration_minutes: float (required for regular steps)
-    - workout_type: optional preset zone key (easy, tempo, threshold, strides, sprint, ...)
+    - workout_type: optional preset zone key (base, threshold, sprint, ...)
     - heart_rate_zone: optional Garmin zone number 1-5 (overrides workout_type)
     - iterations + steps: required for repeat blocks
 
     Heart rate targets are set automatically unless heart_rate_zone is provided.
+    Pass workout_date (YYYY-MM-DD) to also schedule it in the same call.
     """
     client, error = _get_client_or_error()
     if error:
         return error
+
+    if workout_date is not None:
+        date_error = _validate_workout_date(workout_date)
+        if date_error:
+            return date_error
 
     try:
         running_workout = build_running_workout(name, steps, description=description)
@@ -785,16 +792,27 @@ def workout(
         return upload_result
 
     upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+
+    workout_id = upload_result.get("workoutId")
+    if workout_date is not None and workout_id is not None:
+        upload_result["schedule"] = _schedule_existing(
+            client, int(workout_id), workout_date
+        )
+
     return upload_result
 
 
-@mcp.tool()
-def schedule_workout(workout_id: int, workout_date: str) -> Dict[str, Any]:
-    """Schedule an existing workout template on a calendar date (YYYY-MM-DD)."""
-    client, error = _get_client_or_error()
-    if error:
-        return error
+def _validate_workout_date(workout_date: str) -> Optional[Dict[str, Any]]:
+    """Return a structured error dict if workout_date is not ISO YYYY-MM-DD."""
+    try:
+        date.fromisoformat(workout_date)
+    except (ValueError, TypeError):
+        return {"error": "workout_date must be an ISO date (YYYY-MM-DD)"}
+    return None
 
+
+def _schedule_existing(client: Garmin, workout_id: int, workout_date: str) -> Dict[str, Any]:
+    """Schedule an uploaded workout on a date, skipping duplicate calendar entries."""
     if hasattr(client, "schedule_workout"):
         existing = _find_scheduled_workout(client, workout_id, workout_date)
         if existing is not None:
@@ -816,6 +834,20 @@ def schedule_workout(workout_id: int, workout_date: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+def schedule_workout(workout_id: int, workout_date: str) -> Dict[str, Any]:
+    """Schedule an existing workout template on a calendar date (YYYY-MM-DD)."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    date_error = _validate_workout_date(workout_date)
+    if date_error:
+        return date_error
+
+    return _schedule_existing(client, workout_id, workout_date)
+
+
+@mcp.tool()
 def list_workout_templates() -> Dict[str, Any]:
     """List built-in workout templates and the heart rate zones they use."""
     return {
@@ -828,8 +860,8 @@ def list_workout_templates() -> Dict[str, Any]:
         ],
         "combineHint": (
             "Use combine_workout_templates with segments like "
-            '[{"template": "easy", "params": {"duration_minutes": 20}}, '
-            '{"template": "strides", "params": {"count": 6}}].'
+            '[{"template": "base", "params": {"duration_minutes": 20}}, '
+            '{"template": "sprint", "params": {"repetitions": 6}}].'
         ),
     }
 
@@ -840,10 +872,16 @@ def _create_from_template(
     params: Optional[Dict[str, Any]] = None,
     description: Optional[str] = None,
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     client, error = _get_client_or_error()
     if error:
         return error
+
+    if workout_date is not None:
+        date_error = _validate_workout_date(workout_date)
+        if date_error:
+            return date_error
 
     try:
         running_workout = build_template_workout(
@@ -868,21 +906,31 @@ def _create_from_template(
             estimate_template_duration_minutes(template, params),
             intensity=intensity_for_template(template),
         )
+
+    workout_id = upload_result.get("workoutId")
+    if workout_date is not None and workout_id is not None:
+        upload_result["schedule"] = _schedule_existing(
+            client, int(workout_id), workout_date
+        )
+
     return upload_result
 
 
 @mcp.tool()
-def create_easy_workout(
+def create_base_workout(
     duration_minutes: int = 30,
-    name: str = "Easy Run",
+    name: str = "Base Run",
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a single-step easy aerobic run (HR zone 2)."""
+    """Create a single-step base aerobic run (HR zone 2). Pass workout_date
+    (YYYY-MM-DD) to also schedule it on the calendar in the same call."""
     return _create_from_template(
-        "easy",
+        "base",
         name,
         params={"duration_minutes": duration_minutes},
         include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
     )
 
 
@@ -891,13 +939,16 @@ def create_long_run_workout(
     duration_minutes: int = 90,
     name: str = "Long Run",
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a single-step long easy run (HR zone 2)."""
+    """Create a single-step long easy run (HR zone 2). Pass workout_date
+    (YYYY-MM-DD) to also schedule it in the same call."""
     return _create_from_template(
         "long_run",
         name,
         params={"duration_minutes": duration_minutes},
         include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
     )
 
 
@@ -906,34 +957,16 @@ def create_recovery_workout(
     duration_minutes: int = 25,
     name: str = "Recovery Run",
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a short recovery jog (HR zone 1)."""
+    """Create a short recovery jog (HR zone 1). Pass workout_date (YYYY-MM-DD)
+    to also schedule it in the same call."""
     return _create_from_template(
         "recovery",
         name,
         params={"duration_minutes": duration_minutes},
         include_nutrition_cues=include_nutrition_cues,
-    )
-
-
-@mcp.tool()
-def create_tempo_workout(
-    duration_minutes: int = 20,
-    warmup_minutes: int = 10,
-    cooldown_minutes: int = 10,
-    name: str = "Tempo Run",
-    include_nutrition_cues: bool = False,
-) -> Dict[str, Any]:
-    """Create a tempo run with warmup and cooldown (main block HR zone 3)."""
-    return _create_from_template(
-        "tempo",
-        name,
-        params={
-            "duration_minutes": duration_minutes,
-            "warmup_minutes": warmup_minutes,
-            "cooldown_minutes": cooldown_minutes,
-        },
-        include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
     )
 
 
@@ -944,8 +977,10 @@ def create_threshold_workout(
     cooldown_minutes: int = 10,
     name: str = "Threshold Run",
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a lactate-threshold run with warmup and cooldown (main block HR zone 4)."""
+    """Create a lactate-threshold run with warmup and cooldown (main block HR
+    zone 4). Pass workout_date (YYYY-MM-DD) to also schedule it in the same call."""
     return _create_from_template(
         "threshold",
         name,
@@ -955,31 +990,7 @@ def create_threshold_workout(
             "cooldown_minutes": cooldown_minutes,
         },
         include_nutrition_cues=include_nutrition_cues,
-    )
-
-
-@mcp.tool()
-def create_strides_workout(
-    count: int = 6,
-    stride_seconds: int = 20,
-    recovery_seconds: int = 60,
-    warmup_minutes: int = 15,
-    cooldown_minutes: int = 10,
-    name: str = "Strides",
-    include_nutrition_cues: bool = False,
-) -> Dict[str, Any]:
-    """Create a strides session with easy warmup/cooldown (efforts in HR zone 5)."""
-    return _create_from_template(
-        "strides",
-        name,
-        params={
-            "count": count,
-            "stride_seconds": stride_seconds,
-            "recovery_seconds": recovery_seconds,
-            "warmup_minutes": warmup_minutes,
-            "cooldown_minutes": cooldown_minutes,
-        },
-        include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
     )
 
 
@@ -992,8 +1003,10 @@ def create_sprint_workout(
     cooldown_minutes: int = 10,
     name: str = "Sprint Intervals",
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create short sprint repeats with jog recoveries (efforts in HR zone 5)."""
+    """Create short sprint repeats with jog recoveries (efforts in HR zone 5).
+    Pass workout_date (YYYY-MM-DD) to also schedule it in the same call."""
     return _create_from_template(
         "sprint",
         name,
@@ -1005,6 +1018,55 @@ def create_sprint_workout(
             "cooldown_minutes": cooldown_minutes,
         },
         include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
+    )
+
+
+@mcp.tool()
+def create_hill_repeats_workout(
+    repetitions: int = 6,
+    sprint_seconds: int = 30,
+    recovery_seconds: int = 90,
+    warmup_minutes: int = 15,
+    cooldown_minutes: int = 10,
+    name: str = "Hill Repeats",
+    include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create hill repeats — sprint repeats meant to be run uphill (efforts in
+    HR zone 5). Same structure as sprints; run them on a hill. Pass workout_date
+    (YYYY-MM-DD) to also schedule it in the same call."""
+    return _create_from_template(
+        "hill_repeats",
+        name,
+        params={
+            "repetitions": repetitions,
+            "sprint_seconds": sprint_seconds,
+            "recovery_seconds": recovery_seconds,
+            "warmup_minutes": warmup_minutes,
+            "cooldown_minutes": cooldown_minutes,
+        },
+        include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
+    )
+
+
+@mcp.tool()
+def create_weighted_pack_workout(
+    duration_minutes: int = 45,
+    name: str = "Weighted Pack Run",
+    include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a base aerobic run (HR zone 2) to be run carrying a loaded pack
+    (rucking). Same structure as a base run. Pass workout_date (YYYY-MM-DD) to
+    also schedule it in the same call."""
+    return _create_from_template(
+        "weighted_pack",
+        name,
+        params={"duration_minutes": duration_minutes},
+        include_nutrition_cues=include_nutrition_cues,
+        workout_date=workout_date,
     )
 
 
@@ -1014,19 +1076,26 @@ def combine_workout_templates(
     segments: List[Dict[str, Any]],
     description: Optional[str] = None,
     include_nutrition_cues: bool = False,
+    workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Combine multiple workout templates into one session.
 
     Each segment is either:
-    - {"template": "easy", "params": {"duration_minutes": 20}}
-    - {"template": "strides", "params": {"count": 6}}
+    - {"template": "base", "params": {"duration_minutes": 20}}
+    - {"template": "sprint", "params": {"repetitions": 6}}
     - {"steps": [...]} with explicit workout() step objects
 
-    Example: easy 20 min + strides + easy 10 min cooldown block.
+    Example: base 20 min + sprints + base 10 min cooldown block.
+    Pass workout_date (YYYY-MM-DD) to also schedule it in the same call.
     """
     client, error = _get_client_or_error()
     if error:
         return error
+
+    if workout_date is not None:
+        date_error = _validate_workout_date(workout_date)
+        if date_error:
+            return date_error
 
     try:
         running_workout = build_combined_workout(
@@ -1045,11 +1114,18 @@ def combine_workout_templates(
     upload_result["segments"] = segments
     upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
     if include_nutrition_cues:
-        primary_template = str(segments[0].get("template", "easy")) if segments else "easy"
+        primary_template = str(segments[0].get("template", "base")) if segments else "base"
         upload_result["nutritionCues"] = lookup_nutrition_cues(
             estimate_combined_duration_minutes(segments),
             intensity=intensity_for_template(primary_template),
         )
+
+    workout_id = upload_result.get("workoutId")
+    if workout_date is not None and workout_id is not None:
+        upload_result["schedule"] = _schedule_existing(
+            client, int(workout_id), workout_date
+        )
+
     return upload_result
 
 mount_rest_routes(mcp)

@@ -26,8 +26,9 @@ The 80/20 rule means roughly **80% of weekly training volume at low intensity** 
 ### Hard 20% (Zone 4–5)
 
 - Deliberately planned quality sessions only — not accidental hard efforts.
-- Includes: intervals, tempo runs, threshold work, hill repeats, fartlek, and race-pace segments.
+- Includes: threshold work, sprint intervals, hill repeats, and race-pace segments.
 - Purpose: raise VO2 max, lactate clearance, and race-specific fitness.
+- Polarized model: prescribe only low (Zone 1–2) or high (Zone 4–5) — never a Zone 3 "tempo" session.
 
 ### Gray zone to avoid (Zone 3)
 
@@ -50,17 +51,33 @@ If zone data is unavailable, estimate from average HR relative to lactate-thresh
 
 ## Workout types to propose
 
-When proposing training, use these templates and adapt to the athlete's level:
+Each type below maps to a single create tool that uploads the workout. The
+polarized regimen uses only low-intensity (Zone 1–2) and high-intensity
+(Zone 4–5) work — there is no Zone 3 "tempo" template.
 
-| Type | Purpose | Typical structure |
-|------|---------|-------------------|
-| Recovery run | Active rest | 20–40 min, Zone 1, very easy |
-| Easy run | Aerobic base | 30–60 min, Zone 2, conversational |
-| Long run | Endurance | 60–120+ min, mostly Zone 2 |
-| Tempo run | Lactate tolerance | 15–30 min at comfortably hard pace |
-| Threshold intervals | Race fitness | 3–5 × 5–8 min at threshold with short recovery |
-| VO2 max intervals | Top-end speed | 4–6 × 3–5 min hard with equal recovery |
-| Hill repeats | Strength + power | 6–10 × 60–90 s uphill, jog down |
+| Type | Tool | Purpose | Typical structure |
+|------|------|---------|-------------------|
+| Recovery run | `create_recovery_workout` | Active rest | 20–40 min, Zone 1, very easy |
+| Base run | `create_base_workout` | Aerobic base | 30–60 min, Zone 2, conversational |
+| Long run | `create_long_run_workout` | Endurance | 60–120+ min, mostly Zone 2 |
+| Weighted pack | `create_weighted_pack_workout` | Loaded aerobic (rucking) | Base run in Zone 2 carrying a pack |
+| Threshold intervals | `create_threshold_workout` | Race fitness | warmup + 15–30 min Zone 4 + cooldown |
+| Sprint intervals | `create_sprint_workout` | Top-end speed | 6–10 × 30–90 s Zone 5, jog recoveries |
+| Hill repeats | `create_hill_repeats_workout` | Strength + power | sprint structure, run uphill |
+
+Hill repeats and weighted pack are intent variants — structurally identical to
+sprints and base runs respectively (no separate elevation/load metric on the watch).
+
+### Create and schedule in one step
+
+Every `create_*_workout` tool (and `workout` / `combine_workout_templates`)
+accepts an optional `workout_date` (`YYYY-MM-DD`). When you know the day, pass it
+so the workout is uploaded **and** placed on the calendar in a single call — do
+not follow up with a separate `schedule_workout` step. Only call
+`schedule_workout` to (re)schedule a workout that already exists.
+
+For sessions that don't match a template, build steps directly with `workout`,
+or stitch templates together with `combine_workout_templates`.
 
 Always include at least one full rest or recovery day per week unless the athlete's profile indicates otherwise.
 

@@ -8,28 +8,37 @@ from nutrition_matrix import inject_nutrition_cues, intensity_for_template
 from workout_builder import build_running_workout, estimate_steps_duration_seconds
 
 TEMPLATE_TYPES = (
-    "easy",
+    "base",
     "long_run",
     "recovery",
-    "tempo",
     "threshold",
-    "strides",
     "sprint",
+    "hill_repeats",
+    "weighted_pack",
 )
 
+# Aliases are named variants that reuse another template's build. They differ
+# only in intent/label, not in structure or zone:
+# - hill_repeats: sprints run on a hill (no separate elevation metric)
+# - weighted_pack: a base run carrying a loaded pack (rucking)
+TEMPLATE_ALIASES: Dict[str, str] = {
+    "hill_repeats": "sprint",
+    "weighted_pack": "base",
+}
 
-def _easy_steps(duration_minutes: int) -> List[Dict[str, Any]]:
+
+def _base_steps(duration_minutes: int) -> List[Dict[str, Any]]:
     return [
         {
             "type": "interval",
             "duration_minutes": duration_minutes,
-            "workout_type": "easy",
+            "workout_type": "base",
         }
     ]
 
 
-def build_easy_workout_steps(duration_minutes: int) -> List[Dict[str, Any]]:
-    return _easy_steps(duration_minutes)
+def build_base_workout_steps(duration_minutes: int) -> List[Dict[str, Any]]:
+    return _base_steps(duration_minutes)
 
 
 def build_long_run_workout_steps(duration_minutes: int) -> List[Dict[str, Any]]:
@@ -52,26 +61,6 @@ def build_recovery_workout_steps(duration_minutes: int) -> List[Dict[str, Any]]:
     ]
 
 
-def build_tempo_workout_steps(
-    tempo_minutes: int,
-    warmup_minutes: int = 10,
-    cooldown_minutes: int = 10,
-) -> List[Dict[str, Any]]:
-    return [
-        {"type": "warmup", "duration_minutes": warmup_minutes, "workout_type": "warmup"},
-        {
-            "type": "interval",
-            "duration_minutes": tempo_minutes,
-            "workout_type": "tempo",
-        },
-        {
-            "type": "cooldown",
-            "duration_minutes": cooldown_minutes,
-            "workout_type": "cooldown",
-        },
-    ]
-
-
 def build_threshold_workout_steps(
     threshold_minutes: int,
     warmup_minutes: int = 10,
@@ -83,39 +72,6 @@ def build_threshold_workout_steps(
             "type": "interval",
             "duration_minutes": threshold_minutes,
             "workout_type": "threshold",
-        },
-        {
-            "type": "cooldown",
-            "duration_minutes": cooldown_minutes,
-            "workout_type": "cooldown",
-        },
-    ]
-
-
-def build_strides_workout_steps(
-    count: int = 6,
-    stride_seconds: int = 20,
-    recovery_seconds: int = 60,
-    warmup_minutes: int = 15,
-    cooldown_minutes: int = 10,
-) -> List[Dict[str, Any]]:
-    return [
-        {"type": "warmup", "duration_minutes": warmup_minutes, "workout_type": "warmup"},
-        {
-            "type": "repeat",
-            "iterations": count,
-            "steps": [
-                {
-                    "type": "interval",
-                    "duration_minutes": stride_seconds / 60.0,
-                    "workout_type": "strides",
-                },
-                {
-                    "type": "recovery",
-                    "duration_minutes": recovery_seconds / 60.0,
-                    "workout_type": "interval_recovery",
-                },
-            ],
         },
         {
             "type": "cooldown",
@@ -160,32 +116,18 @@ def build_sprint_workout_steps(
 
 def build_template_steps(template: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     params = params or {}
-    template_key = template.lower()
+    template_key = TEMPLATE_ALIASES.get(template.lower(), template.lower())
 
-    if template_key == "easy":
-        return build_easy_workout_steps(int(params.get("duration_minutes", 30)))
+    if template_key == "base":
+        return build_base_workout_steps(int(params.get("duration_minutes", 30)))
     if template_key == "long_run":
         return build_long_run_workout_steps(int(params.get("duration_minutes", 90)))
     if template_key == "recovery":
         return build_recovery_workout_steps(int(params.get("duration_minutes", 25)))
-    if template_key == "tempo":
-        return build_tempo_workout_steps(
-            tempo_minutes=int(params.get("duration_minutes", 20)),
-            warmup_minutes=int(params.get("warmup_minutes", 10)),
-            cooldown_minutes=int(params.get("cooldown_minutes", 10)),
-        )
     if template_key == "threshold":
         return build_threshold_workout_steps(
             threshold_minutes=int(params.get("duration_minutes", 20)),
             warmup_minutes=int(params.get("warmup_minutes", 10)),
-            cooldown_minutes=int(params.get("cooldown_minutes", 10)),
-        )
-    if template_key == "strides":
-        return build_strides_workout_steps(
-            count=int(params.get("count", 6)),
-            stride_seconds=int(params.get("stride_seconds", 20)),
-            recovery_seconds=int(params.get("recovery_seconds", 60)),
-            warmup_minutes=int(params.get("warmup_minutes", 15)),
             cooldown_minutes=int(params.get("cooldown_minutes", 10)),
         )
     if template_key == "sprint":
@@ -271,7 +213,7 @@ def build_combined_workout(
     steps = combine_template_steps(segments)
     if include_nutrition_cues:
         duration_minutes = estimate_combined_duration_minutes(segments)
-        primary_template = str(segments[0].get("template", "easy")) if segments else "easy"
+        primary_template = str(segments[0].get("template", "base")) if segments else "base"
         steps = inject_nutrition_cues(
             steps,
             duration_minutes,
@@ -281,11 +223,11 @@ def build_combined_workout(
 
 
 TEMPLATE_DESCRIPTIONS = {
-    "easy": "Single continuous easy aerobic run in HR zone 2.",
+    "base": "Single continuous easy aerobic run in HR zone 2.",
     "long_run": "Extended easy aerobic run in HR zone 2.",
     "recovery": "Short recovery jog in HR zone 1.",
-    "tempo": "Warmup, steady-state tempo block in HR zone 3, cooldown.",
     "threshold": "Warmup, lactate-threshold block in HR zone 4, cooldown.",
-    "strides": "Easy warmup, short accelerations in HR zone 5 with easy recoveries, cooldown.",
     "sprint": "Warmup, short max-effort sprints in HR zone 5 with jog recoveries, cooldown.",
+    "hill_repeats": "Sprints run uphill: warmup, max-effort hill reps in HR zone 5 with jog recoveries, cooldown.",
+    "weighted_pack": "Base aerobic run in HR zone 2 carrying a loaded pack (rucking).",
 }

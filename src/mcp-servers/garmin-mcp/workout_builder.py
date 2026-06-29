@@ -40,7 +40,7 @@ def _resolve_zone(step: Dict[str, Any], default_zone: Optional[int]) -> int:
         return zone_for_workout_type(str(step["workout_type"]))
     if default_zone is not None:
         return default_zone
-    return zone_for_workout_type("easy")
+    return zone_for_workout_type("base")
 
 
 def _minutes_to_seconds(minutes: float) -> float:

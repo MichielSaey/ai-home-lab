@@ -11,7 +11,7 @@ from workout_builder import (
 def test_build_running_workout_sets_name_and_duration() -> None:
     workout = build_running_workout(
         "Easy Run",
-        [{"type": "interval", "duration_minutes": 30, "workout_type": "easy"}],
+        [{"type": "interval", "duration_minutes": 30, "workout_type": "base"}],
         description="Morning jog",
     )
 
@@ -29,7 +29,7 @@ def test_build_workout_steps_supports_repeat_blocks() -> None:
                 "type": "repeat",
                 "iterations": 3,
                 "steps": [
-                    {"type": "interval", "duration_minutes": 2, "workout_type": "tempo"},
+                    {"type": "interval", "duration_minutes": 2, "workout_type": "threshold"},
                     {
                         "type": "recovery",
                         "duration_minutes": 1,
@@ -82,7 +82,7 @@ def test_extract_workout_id_handles_common_response_shapes() -> None:
     [
         ([], "At least one workout step is required."),
         (
-            [{"type": "interval", "workout_type": "easy"}],
+            [{"type": "interval", "workout_type": "base"}],
             "Each step requires duration_minutes.",
         ),
         (
@@ -95,7 +95,7 @@ def test_extract_workout_id_handles_common_response_shapes() -> None:
                     "type": "repeat",
                     "iterations": 0,
                     "steps": [
-                        {"type": "interval", "duration_minutes": 1, "workout_type": "easy"}
+                        {"type": "interval", "duration_minutes": 1, "workout_type": "base"}
                     ],
                 }
             ],

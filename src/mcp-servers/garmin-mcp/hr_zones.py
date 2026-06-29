@@ -18,14 +18,15 @@ from garminconnect import Garmin
 from garminconnect.workout import TargetType
 
 # Garmin workout templates map to these zone numbers (1-5).
+# Polarized model: prescribe only low (Z1-2) and high (Z4-5); never Z3.
 WORKOUT_ZONE_TARGETS: Dict[str, int] = {
     "recovery": 1,
-    "easy": 2,
+    "base": 2,
     "long_run": 2,
-    "tempo": 3,
+    "weighted_pack": 2,
     "threshold": 4,
-    "strides": 5,
     "sprint": 5,
+    "hill_repeats": 5,
     "interval_recovery": 1,
     "warmup": 2,
     "cooldown": 1,
