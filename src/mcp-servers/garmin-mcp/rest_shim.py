@@ -53,18 +53,6 @@ def parse_days_back(raw: Optional[str]) -> int:
     return value
 
 
-def parse_weeks(raw: Optional[str]) -> int:
-    if raw is None:
-        return 4
-    try:
-        value = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("weeks must be an integer between 1 and 12") from exc
-    if value < 1 or value > 12:
-        raise ValueError("weeks must be an integer between 1 and 12")
-    return value
-
-
 def parse_include_activities(raw: Optional[str]) -> bool:
     if raw is None:
         return False
@@ -82,7 +70,7 @@ async def health_handler(request: Request) -> Response:
     return response_from_health(server.health())
 
 
-async def weekly_report_handler(request: Request) -> Response:
+async def coaching_brief_handler(request: Request) -> Response:
     import server
 
     try:
@@ -93,7 +81,7 @@ async def weekly_report_handler(request: Request) -> Response:
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
-    result = server.get_weekly_report(
+    result = server.get_coaching_brief(
         days_back=days_back,
         include_activities=include_activities,
     )
@@ -102,22 +90,9 @@ async def weekly_report_handler(request: Request) -> Response:
     return JSONResponse(result, status_code=200)
 
 
-async def training_plan_handler(request: Request) -> Response:
-    import server
-
-    try:
-        weeks = parse_weeks(request.query_params.get("weeks"))
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-
-    result = server.get_training_plan(weeks=weeks)
-    if is_structured_error(result):
-        return response_from_structured_error(result)
-    return JSONResponse(result, status_code=200)
-
-
 def mount_rest_routes(mcp_instance: Any) -> None:
     """Register REST shim routes on the same Starlette app as the MCP endpoint."""
     mcp_instance.custom_route("/health", methods=["GET"])(health_handler)
-    mcp_instance.custom_route("/weekly-report", methods=["GET"])(weekly_report_handler)
-    mcp_instance.custom_route("/training-plan", methods=["GET"])(training_plan_handler)
+    mcp_instance.custom_route("/coaching-brief", methods=["GET"])(coaching_brief_handler)
+    # Legacy path — same handler.
+    mcp_instance.custom_route("/weekly-report", methods=["GET"])(coaching_brief_handler)

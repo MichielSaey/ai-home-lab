@@ -1,6 +1,5 @@
 import os
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from garminconnect import (
@@ -10,6 +9,7 @@ from garminconnect import (
 )
 from mcp.server.fastmcp import FastMCP
 
+from coaching_brief import build_coaching_brief
 from errors import (
     AUTH_FAILED,
     CONNECTION_ERROR,
@@ -24,7 +24,12 @@ from nutrition_matrix import (
     intensity_for_template,
 )
 from rest_shim import mount_rest_routes
-from training_plan import build_training_plan, first_event_date
+from training_plan import (
+    build_training_plan,
+    first_event_date,
+    last_event_date_from_payload,
+    latest_event_within_days,
+)
 from training_status import parse_training_status
 from weather import fetch_daily_weather
 from zones import (
@@ -68,8 +73,6 @@ GARMIN_HOME_LON = _env_float("GARMIN_HOME_LON")
 
 _CLIENT: Optional[Garmin] = None
 _CLIENT_ERROR: Optional[Dict[str, Any]] = None
-
-COACH_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "coach_prompt.md"
 
 ACTIVITY_HEADERS = [
     "name",
@@ -263,12 +266,6 @@ def _report_window(days: int, days_ago: int = 0) -> tuple[date, date]:
     return start_date, end_date
 
 
-def _load_coach_prompt() -> str:
-    if not COACH_PROMPT_PATH.exists():
-        return "You are a Garmin running coach. Follow the 80/20 rule: 80% easy, 20% hard."
-    return COACH_PROMPT_PATH.read_text(encoding="utf-8")
-
-
 def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
     raw = _call_optional(client, "get_activity_hr_in_timezones", str(activity_id))
     if isinstance(raw, dict) and raw.get("error"):
@@ -405,7 +402,8 @@ def _training_plan_table(
         return stats
 
     event_rows = events.get("Garmin Events", {}).get("Rows", [])
-    event_date = first_event_date(event_rows)
+    upcoming_event_date = first_event_date(event_rows)
+    last_event_date = last_event_date_from_payload(events)
     stat_rows = stats["Garmin Weekly Stats"]["Rows"]
 
     def load_at_week_end(week_end: date) -> dict[str, Any]:
@@ -416,7 +414,13 @@ def _training_plan_table(
 
     daily_weather = _weather_for_plan(stat_rows)
 
-    return build_training_plan(stat_rows, event_date, load_at_week_end, daily_weather)
+    return build_training_plan(
+        stat_rows,
+        upcoming_event_date,
+        load_at_week_end,
+        daily_weather,
+        last_event_date=last_event_date,
+    )
 
 
 def _weather_for_plan(
@@ -506,7 +510,7 @@ def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str
 def get_report(
     days: int = 7, days_ago: int = 0, include_activities: bool = False
 ) -> Dict[str, Any]:
-    """Build a rollable Garmin training report for a past window of days."""
+    """Rollable training report for a past day window (internal building block)."""
     if days < 1 or days > 90:
         return {"error": "days must be between 1 and 90"}
 
@@ -551,26 +555,23 @@ def get_report(
         report["activities"] = _activities_table(
             client, days=days, days_ago=days_ago, include_hr_zones=True
         )
+    report["coaching_brief"] = build_coaching_brief(
+        training_plan if isinstance(training_plan, list) else [],
+        events if isinstance(events, dict) else None,
+    )
     return report
 
 
 @mcp.tool()
-def get_training_plan(weeks: int = 4) -> list[dict[str, Any]] | Dict[str, Any]:
-    """Periodized plan: 4 past weeks + upcoming week with actuals, targets, and load."""
-    client, error = _get_client_or_error()
-    if error:
-        return error
+def get_coaching_brief(
+    days_back: int = 7, include_activities: bool = False
+) -> Dict[str, Any]:
+    """Primary coach tool — fetch all Garmin data and a deterministic coaching brief.
 
-    events = get_events()
-    if isinstance(events, dict) and events.get("error"):
-        return events
-
-    return _training_plan_table(client, events, weeks=weeks)
-
-
-@mcp.tool()
-def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> Dict[str, Any]:
-    """Coach review bundle: profile, predictions, events, and training plan. Slow — call on demand."""
+    Returns profile, race predictions, events, training_plan (lookback + upcoming
+    week rows), coaching_brief (review, assessment, next-week sessions,
+    ready-to-read narrative), and optional activities. Call once per coaching turn.
+    """
     return get_report(
         days=days_back,
         days_ago=0,
@@ -582,22 +583,6 @@ def get_weekly_report(days_back: int = 7, include_activities: bool = False) -> D
 def health() -> Dict[str, Any]:
     """Lightweight Garmin Connect reachability check (no weekly report)."""
     return _garmin_health_payload()
-
-
-@mcp.resource("garmin://coach-prompt")
-def coach_prompt() -> str:
-    """Coach instructions including polarized training rules and session workflow."""
-    return _load_coach_prompt()
-
-
-# Tool wrappers for the resources above. MCP clients that cannot read resources
-# (e.g. Odysseus) reach the same content through these tools. Keep both: the
-# resources stay for clients that do support resource reads.
-@mcp.tool()
-def get_coach_prompt() -> str:
-    """Return the running coach instructions (polarized training rules, session
-    workflow, output format). Call this first when acting as the coach."""
-    return _load_coach_prompt()
 
 
 @mcp.tool()
@@ -626,6 +611,12 @@ def report_for_days(days: int) -> Dict[str, Any]:
 
 @mcp.tool()
 def get_events(months_ahead: int = 12) -> Dict[str, Any]:
+    """Upcoming Garmin calendar events, plus the latest event from the past 4 weeks.
+
+    ``Garmin Events`` lists upcoming races only (same as before). When an event
+    occurred within the last 28 days, ``latest_event`` carries its title, date,
+    and target distance/duration from the calendar entry.
+    """
     client, error = _get_client_or_error()
     if error:
         return error
@@ -640,59 +631,78 @@ def get_events(months_ahead: int = 12) -> Dict[str, Any]:
     ]
     today = date.today()
     start_month = today.replace(day=1)
-    event_rows = []
-    seen_titles = set()
+    upcoming_rows: list[list[Any]] = []
+    scan_rows: list[list[Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
 
+    def _append_event(event: dict[str, Any]) -> None:
+        event_date_str = event.get("date")
+        if not event_date_str:
+            return
+        try:
+            event_date = date.fromisoformat(event_date_str)
+        except ValueError:
+            return
+        title = (event.get("title") or "").strip()
+        dedupe_key = (title.lower(), event_date_str)
+        if dedupe_key in seen_keys:
+            return
+        seen_keys.add(dedupe_key)
+        completion_target = event.get("completionTarget") or {}
+        row = [
+            title or event.get("title"),
+            event.get("itemType"),
+            event_date_str,
+            completion_target.get("value"),
+            completion_target.get("unit"),
+            completion_target.get("unitType"),
+        ]
+        scan_rows.append(row)
+        if event_date > today:
+            upcoming_rows.append(row)
+
+    # Upcoming list: forward from the current month.
     for offset in range(months_ahead):
-        year = start_month.year + (start_month.month - 1 + offset) // 12
-        month = (start_month.month - 1 + offset) % 12 + 1
+        total_month = (start_month.month - 1) + offset
+        year = start_month.year + total_month // 12
+        month = total_month % 12 + 1
         calendar_payload = _call_optional(
             client, "get_scheduled_workouts", year=year, month=month
         )
-        if not isinstance(calendar_payload, dict):
-            continue
-        if calendar_payload.get("error"):
+        if not isinstance(calendar_payload, dict) or calendar_payload.get("error"):
             continue
         calendar_items = calendar_payload.get("calendarItems", [])
         if not isinstance(calendar_items, list):
             continue
-
         for event in calendar_items:
-            if not isinstance(event, dict):
-                continue
-            if event.get("itemType") != "event":
-                continue
-            event_date_str = event.get("date")
-            if not event_date_str:
-                continue
-            try:
-                event_date = date.fromisoformat(event_date_str)
-            except ValueError:
-                continue
-            if event_date <= today:
-                continue
-            title = (event.get("title") or "").strip().lower()
-            if title in seen_titles:
-                continue
-            seen_titles.add(title)
+            if isinstance(event, dict) and event.get("itemType") == "event":
+                _append_event(event)
 
-            completion_target = event.get("completionTarget") or {}
-            event_rows.append(
-                [
-                    event.get("title"),
-                    event.get("itemType"),
-                    event_date_str,
-                    completion_target.get("value"),
-                    completion_target.get("unit"),
-                    completion_target.get("unitType"),
-                ]
-            )
+    # Latest recent event: scan ~2 months back (covers the 4-week window).
+    for offset in range(-2, 0):
+        total_month = (start_month.month - 1) + offset
+        year = start_month.year + total_month // 12
+        month = total_month % 12 + 1
+        calendar_payload = _call_optional(
+            client, "get_scheduled_workouts", year=year, month=month
+        )
+        if not isinstance(calendar_payload, dict) or calendar_payload.get("error"):
+            continue
+        calendar_items = calendar_payload.get("calendarItems", [])
+        if not isinstance(calendar_items, list):
+            continue
+        for event in calendar_items:
+            if isinstance(event, dict) and event.get("itemType") == "event":
+                _append_event(event)
+
+    upcoming_rows.sort(key=lambda row: row[2])
 
     return {
+        "latest_event": latest_event_within_days(scan_rows, today=today),
         "Garmin Events": {
             "Headers": event_columns,
-            "Rows": event_rows,
-        }
+            "Rows": upcoming_rows,
+        },
     }
 
 

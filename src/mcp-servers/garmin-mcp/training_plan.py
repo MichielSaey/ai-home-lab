@@ -14,11 +14,23 @@ WEEK_TYPE_SPECS = {
 }
 
 
-def weeks_until_event(from_date: date, event_date: date) -> int:
-    return max(0, (event_date - from_date).days // 7)
+def weeks_until_event(from_date: date, event_date: date) -> int | None:
+    """Whole weeks from ``from_date`` until ``event_date``.
+
+    Returns ``None`` when the event is already in the past relative to
+    ``from_date`` so we do not label post-race weeks as ``race`` / taper.
+    """
+    if event_date < from_date:
+        return None
+    return (event_date - from_date).days // 7
 
 
-def classify_week_type(week_number: int, weeks_until: int | None) -> str:
+def classify_week_type(
+    week_number: int,
+    weeks_until: int | None,
+    *,
+    schedule_recovery: bool = False,
+) -> str:
     if weeks_until is not None:
         if weeks_until == 0:
             return "race"
@@ -26,22 +38,113 @@ def classify_week_type(week_number: int, weeks_until: int | None) -> str:
             return "taper_final"
         if weeks_until == 2:
             return "taper_first"
-    if week_number % 4 == 0:
+    if schedule_recovery and week_number % 4 == 0:
         return "recovery"
     return "build"
 
 
+def _week_contains(week_start: date, week_end: date, event_date: date) -> bool:
+    return week_start <= event_date <= week_end
+
+
+def _is_recovery_week_after_event(
+    week_start: date, week_end: date, event_date: date
+) -> bool:
+    """True when this week is the first recovery week after a past event."""
+    if event_date >= week_end:
+        return False
+    recovery_end = event_date + timedelta(days=7)
+    return week_start <= recovery_end and week_end > event_date
+
+
+def classify_plan_week(
+    week_start: date,
+    week_end: date,
+    week_number: int,
+    upcoming_event_date: date | None,
+    last_event_date: date | None,
+    *,
+    is_current: bool = False,
+    schedule_recovery: bool = False,
+    today: date | None = None,
+) -> str:
+    """Week type for one plan row, including post-race recovery."""
+    today = today or date.today()
+    if last_event_date is not None:
+        if _week_contains(week_start, week_end, last_event_date) and not is_current:
+            return "race"
+        if is_current and last_event_date <= today and (today - last_event_date).days < 7:
+            return "recovery"
+        if last_event_date < week_end and _is_recovery_week_after_event(
+            week_start, week_end, last_event_date
+        ):
+            return "recovery"
+    weeks_until = (
+        weeks_until_event(week_end, upcoming_event_date)
+        if upcoming_event_date
+        else None
+    )
+    return classify_week_type(
+        week_number, weeks_until, schedule_recovery=schedule_recovery
+    )
+
+
+def _event_date_from_row(row: list[Any]) -> date | None:
+    try:
+        return date.fromisoformat(row[2])
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
+def _event_summary_row(row: list[Any]) -> dict[str, Any]:
+    event_date = _event_date_from_row(row)
+    return {
+        "title": row[0],
+        "date": event_date.isoformat() if event_date else row[2],
+        "target_value": row[3] if len(row) > 3 else None,
+        "target_unit": row[4] if len(row) > 4 else None,
+    }
+
+
+def latest_event_within_days(
+    event_rows: list[list[Any]],
+    *,
+    today: date | None = None,
+    days: int = 28,
+) -> dict[str, Any] | None:
+    """Most recent event that occurred within the last ``days`` (default 4 weeks)."""
+    today = today or date.today()
+    cutoff = today - timedelta(days=days)
+    latest: tuple[date, list[Any]] | None = None
+    for row in event_rows:
+        event_date = _event_date_from_row(row)
+        if event_date is None or event_date >= today or event_date < cutoff:
+            continue
+        if latest is None or event_date > latest[0]:
+            latest = (event_date, row)
+    return _event_summary_row(latest[1]) if latest else None
+
+
 def first_event_date(event_rows: list[list[Any]], today: date | None = None) -> date | None:
+    """Earliest upcoming event — used for taper/race week typing."""
     today = today or date.today()
     upcoming: list[date] = []
     for row in event_rows:
-        try:
-            event_date = date.fromisoformat(row[2])
-        except (ValueError, IndexError):
-            continue
-        if event_date > today:
+        event_date = _event_date_from_row(row)
+        if event_date is not None and event_date > today:
             upcoming.append(event_date)
     return min(upcoming) if upcoming else None
+
+
+def last_event_date_from_payload(events: dict[str, Any]) -> date | None:
+    """Parse ``latest_event`` from a ``get_events`` response."""
+    latest = events.get("latest_event")
+    if not isinstance(latest, dict):
+        return None
+    try:
+        return date.fromisoformat(str(latest.get("date"))[:10])
+    except (ValueError, TypeError):
+        return None
 
 
 def round_km(km: float | None) -> int | None:
@@ -134,15 +237,30 @@ def build_training_plan(
     event_date: date | None,
     load_at_week_end: Callable[[date], dict[str, Any]],
     daily_weather: Optional[dict[str, dict[str, Any]]] = None,
+    last_event_date: date | None = None,
+    today: date | None = None,
 ) -> list[dict[str, Any]]:
     if not stat_rows:
         return []
 
+    today = today or date.today()
     week_types: list[str] = []
     for i, row in enumerate(stat_rows):
+        week_start = date.fromisoformat(row[0])
         week_end = date.fromisoformat(row[1])
-        w_until = weeks_until_event(week_end, event_date) if event_date else None
-        week_types.append(classify_week_type(i + 1, w_until))
+        is_current = i == len(stat_rows) - 1
+        week_types.append(
+            classify_plan_week(
+                week_start,
+                week_end,
+                i + 1,
+                event_date,
+                last_event_date,
+                is_current=is_current,
+                schedule_recovery=False,
+                today=today,
+            )
+        )
 
     peak_km = max(
         (float(row[2] or 0) for row, wt in zip(stat_rows, week_types) if wt == "build"),
@@ -178,9 +296,17 @@ def build_training_plan(
     while plan_start.weekday() != 0:
         plan_start += timedelta(days=1)
     plan_week_num = len(stat_rows) + 1
-    plan_w_until = weeks_until_event(plan_start, event_date) if event_date else None
-    plan_type = classify_week_type(plan_week_num, plan_w_until)
     plan_end = plan_start + timedelta(days=6)
+    plan_type = classify_plan_week(
+        plan_start,
+        plan_end,
+        plan_week_num,
+        event_date,
+        last_event_date,
+        is_current=True,
+        schedule_recovery=True,
+        today=today,
+    )
 
     upcoming_block = {
         "week_description": "upcoming_week",

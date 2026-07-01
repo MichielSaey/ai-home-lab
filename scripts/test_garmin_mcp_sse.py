@@ -57,45 +57,48 @@ async def _run() -> None:
                 tool_names = sorted(t.name for t in tools.tools)
                 print(f"Tools ({len(tool_names)}): {', '.join(tool_names)}")
 
-                for required in ("get_training_plan", "get_weekly_report"):
-                    if required not in tool_names:
-                        raise RuntimeError(f"Missing tool: {required}")
+                removed = (
+                    "get_weekly_review",
+                    "get_plan_weeks",
+                    "get_training_plan",
+                    "get_weekly_report",
+                    "get_coach_prompt",
+                )
+                for name in removed:
+                    if name in tool_names:
+                        raise RuntimeError(f"Removed tool still exposed: {name}")
+
+                if "get_coaching_brief" not in tool_names:
+                    raise RuntimeError("Missing tool: get_coaching_brief")
 
                 async with asyncio.timeout(TOOL_TIMEOUT):
-                    plan_result = await session.call_tool(
-                        "get_training_plan", arguments={"weeks": 4}
+                    report_result = await session.call_tool(
+                        "get_coaching_brief", arguments={}
                     )
-                plan = _tool_payload(plan_result)
-                if isinstance(plan, dict) and plan.get("error"):
-                    raise RuntimeError(f"get_training_plan error: {plan['error']}")
-                if not isinstance(plan, list) or len(plan) != 5:
-                    raise RuntimeError(f"Expected 5 plan weeks, got: {plan!r}")
-                if plan[-1].get("week_description") != "upcoming_week":
-                    raise RuntimeError(f"Bad upcoming week: {plan[-1]}")
-                print("get_training_plan: OK")
+                report = _tool_payload(report_result)
+                if isinstance(report, dict) and report.get("error"):
+                    raise RuntimeError(f"get_coaching_brief error: {report['error']}")
+                if "training_plan" not in report:
+                    raise RuntimeError("get_coaching_brief missing training_plan")
+                if "plan_weeks" in report:
+                    raise RuntimeError("get_coaching_brief still has plan_weeks")
+                if "coaching_brief" not in report:
+                    raise RuntimeError("get_coaching_brief missing coaching_brief")
+                if "weekly_stats" in report:
+                    raise RuntimeError("get_coaching_brief still has weekly_stats")
+                print(
+                    f"get_coaching_brief: OK "
+                    f"(training_plan weeks={len(report['training_plan'])}, "
+                    f"profile keys={list(report.get('profile', {}).keys())[:3]})"
+                )
 
                 resources = await session.list_resources()
                 resource_uris = sorted(r.uri for r in resources.resources)
                 print(f"Resources: {', '.join(resource_uris)}")
                 if "garmin://weekly-report" not in resource_uris:
                     raise RuntimeError("Missing garmin://weekly-report resource")
-
-                async with asyncio.timeout(TOOL_TIMEOUT):
-                    report_result = await session.call_tool(
-                        "get_weekly_report", arguments={}
-                    )
-                report = _tool_payload(report_result)
-                if isinstance(report, dict) and report.get("error"):
-                    raise RuntimeError(f"get_weekly_report error: {report['error']}")
-                if "training_plan" not in report:
-                    raise RuntimeError("get_weekly_report missing training_plan")
-                if "weekly_stats" in report:
-                    raise RuntimeError("get_weekly_report still has weekly_stats")
-                print(
-                    f"get_weekly_report: OK "
-                    f"(plan weeks={len(report['training_plan'])}, "
-                    f"profile keys={list(report.get('profile', {}).keys())[:3]})"
-                )
+                if "garmin://coach-prompt" in resource_uris:
+                    raise RuntimeError("Removed resource still exposed: coach-prompt")
 
     print("ALL MCP FUNCTIONAL TESTS PASSED")
 

@@ -11,7 +11,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copy all Python modules in one step so new files (e.g. weather.py) cannot be
 # forgotten individually and break container health on startup.
 COPY src/mcp-servers/garmin-mcp/*.py /app/
-COPY src/mcp-servers/garmin-mcp/prompts/ /app/prompts/
 ENV MCP_HOST=0.0.0.0
 ENV MCP_PORT=8000
 ENV MCP_TRANSPORT=streamable-http

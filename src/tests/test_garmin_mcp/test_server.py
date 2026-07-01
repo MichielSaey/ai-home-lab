@@ -93,12 +93,12 @@ def test_get_weekly_stats_combines_distance_and_zones() -> None:
     assert current_week[3] == 20.0
 
 
-def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
+def test_get_coaching_brief_is_primary_coach_bundle() -> None:
     with (
         patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
         patch.object(server, "get_profile", return_value={"weight": 70}),
         patch.object(server, "get_race_predictions", return_value={"Garmin Race Predictions": {}}),
-        patch.object(server, "get_events", return_value={"Garmin Events": {}}),
+        patch.object(server, "get_events", return_value={"Garmin Events": {}, "latest_event": None}),
         patch.object(
             server,
             "_training_plan_table",
@@ -106,12 +106,33 @@ def test_get_weekly_report_is_tool_without_activities_by_default() -> None:
         ),
         patch.object(server, "_activities_table") as activities_table,
     ):
-        result = server.get_weekly_report()
+        result = server.get_coaching_brief()
 
     assert "training_plan" in result
-    assert "weekly_stats" not in result
+    assert "coaching_brief" in result
+    assert "plan_weeks" not in result
     assert "activities" not in result
     activities_table.assert_not_called()
+
+
+def test_get_coaching_brief_can_include_activities() -> None:
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
+        patch.object(server, "get_profile", return_value={}),
+        patch.object(server, "get_race_predictions", return_value={}),
+        patch.object(server, "get_events", return_value={}),
+        patch.object(server, "_training_plan_table", return_value=[]),
+        patch.object(server, "_activities_table", return_value={"Garmin Activities": {}}) as activities_table,
+    ):
+        result = server.get_coaching_brief(include_activities=True)
+
+    assert "activities" in result
+    activities_table.assert_called_once_with(
+        ANY,
+        days=7,
+        days_ago=0,
+        include_hr_zones=True,
+    )
 
 
 def test_weekly_report_resource_aliases_get_report() -> None:
@@ -141,23 +162,3 @@ def test_get_profile_handles_missing_user_profile() -> None:
         result = server.get_profile()
 
     assert result["error"] == "No profile returned from Garmin"
-
-
-def test_get_weekly_report_can_include_activities() -> None:
-    with (
-        patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
-        patch.object(server, "get_profile", return_value={}),
-        patch.object(server, "get_race_predictions", return_value={}),
-        patch.object(server, "get_events", return_value={}),
-        patch.object(server, "_training_plan_table", return_value=[]),
-        patch.object(server, "_activities_table", return_value={"Garmin Activities": {}}) as activities_table,
-    ):
-        result = server.get_weekly_report(include_activities=True)
-
-    assert "activities" in result
-    activities_table.assert_called_once_with(
-        ANY,
-        days=7,
-        days_ago=0,
-        include_hr_zones=True,
-    )

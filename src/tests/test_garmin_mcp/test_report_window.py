@@ -54,6 +54,7 @@ def test_get_report_includes_training_plan_and_window() -> None:
         result = server.get_report(days=7, days_ago=7)
 
     assert "training_plan" in result
+    assert "plan_weeks" not in result
     assert "weekly_stats" not in result
     assert result["training_plan"] == training_plan
     assert result["window"]["days"] == 7
