@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import ANY, MagicMock, patch
 
 import server
@@ -68,13 +68,13 @@ def test_get_activities_can_skip_hr_zones() -> None:
 
 def test_get_weekly_stats_combines_distance_and_zones() -> None:
     mock_client = MagicMock()
-    today = date.today()
+    yesterday = date.today() - timedelta(days=1)
     mock_client.get_activities_by_date.return_value = [
         {
             "activityId": 201,
             "activityType": {"typeKey": "running"},
             "distance": 10000,
-            "startTimeLocal": f"{today.isoformat()} 07:00:00",
+            "startTimeLocal": f"{yesterday.isoformat()} 07:00:00",
         }
     ]
     mock_client.get_activity_hr_in_timezones.return_value = [
@@ -102,7 +102,7 @@ def test_get_coaching_brief_is_primary_coach_bundle() -> None:
         patch.object(
             server,
             "_training_plan_table",
-            return_value=[{"week_description": "upcoming_week"}],
+            return_value=([{"week_description": "upcoming_week"}], []),
         ),
         patch.object(server, "_activities_table") as activities_table,
     ):
@@ -121,7 +121,7 @@ def test_get_coaching_brief_can_include_activities() -> None:
         patch.object(server, "get_profile", return_value={}),
         patch.object(server, "get_race_predictions", return_value={}),
         patch.object(server, "get_events", return_value={}),
-        patch.object(server, "_training_plan_table", return_value=[]),
+        patch.object(server, "_training_plan_table", return_value=([], [])),
         patch.object(server, "_activities_table", return_value={"Garmin Activities": {}}) as activities_table,
     ):
         result = server.get_coaching_brief(include_activities=True)

@@ -62,12 +62,17 @@ def activity_date(activity: dict[str, Any]) -> date | None:
 def weekly_stats_rows(
     activities: list[dict[str, Any]],
     activity_zones: dict[Any, dict[int, float]],
-    today: date,
+    anchor_end: date,
     num_blocks: int = 4,
 ) -> list[list[Any]]:
+    """Rolling 7-day blocks ending on ``anchor_end`` (typically yesterday).
+
+    Each block covers 7 complete days: [anchor_end - 6, anchor_end]. No partial
+    calendar week that includes today.
+    """
     rows: list[list[Any]] = []
     for block_index in range(num_blocks - 1, -1, -1):
-        block_end = today - timedelta(days=block_index * 7)
+        block_end = anchor_end - timedelta(days=block_index * 7)
         block_start = block_end - timedelta(days=6)
         block_distance_km = 0.0
         block_zones = {zone: 0.0 for zone in range(1, 6)}
@@ -102,12 +107,12 @@ def weekly_stats_rows(
 
 def weekly_hr_zone_rows(
     dated_zones: list[tuple[date, dict[int, float]]],
-    today: date,
+    anchor_end: date,
     num_blocks: int = 4,
 ) -> list[list[Any]]:
     rows: list[list[Any]] = []
     for block_index in range(num_blocks - 1, -1, -1):
-        block_end = today - timedelta(days=block_index * 7)
+        block_end = anchor_end - timedelta(days=block_index * 7)
         block_start = block_end - timedelta(days=6)
         block_zones = {zone: 0.0 for zone in range(1, 6)}
         for act_date, zones in dated_zones:

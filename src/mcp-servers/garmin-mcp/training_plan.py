@@ -7,7 +7,8 @@ from weather import average_temp, days_in_range
 # to minimize. easy_pct + hard_pct therefore sum to 100 for every week type.
 WEEK_TYPE_SPECS = {
     "build": {"multiplier": 1.10, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "prev"},
-    "recovery": {"multiplier": 0.80, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "prev"},
+    # Recovery volume is 80% of peak build-week km, not the prior partial week.
+    "recovery": {"multiplier": 0.80, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "peak"},
     "taper_first": {"multiplier": 0.80, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "peak"},
     "taper_final": {"multiplier": 0.64, "easy_pct": 85, "medium_pct": 0, "hard_pct": 15, "ref": "peak"},
     "race": {"multiplier": 0.30, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "prev"},
@@ -248,7 +249,7 @@ def build_training_plan(
     for i, row in enumerate(stat_rows):
         week_start = date.fromisoformat(row[0])
         week_end = date.fromisoformat(row[1])
-        is_current = i == len(stat_rows) - 1
+        is_latest = i == len(stat_rows) - 1
         week_types.append(
             classify_plan_week(
                 week_start,
@@ -256,7 +257,7 @@ def build_training_plan(
                 i + 1,
                 event_date,
                 last_event_date,
-                is_current=is_current,
+                is_current=is_latest,
                 schedule_recovery=False,
                 today=today,
             )
@@ -274,27 +275,25 @@ def build_training_plan(
         week_start = date.fromisoformat(row[0])
         week_end = date.fromisoformat(row[1])
         week_type = week_types[i]
-        is_current = i == len(stat_rows) - 1
+        is_latest = i == len(stat_rows) - 1
         load = load_at_week_end(week_end)
 
         block = {
-            "week_description": "current_week" if is_current else "past_week",
+            "week_description": "latest_week" if is_latest else "past_week",
             "week_type": week_type,
             "actuals": actuals_from_stat_row(row, load),
             "target": build_target(week_type, prev_km, peak_km),
         }
-        # Past weeks get an average temperature; the current week is broken into
-        # per-day blocks so the coach can plan around daily heat.
+        # Latest rolling block gets per-day weather for context; past blocks avg only.
         _enrich_week_weather(
-            block, week_start, week_end, daily_weather, include_days=is_current
+            block, week_start, week_end, daily_weather, include_days=is_latest
         )
         training_plan.append(block)
         prev_km = float(row[2] or 0) or prev_km
 
     last_end = date.fromisoformat(stat_rows[-1][1])
+    # Upcoming plan: next 7 days starting the day after the latest rolling block ends.
     plan_start = last_end + timedelta(days=1)
-    while plan_start.weekday() != 0:
-        plan_start += timedelta(days=1)
     plan_week_num = len(stat_rows) + 1
     plan_end = plan_start + timedelta(days=6)
     plan_type = classify_plan_week(

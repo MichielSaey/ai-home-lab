@@ -62,7 +62,7 @@ def test_activity_date_parses_start_time_local() -> None:
 
 
 def test_weekly_stats_rows_combines_distance_and_zones() -> None:
-    today = date(2026, 6, 17)
+    anchor_end = date(2026, 6, 16)
     activities = [
         {
             "activityId": 1,
@@ -71,37 +71,36 @@ def test_weekly_stats_rows_combines_distance_and_zones() -> None:
         }
     ]
     activity_zones = {1: {1: 600, 2: 0, 3: 0, 4: 0, 5: 0}}
-    rows = weekly_stats_rows(activities, activity_zones, today, num_blocks=2)
+    rows = weekly_stats_rows(activities, activity_zones, anchor_end, num_blocks=2)
 
     assert len(rows) == 2
-    current_week = rows[1]
-    assert current_week[2] == 5.0
-    assert current_week[3] == 10.0
+    latest_week = rows[1]
+    assert latest_week[0] == "2026-06-10"
+    assert latest_week[1] == "2026-06-16"
+    assert latest_week[2] == 5.0
+    assert latest_week[3] == 10.0
 
 
-def test_weekly_hr_zone_rows_rolls_up_by_calendar_week() -> None:
-    today = date(2026, 6, 17)
+def test_weekly_hr_zone_rows_rolls_up_by_rolling_block() -> None:
+    anchor_end = date(2026, 6, 16)
     dated_zones = [
         (date(2026, 6, 16), {1: 600, 2: 0, 3: 0, 4: 0, 5: 0}),
         (date(2026, 6, 10), {1: 0, 2: 0, 3: 1200, 4: 0, 5: 0}),
     ]
-    rows = weekly_hr_zone_rows(dated_zones, today, num_blocks=2)
+    rows = weekly_hr_zone_rows(dated_zones, anchor_end, num_blocks=2)
 
     assert len(rows) == 2
-    current_week = rows[1]
+    latest_week = rows[1]
     prior_week = rows[0]
 
-    assert current_week[0] == "2026-06-11"
-    assert current_week[1] == "2026-06-17"
-    assert current_week[2:7] == [10.0, 0.0, 0.0, 0.0, 0.0]
+    assert latest_week[0] == "2026-06-10"
+    assert latest_week[1] == "2026-06-16"
+    assert latest_week[2:7] == [10.0, 0.0, 20.0, 0.0, 0.0]
     # easy_min, medium_min, hard_min
-    assert current_week[7:10] == [10.0, 0.0, 0.0]
+    assert latest_week[7:10] == [10.0, 20.0, 0.0]
     # easy_pct, medium_pct, hard_pct
-    assert current_week[10:13] == [100.0, 0.0, 0.0]
+    assert latest_week[10:13] == [33.3, 66.7, 0.0]
 
-    assert prior_week[0] == "2026-06-04"
-    assert prior_week[1] == "2026-06-10"
-    assert prior_week[2:7] == [0.0, 0.0, 20.0, 0.0, 0.0]
-    # all Zone 3 → medium bucket only
-    assert prior_week[7:10] == [0.0, 20.0, 0.0]
-    assert prior_week[10:13] == [0.0, 100.0, 0.0]
+    assert prior_week[0] == "2026-06-03"
+    assert prior_week[1] == "2026-06-09"
+    assert prior_week[2:7] == [0.0, 0.0, 0.0, 0.0, 0.0]

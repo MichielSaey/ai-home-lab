@@ -362,14 +362,41 @@ def _activities_table(
     return payload
 
 
+def _recent_activity_summaries(
+    activities: list[dict[str, Any]], *, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Lightweight recent runs for the coach (includes today through yesterday)."""
+    summaries: list[dict[str, Any]] = []
+    for activity in sorted(
+        activities, key=lambda row: row.get("startTimeLocal", ""), reverse=True
+    ):
+        act_date = activity_date(activity)
+        if act_date is None:
+            continue
+        summaries.append(
+            {
+                "date": act_date.isoformat(),
+                "name": activity.get("activityName"),
+                "distance_km": round((activity.get("distance", 0) or 0) / 1000, 2),
+                "duration_min": round((activity.get("movingDuration", 0) or 0) / 60, 1),
+                "training_effect": activity.get("trainingEffectLabel"),
+                "avg_hr": activity.get("averageHR"),
+            }
+        )
+        if len(summaries) >= limit:
+            break
+    return summaries
+
+
 def _weekly_stats_table(
     client: Garmin, weeks: int = 4, *, end_date: Optional[date] = None
 ) -> Dict[str, Any] | dict[str, Any]:
     report_end = end_date or date.today()
-    lookback_days = weeks * 7 - 1
+    anchor_end = report_end - timedelta(days=1)
+    lookback_days = weeks * 7
     activities = _running_activities_in_range(
         client,
-        (report_end - timedelta(days=lookback_days)).isoformat(),
+        (anchor_end - timedelta(days=lookback_days - 1)).isoformat(),
         report_end.isoformat(),
     )
     if isinstance(activities, dict) and activities.get("error"):
@@ -385,8 +412,9 @@ def _weekly_stats_table(
     return {
         "Garmin Weekly Stats": {
             "Headers": WEEKLY_STATS_HEADERS,
-            "Rows": weekly_stats_rows(activities, activity_zones, report_end, num_blocks=weeks),
-        }
+            "Rows": weekly_stats_rows(activities, activity_zones, anchor_end, num_blocks=weeks),
+        },
+        "_activities": activities,
     }
 
 
@@ -396,11 +424,12 @@ def _training_plan_table(
     weeks: int = 4,
     *,
     end_date: Optional[date] = None,
-) -> list[dict[str, Any]] | dict[str, Any]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | dict[str, Any]:
     stats = _weekly_stats_table(client, weeks=weeks, end_date=end_date)
     if isinstance(stats, dict) and stats.get("error"):
         return stats
 
+    activities = stats.pop("_activities", [])
     event_rows = events.get("Garmin Events", {}).get("Rows", [])
     upcoming_event_date = first_event_date(event_rows)
     last_event_date = last_event_date_from_payload(events)
@@ -414,12 +443,15 @@ def _training_plan_table(
 
     daily_weather = _weather_for_plan(stat_rows)
 
-    return build_training_plan(
-        stat_rows,
-        upcoming_event_date,
-        load_at_week_end,
-        daily_weather,
-        last_event_date=last_event_date,
+    return (
+        build_training_plan(
+            stat_rows,
+            upcoming_event_date,
+            load_at_week_end,
+            daily_weather,
+            last_event_date=last_event_date,
+        ),
+        activities,
     )
 
 
@@ -493,7 +525,7 @@ def get_activities(
 
 @mcp.tool()
 def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str, Any]:
-    """Weekly running distance and HR zone rollups (one row per calendar week)."""
+    """Weekly running distance and HR zone rollups (rolling 7-day blocks through yesterday)."""
     client, error = _get_client_or_error()
     if error:
         return error
@@ -503,7 +535,10 @@ def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str
             report_end = date.fromisoformat(end_date)
         except ValueError:
             return {"error": "end_date must be an ISO date (YYYY-MM-DD)"}
-    return _weekly_stats_table(client, weeks=weeks, end_date=report_end)
+    result = _weekly_stats_table(client, weeks=weeks, end_date=report_end)
+    if isinstance(result, dict):
+        result.pop("_activities", None)
+    return result
 
 
 @mcp.tool()
@@ -535,9 +570,12 @@ def get_report(
     if isinstance(events, dict) and events.get("error"):
         return events
 
-    training_plan = _training_plan_table(client, events, end_date=end_date)
-    if isinstance(training_plan, dict) and training_plan.get("error"):
-        return training_plan
+    plan_result = _training_plan_table(client, events, end_date=end_date)
+    if isinstance(plan_result, dict) and plan_result.get("error"):
+        return plan_result
+
+    training_plan, plan_activities = plan_result
+    recent_activities = _recent_activity_summaries(plan_activities)
 
     report: Dict[str, Any] = {
         "window": {
@@ -558,6 +596,7 @@ def get_report(
     report["coaching_brief"] = build_coaching_brief(
         training_plan if isinstance(training_plan, list) else [],
         events if isinstance(events, dict) else None,
+        recent_activities=recent_activities,
     )
     return report
 

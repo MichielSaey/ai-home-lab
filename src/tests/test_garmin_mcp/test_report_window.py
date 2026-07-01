@@ -42,14 +42,16 @@ def test_report_window_rejects_negative_days_ago() -> None:
 
 def test_get_report_includes_training_plan_and_window() -> None:
     end_date = date.today() - timedelta(days=7)
-    training_plan = [{"week_description": "current_week"}]
+    training_plan = [{"week_description": "latest_week"}]
 
     with (
         patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
         patch.object(server, "get_profile", return_value={"weight": 70}),
         patch.object(server, "get_race_predictions", return_value={"Garmin Race Predictions": {}}),
         patch.object(server, "get_events", return_value={"Garmin Events": {}}),
-        patch.object(server, "_training_plan_table", return_value=training_plan) as training_plan_table,
+        patch.object(
+            server, "_training_plan_table", return_value=(training_plan, [])
+        ) as training_plan_table,
     ):
         result = server.get_report(days=7, days_ago=7)
 

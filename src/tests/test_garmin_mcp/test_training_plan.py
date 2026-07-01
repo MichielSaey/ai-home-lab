@@ -93,7 +93,7 @@ def test_past_race_week_labeled_race_not_recovery() -> None:
     )
 
 
-def test_build_training_plan_current_week_recovery_after_recent_race() -> None:
+def test_build_training_plan_latest_week_recovery_after_recent_race() -> None:
     today = date(2026, 6, 5)
     stat_rows = [
         ["2026-05-05", "2026-05-11", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
@@ -108,9 +108,12 @@ def test_build_training_plan_current_week_recovery_after_recent_race() -> None:
         last_event_date=date(2026, 6, 1),
         today=today,
     )
-    assert plan[-2]["week_description"] == "current_week"
+    assert plan[-2]["week_description"] == "latest_week"
     assert plan[-2]["week_type"] == "recovery"
     assert plan[-2]["target"]["easy_pct"] == 90
+    # Recovery upcoming week: 80% of peak build week (48 km) ≈ 38 km
+    assert plan[-1]["week_type"] == "recovery"
+    assert plan[-1]["target"]["distance_km"] == 38
 
 
 def test_build_training_plan_includes_upcoming_week() -> None:
@@ -129,7 +132,7 @@ def test_build_training_plan_includes_upcoming_week() -> None:
     plan = build_training_plan(stat_rows, event_date=None, load_at_week_end=load_at)
 
     assert len(plan) == 5
-    assert plan[-2]["week_description"] == "current_week"
+    assert plan[-2]["week_description"] == "latest_week"
     assert plan[-1]["week_description"] == "upcoming_week"
     # Lookback rows are not retroactively labeled recovery without an event taper.
     assert plan[3]["week_type"] == "build"
@@ -161,16 +164,16 @@ def test_build_training_plan_enriches_weather() -> None:
     )
 
     past_week = plan[0]
-    current_week = plan[1]
+    latest_week = plan[1]
     upcoming_week = plan[2]
 
     assert past_week["week_description"] == "past_week"
     assert past_week["avg_temp_c"] == 21.0
     assert "days" not in past_week
 
-    assert current_week["week_description"] == "current_week"
-    assert current_week["avg_temp_c"] == 32.0
-    assert [d["date"] for d in current_week["days"]] == [
+    assert latest_week["week_description"] == "latest_week"
+    assert latest_week["avg_temp_c"] == 32.0
+    assert [d["date"] for d in latest_week["days"]] == [
         "2026-06-02",
         "2026-06-03",
         "2026-06-04",
@@ -179,7 +182,7 @@ def test_build_training_plan_enriches_weather() -> None:
         "2026-06-07",
         "2026-06-08",
     ]
-    assert current_week["days"][0]["weather"] == "Clear sky"
+    assert latest_week["days"][0]["weather"] == "Clear sky"
 
     assert upcoming_week["week_description"] == "upcoming_week"
     assert "days" in upcoming_week

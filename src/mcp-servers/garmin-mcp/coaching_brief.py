@@ -6,6 +6,7 @@ without multi-turn tool orchestration or heavy reasoning.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -17,14 +18,92 @@ def _week_by_description(plan_weeks: list[dict[str, Any]], desc: str) -> dict[st
 
 
 def _latest_review_week(plan_weeks: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Most recent week with completed actuals — prefer last past_week."""
+    """Most recent rolling 7-day block (yesterday … yesterday−6)."""
+    latest = _week_by_description(plan_weeks, "latest_week")
+    if latest and latest.get("actuals", {}).get("distance_km") is not None:
+        return latest
     past = [w for w in plan_weeks if w.get("week_description") == "past_week"]
     if past:
         return past[-1]
-    current = _week_by_description(plan_weeks, "current_week")
-    if current and current.get("actuals", {}).get("distance_km") is not None:
-        return current
     return None
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def _activity_intensity_bucket(activity: dict[str, Any]) -> str:
+    """Rough bucket from Garmin labels — enough to avoid stacked easy days."""
+    label = str(
+        activity.get("training_effect")
+        or activity.get("trainingEffectLabel")
+        or ""
+    ).lower()
+    name = str(activity.get("name") or activity.get("activityName") or "").lower()
+    combined = f"{label} {name}"
+    if "recovery" in combined:
+        return "recovery"
+    if any(token in combined for token in ("tempo", "threshold", "interval", "anaerobic", "speed")):
+        return "hard"
+    aerobic_te = activity.get("aerobicTrainingEffect") or activity.get("aerobic_te")
+    if aerobic_te is not None and float(aerobic_te) >= 3.5:
+        return "hard"
+    return "easy"
+
+
+def _apply_recent_activities(
+    sessions: list[dict[str, Any]],
+    recent_activities: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Mark completed runs and avoid prescribing recovery right after easy work."""
+    if not recent_activities:
+        return sessions
+
+    by_date: dict[str, dict[str, Any]] = {}
+    for activity in recent_activities:
+        act_date = activity.get("date")
+        if act_date and act_date not in by_date:
+            by_date[act_date] = activity
+
+    out: list[dict[str, Any]] = []
+    for slot in sessions:
+        row = dict(slot)
+        session_date = _parse_iso_date(row.get("date"))
+        if session_date and session_date.isoformat() in by_date:
+            logged = by_date[session_date.isoformat()]
+            row["logged_activity"] = logged
+            if row.get("session") != "rest":
+                row["status"] = "completed"
+                row["completed_activity"] = logged
+            out.append(row)
+            continue
+
+        if (
+            row.get("session") == "recovery"
+            and session_date
+            and _had_recent_easy_work(by_date, session_date)
+        ):
+            row["session"] = "easy"
+            row["workout_type"] = "base"
+            row["adjustment_note"] = (
+                "Easy day instead of recovery — you already ran easy/recovery recently."
+            )
+        out.append(row)
+    return out
+
+
+def _had_recent_easy_work(by_date: dict[str, dict[str, Any]], session_date: date) -> bool:
+    for offset in range(1, 3):
+        prior = (session_date - timedelta(days=offset)).isoformat()
+        activity = by_date.get(prior)
+        if activity and _activity_intensity_bucket(activity) in ("easy", "recovery"):
+            return True
+    return False
 
 
 def _acwr_label(acwr: float | None) -> str:
@@ -95,13 +174,19 @@ def _volume_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[
 def _session_plan(week_type: str, target_km: int | None, acwr_label: str) -> list[dict[str, Any]]:
     """Polarized week skeleton — durations in minutes, no Zone 3."""
     if acwr_label == "spike" or week_type == "recovery":
+        # Post-race / deload: mostly easy, one short quality touch — not stacked recovery runs.
         return [
             {"day_offset": 0, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 1, "session": "recovery", "workout_type": "recovery", "duration_min": 30},
+            {"day_offset": 1, "session": "easy", "workout_type": "base", "duration_min": 35},
             {"day_offset": 2, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 3, "session": "easy", "workout_type": "base", "duration_min": 35},
-            {"day_offset": 4, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 5, "session": "easy", "workout_type": "base", "duration_min": 40},
+            {
+                "day_offset": 3,
+                "session": "quality",
+                "workout_type": "threshold",
+                "duration_min": 30,
+            },
+            {"day_offset": 4, "session": "easy", "workout_type": "recovery", "duration_min": 30},
+            {"day_offset": 5, "session": "rest", "workout_type": None, "duration_min": None},
             {"day_offset": 6, "session": "easy", "workout_type": "long_run", "duration_min": 50},
         ]
     if week_type in ("taper_first", "taper_final", "race"):
@@ -205,9 +290,11 @@ def _narrative(
         else:
             review_bits.append(f"on the plan target of {target_km} km")
     review_summary = (
-        "Your latest completed week was " + ", which is ".join(review_bits) + "."
+        "Your latest 7 days (through yesterday) were "
+        + ", which is ".join(review_bits)
+        + "."
         if review_bits
-        else "No completed week data available yet."
+        else "No completed 7-day block data available yet."
     )
 
     intensity = assessment.get("intensity") or {}
@@ -242,6 +329,7 @@ def _narrative(
 def build_coaching_brief(
     training_plan: list[dict[str, Any]],
     events: dict[str, Any] | None = None,
+    recent_activities: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build review, assessment, next-week proposal, and ready-to-read narrative."""
     review_week = _latest_review_week(training_plan)
@@ -265,9 +353,12 @@ def build_coaching_brief(
         upcoming_type = "recovery"
 
     focus = _focus_for_week(upcoming_type, intensity.get("flags") or [], acwr_label)
-    sessions = _attach_session_dates(
-        _session_plan(upcoming_type, upcoming_target, acwr_label),
-        upcoming or {},
+    sessions = _apply_recent_activities(
+        _attach_session_dates(
+            _session_plan(upcoming_type, upcoming_target, acwr_label),
+            upcoming or {},
+        ),
+        recent_activities,
     )
 
     coaching_note = focus
@@ -293,6 +384,7 @@ def build_coaching_brief(
     narrative = _narrative(review_week, upcoming, assessment, proposal)
 
     return {
+        "recent_activities": recent_activities or [],
         "review_week": {
             "week_description": review_week.get("week_description"),
             "week_type": review_week.get("week_type"),
