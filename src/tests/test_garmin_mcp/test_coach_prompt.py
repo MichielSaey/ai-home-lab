@@ -9,7 +9,18 @@ def test_load_coach_prompt_returns_80_20_guidance() -> None:
     assert "ACWR" in prompt
     assert "week_type" in prompt
     assert "training_plan" in prompt
+    assert "get_training_plan" in prompt
     assert "Taper overrides recovery" in prompt
+    assert "not** open with profile" in prompt
+
+
+def test_coach_prompt_prioritizes_training_plan_over_predictions() -> None:
+    prompt = server._load_coach_prompt()
+    plan_pos = prompt.find("get_training_plan")
+    predictions_pos = prompt.find("get_race_predictions")
+    assert plan_pos != -1
+    assert predictions_pos != -1
+    assert plan_pos < predictions_pos
 
 
 def test_coach_prompt_resource_aliases_loader() -> None:
