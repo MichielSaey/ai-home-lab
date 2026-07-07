@@ -313,11 +313,11 @@ def build_training_plan(
         "actuals": empty_actuals(),
         "target": build_target(plan_type, prev_km, peak_km),
     }
-    # The upcoming week is forecast-only, so per-day blocks carry the planning
-    # signal (temperature + conditions) for scheduling around heat.
-    _enrich_week_weather(
-        upcoming_block, plan_start, plan_end, daily_weather, include_days=True
-    )
+    # Upcoming week always gets a 7-day scaffold (dates for the agent). Weather
+    # fields are filled when GARMIN_HOME_LAT/LON are configured.
+    if daily_weather is not None:
+        upcoming_block["avg_temp_c"] = average_temp(daily_weather, plan_start, plan_end)
+    upcoming_block["days"] = days_in_range(daily_weather or {}, plan_start, plan_end)
     training_plan.append(upcoming_block)
 
     return training_plan

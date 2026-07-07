@@ -1,4 +1,5 @@
 from coaching_brief import build_coaching_brief
+from training_plan import build_training_plan
 
 
 def _sample_plan() -> list[dict]:
