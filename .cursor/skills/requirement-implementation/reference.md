@@ -44,7 +44,8 @@ Do NOT modify:
 - src/mcp-servers/garmin-mcp/*
 
 When done:
-- Run: python3 -m pytest src/tests/test_garmin_mcp/ -q (if Garmin untouched, skip)
+- Validate compose: `docker compose -f src/mcp-servers/docker-compose.yml config`
+- Run: `python3 -m pytest src/tests/test_garmin_mcp/ -q` when Garmin code changed
 - Return: files changed, decisions, manual user steps (do not push)
 ```
 

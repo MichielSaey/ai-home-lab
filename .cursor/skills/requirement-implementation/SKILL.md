@@ -162,6 +162,7 @@ Do not push directly to `main` when an open PR exists for the same branch — me
 | MCP servers | `src/mcp-servers/<name>/`, register in `src/mcp-servers/docker-compose.yml` |
 | Env vars | Root `.env.example` only |
 | Garmin tests | `python3 -m pytest src/tests/test_garmin_mcp/ -v` |
+| Compose validate | `docker compose -f src/mcp-servers/docker-compose.yml config` |
 | Docs | Update `docs/PLAN.md` status when a track step completes |
 | Scope | Smallest correct diff; no drive-by refactors |
 
