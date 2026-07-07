@@ -57,18 +57,10 @@ User request: "Add Actual Budget MCP and remove Garmin workout prescriptions"
 
 1. `explore` agent — map MCP patterns and affected files
 2. Branch `cursor/actual-budget-garmin-coaching-d886`
-3. Two `generalPurpose` agents **in parallel for analysis**, or **sequentially for implementation**:
+3. Two `generalPurpose` agents — **parallel only if disjoint files** (e.g. compose vs Garmin module); parent integrates and commits once:
    - Agent A: actual-mcp compose + env + docs
    - Agent B: coaching_brief prescription removal + tests + skill docs
-4. Parent integrates, tests, PR, Bugbot loop, merge
-
-For true parallel implementation, create a branch per agent, then merge into the combined feature branch in the parent before push:
-
-```bash
-git checkout -b cursor/<combined-name>-d886
-git merge cursor/<slice-a>-d886
-git merge cursor/<slice-b>-d886
-```
+4. Parent runs tests, commits, pushes, PR, Bugbot loop, merge
 
 ## PR body template
 

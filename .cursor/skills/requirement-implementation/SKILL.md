@@ -66,13 +66,15 @@ Launch `generalPurpose` subagents (or domain-specific types when available) with
 - Test commands to run before commit
 - Instruction: commit locally, do **not** push (parent agent owns PR)
 
-**Parallelize** when slices are independent — but only one subagent writes/commits at a time on the shared branch. Either:
+**Parallelize read-only work** (explore, analysis) freely.
 
-- Launch parallel agents for **read-only analysis**, then one implementation agent; or
-- Launch parallel implementation agents on **separate branches**, then integrate in the parent; or
-- Run implementation subagents **sequentially** on the same branch (safest default).
+**Implementation subagents** on the shared `/workspace` tree:
 
-Never have two write-capable subagents commit concurrently on `/workspace`.
+- **Default (safest):** run **sequentially** on one feature branch.
+- **Parallel implementation** only when slices touch **disjoint file sets**; subagents return changes without pushing; the **parent agent** reviews, runs tests, and makes a single commit.
+- Do **not** launch multiple write-capable subagents that each `git commit` on the same branch — commits can race or block push.
+
+A single working tree can only be checked out to one branch. Per-slice branches require **sequential** checkout and merge by the parent, not parallel subagents on different branches.
 
 Each subagent prompt should include:
 
