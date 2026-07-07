@@ -68,6 +68,8 @@ def test_build_coaching_brief_spike_downgrades_proposal() -> None:
     assert brief["assessment"]["acwr_label"] == "spike"
     assert brief["next_week_proposal"]["week_type"] == "recovery"
     assert brief["next_week_proposal"]["target_km"] == 34
+    assert brief["upcoming_week"]["target"]["distance_km"] == 34
+    assert "34 km" in brief["narrative"]["proposal_summary"]
 
 
 def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -> None:

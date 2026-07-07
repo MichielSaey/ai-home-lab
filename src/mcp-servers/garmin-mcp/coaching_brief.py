@@ -172,7 +172,14 @@ def _narrative(
     upcoming_type = (upcoming or {}).get("week_type", "build")
     upcoming_target = ((upcoming or {}).get("target") or {}).get("distance_km")
     proposal_summary = proposal.get("focus") or ""
-    if upcoming_target is not None:
+    proposal_target_km = proposal.get("target_km")
+    proposal_week_type = proposal.get("week_type", upcoming_type)
+    if proposal_target_km is not None:
+        proposal_summary = (
+            f"Upcoming {proposal_week_type} week target: {proposal_target_km} km. "
+            f"{proposal_summary}"
+        )
+    elif upcoming_target is not None:
         proposal_summary = (
             f"Upcoming {upcoming_type} week target: {upcoming_target} km. {proposal_summary}"
         )
@@ -240,6 +247,10 @@ def build_coaching_brief(
 
     narrative = _narrative(review_week, upcoming, assessment, proposal)
 
+    upcoming_target_block = dict((upcoming or {}).get("target") or {})
+    if upcoming_target is not None:
+        upcoming_target_block["distance_km"] = upcoming_target
+
     return {
         "recent_activities": recent_activities or [],
         "review_week": {
@@ -250,7 +261,7 @@ def build_coaching_brief(
         },
         "upcoming_week": {
             "week_type": upcoming_type,
-            "target": upcoming.get("target") if upcoming else None,
+            "target": upcoming_target_block or None,
         },
         "assessment": assessment,
         "next_week_proposal": proposal,
