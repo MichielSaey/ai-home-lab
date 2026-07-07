@@ -57,10 +57,12 @@ User request: "Add Actual Budget MCP and remove Garmin workout prescriptions"
 
 1. `explore` agent — map MCP patterns and affected files
 2. Branch `cursor/actual-budget-garmin-coaching-d886`
-3. Two `generalPurpose` agents in parallel:
+3. Two `generalPurpose` agents **in parallel for analysis**, or **sequentially for implementation**:
    - Agent A: actual-mcp compose + env + docs
    - Agent B: coaching_brief prescription removal + tests + skill docs
 4. Parent integrates, tests, PR, Bugbot loop, merge
+
+For true parallel implementation, use separate branches per agent and merge in the parent before push.
 
 ## PR body template
 

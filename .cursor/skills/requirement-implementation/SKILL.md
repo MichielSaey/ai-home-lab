@@ -66,9 +66,13 @@ Launch `generalPurpose` subagents (or domain-specific types when available) with
 - Test commands to run before commit
 - Instruction: commit locally, do **not** push (parent agent owns PR)
 
-**Parallelize** when slices are independent (e.g. new MCP service + unrelated Garmin change).
+**Parallelize** when slices are independent — but only one subagent writes/commits at a time on the shared branch. Either:
 
-**Serialize** when one slice depends on another's output.
+- Launch parallel agents for **read-only analysis**, then one implementation agent; or
+- Launch parallel implementation agents on **separate branches**, then integrate in the parent; or
+- Run implementation subagents **sequentially** on the same branch (safest default).
+
+Never have two write-capable subagents commit concurrently on `/workspace`.
 
 Each subagent prompt should include:
 
