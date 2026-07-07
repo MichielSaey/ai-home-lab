@@ -33,17 +33,15 @@ def _proposal_days(upcoming: dict[str, Any] | None) -> list[dict[str, Any]]:
     days = (upcoming or {}).get("days") or []
     out: list[dict[str, Any]] = []
     for day in days:
-        if not isinstance(day, dict):
+        if not isinstance(day, dict) or day.get("date") is None:
             continue
-        row: dict[str, Any] = {}
-        if day.get("date") is not None:
-            row["date"] = day["date"]
-        if day.get("avg_temp_c") is not None:
-            row["avg_temp_c"] = day["avg_temp_c"]
-        if day.get("weather") is not None:
-            row["weather"] = day["weather"]
-        if row:
-            out.append(row)
+        out.append(
+            {
+                "date": day["date"],
+                "avg_temp_c": day.get("avg_temp_c"),
+                "weather": day.get("weather"),
+            }
+        )
     return out
 
 

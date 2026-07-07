@@ -93,6 +93,20 @@ def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -
     assert all("duration_min" not in day for day in days)
 
 
+def test_build_coaching_brief_proposal_days_without_weather() -> None:
+    stat_rows = [
+        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+    ]
+    plan = build_training_plan(
+        stat_rows, event_date=None, load_at_week_end=lambda _e: {}
+    )
+    brief = build_coaching_brief(plan)
+    days = brief["next_week_proposal"]["days"]
+    assert len(days) == 7
+    assert days[0]["date"] == "2026-06-02"
+    assert days[0]["avg_temp_c"] is None
+
+
 def test_build_coaching_brief_empty_plan() -> None:
     brief = build_coaching_brief([])
     assert brief.get("error") == "no_review_week"
