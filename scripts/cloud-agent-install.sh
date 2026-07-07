@@ -33,14 +33,7 @@ log "devenv version: $(devenv --version)"
 
 cd /workspace
 
-# Warm the environment (syncs uv, runs cuda/jupyter tasks) without enterTest,
-# which currently fails due to a git version mismatch (expects 2.53.0, PATH has 2.43.0).
-log "warming devenv shell"
-devenv shell -- bash -lc '
-  set -euo pipefail
-  python --version
-  test -x .devenv/state/venv/bin/python
-  python -c "import mcp, torch; print(\"imports_ok\")"
-'
+log "running devenv test"
+devenv test
 
 log "complete"

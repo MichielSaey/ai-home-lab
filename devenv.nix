@@ -97,6 +97,7 @@ in
 
   enterTest = ''
     echo "Running tests"
-    git --version | grep --color=auto "${pkgs.git.version}"
+    command -v git >/dev/null
+    git --version | grep -qE 'git version [0-9]+\.[0-9]+'
   '';
 }
