@@ -62,7 +62,13 @@ User request: "Add Actual Budget MCP and remove Garmin workout prescriptions"
    - Agent B: coaching_brief prescription removal + tests + skill docs
 4. Parent integrates, tests, PR, Bugbot loop, merge
 
-For true parallel implementation, use separate branches per agent and merge in the parent before push.
+For true parallel implementation, create a branch per agent, then merge into the combined feature branch in the parent before push:
+
+```bash
+git checkout -b cursor/<combined-name>-d886
+git merge cursor/<slice-a>-d886
+git merge cursor/<slice-b>-d886
+```
 
 ## PR body template
 

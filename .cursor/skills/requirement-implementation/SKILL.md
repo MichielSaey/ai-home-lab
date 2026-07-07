@@ -93,13 +93,15 @@ Parent agent after subagents return:
 1. Review diffs for scope creep and convention drift.
 2. Run tests (`python3 -m pytest src/tests/…` for Garmin MCP; project-specific commands otherwise).
 3. Fix integration issues between parallel slices.
-4. Commit and push:
+4. Stage any parent-agent edits, commit only when there are changes, then push:
 
 ```bash
 git add -A
-git commit -m "<clear message>"
+git diff --cached --quiet || git commit -m "<clear message>"
 git push -u origin cursor/<descriptive-name>-d886
 ```
+
+If subagents already committed, skip the empty commit and push their commits directly.
 
 Commit and push **before** Bugbot review when iterating on fixes.
 
@@ -136,7 +138,12 @@ Do **not** merge with open high-severity findings unless the user overrides.
 
 ### 8. Merge to main
 
-When Bugbot is clean and tests pass:
+**Prefer PR merge** when PR tooling is available:
+
+1. Ensure Bugbot is clean and tests pass on the feature branch.
+2. Merge the PR into `main` via PR management tool or `gh pr merge`.
+
+**Direct merge** only when PR creation is blocked by repo settings:
 
 ```bash
 git checkout main && git pull origin main
@@ -144,7 +151,7 @@ git merge cursor/<descriptive-name>-d886
 git push origin main
 ```
 
-If PR tooling is available, merge via PR instead. If PR creation is blocked by repo settings, fast-forward merge to `main` is acceptable after review.
+Do not push directly to `main` when an open PR exists for the same branch — merge through the PR instead.
 
 ## Repo conventions (quick reference)
 
