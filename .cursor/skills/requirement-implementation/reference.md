@@ -19,6 +19,17 @@ Use `uncommitted changes` only when reviewing dirty working tree.
 
 Use `natural language` + `Change Description` only if diff computation fails (last resort).
 
+### Retry rules (from review-bugbot)
+
+| Failure | Action |
+|---------|--------|
+| Wrong invocation (missing path, wrong prompt shape) | Fix and retry **once** immediately |
+| Could not compute diff | Retry once with `Diff: natural language` + `Change Description` |
+| Other subagent failure | Retry once with same prompt |
+| Same failure after retry | Stop; report blocker to user |
+
+Do not fix findings or rerun review unless the user explicitly asks.
+
 ### Finding table format
 
 | Severity | Location (file:line) | Finding |
