@@ -1,12 +1,12 @@
-"""Deterministic coaching brief — review, assessment, and next-week proposal.
+"""Deterministic coaching brief — review, assessment, and next-week context.
 
-Computed server-side so the LLM only narrates preloaded output (Langflow-style),
-without multi-turn tool orchestration or heavy reasoning.
+Computed server-side for past-week analysis and high-level proposal context.
+The agent (LLM) proposes day-by-day workouts using week_type, targets, focus,
+and per-day weather — not pre-filled session prescriptions.
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Any
 
 
@@ -28,82 +28,23 @@ def _latest_review_week(plan_weeks: list[dict[str, Any]]) -> dict[str, Any] | No
     return None
 
 
-def _parse_iso_date(value: str | None) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except (ValueError, TypeError):
-        return None
-
-
-def _activity_intensity_bucket(activity: dict[str, Any]) -> str:
-    """Rough bucket from Garmin labels — enough to avoid stacked easy days."""
-    label = str(
-        activity.get("training_effect")
-        or activity.get("trainingEffectLabel")
-        or ""
-    ).lower()
-    name = str(activity.get("name") or activity.get("activityName") or "").lower()
-    combined = f"{label} {name}"
-    if "recovery" in combined:
-        return "recovery"
-    if any(token in combined for token in ("tempo", "threshold", "interval", "anaerobic", "speed")):
-        return "hard"
-    aerobic_te = activity.get("aerobicTrainingEffect") or activity.get("aerobic_te")
-    if aerobic_te is not None and float(aerobic_te) >= 3.5:
-        return "hard"
-    return "easy"
-
-
-def _apply_recent_activities(
-    sessions: list[dict[str, Any]],
-    recent_activities: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    """Mark completed runs and avoid prescribing recovery right after easy work."""
-    if not recent_activities:
-        return sessions
-
-    by_date: dict[str, dict[str, Any]] = {}
-    for activity in recent_activities:
-        act_date = activity.get("date")
-        if act_date and act_date not in by_date:
-            by_date[act_date] = activity
-
+def _proposal_days(upcoming: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Per-day weather context for the agent — no workout prescriptions."""
+    days = (upcoming or {}).get("days") or []
     out: list[dict[str, Any]] = []
-    for slot in sessions:
-        row = dict(slot)
-        session_date = _parse_iso_date(row.get("date"))
-        if session_date and session_date.isoformat() in by_date:
-            logged = by_date[session_date.isoformat()]
-            row["logged_activity"] = logged
-            if row.get("session") != "rest":
-                row["status"] = "completed"
-                row["completed_activity"] = logged
-            out.append(row)
+    for day in days:
+        if not isinstance(day, dict):
             continue
-
-        if (
-            row.get("session") == "recovery"
-            and session_date
-            and _had_recent_easy_work(by_date, session_date)
-        ):
-            row["session"] = "easy"
-            row["workout_type"] = "base"
-            row["adjustment_note"] = (
-                "Easy day instead of recovery — you already ran easy/recovery recently."
-            )
-        out.append(row)
+        row: dict[str, Any] = {}
+        if day.get("date") is not None:
+            row["date"] = day["date"]
+        if day.get("avg_temp_c") is not None:
+            row["avg_temp_c"] = day["avg_temp_c"]
+        if day.get("weather") is not None:
+            row["weather"] = day["weather"]
+        if row:
+            out.append(row)
     return out
-
-
-def _had_recent_easy_work(by_date: dict[str, dict[str, Any]], session_date: date) -> bool:
-    for offset in range(1, 3):
-        prior = (session_date - timedelta(days=offset)).isoformat()
-        activity = by_date.get(prior)
-        if activity and _activity_intensity_bucket(activity) in ("easy", "recovery"):
-            return True
-    return False
 
 
 def _acwr_label(acwr: float | None) -> str:
@@ -169,85 +110,6 @@ def _volume_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[
     else:
         vs = "below_target"
     return {"distance_km": dist, "target_km": target_km, "delta_km": delta, "vs_target": vs}
-
-
-def _session_plan(week_type: str, target_km: int | None, acwr_label: str) -> list[dict[str, Any]]:
-    """Polarized week skeleton — durations in minutes, no Zone 3."""
-    if acwr_label == "spike" or week_type == "recovery":
-        # Post-race / deload: mostly easy, one short quality touch — not stacked recovery runs.
-        return [
-            {"day_offset": 0, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 1, "session": "easy", "workout_type": "base", "duration_min": 35},
-            {"day_offset": 2, "session": "rest", "workout_type": None, "duration_min": None},
-            {
-                "day_offset": 3,
-                "session": "quality",
-                "workout_type": "threshold",
-                "duration_min": 30,
-            },
-            {"day_offset": 4, "session": "easy", "workout_type": "recovery", "duration_min": 30},
-            {"day_offset": 5, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 6, "session": "easy", "workout_type": "long_run", "duration_min": 50},
-        ]
-    if week_type in ("taper_first", "taper_final", "race"):
-        hard_tool = "sprint" if week_type == "race" else "threshold"
-        hard_min = 25 if week_type == "taper_final" else 35
-        return [
-            {"day_offset": 0, "session": "rest", "workout_type": None, "duration_min": None},
-            {"day_offset": 1, "session": "easy", "workout_type": "base", "duration_min": 30},
-            {"day_offset": 2, "session": "easy", "workout_type": "recovery", "duration_min": 25},
-            {"day_offset": 3, "session": "rest", "workout_type": None, "duration_min": None},
-            {
-                "day_offset": 4,
-                "session": "quality",
-                "workout_type": hard_tool,
-                "duration_min": hard_min,
-            },
-            {"day_offset": 5, "session": "easy", "workout_type": "base", "duration_min": 25},
-            {"day_offset": 6, "session": "easy", "workout_type": "long_run", "duration_min": 40},
-        ]
-    # build (default)
-    hard_min = 45
-    long_min = 70 if (target_km or 0) >= 25 else 55
-    return [
-        {"day_offset": 0, "session": "rest", "workout_type": None, "duration_min": None},
-        {
-            "day_offset": 1,
-            "session": "quality",
-            "workout_type": "threshold",
-            "duration_min": hard_min,
-        },
-        {"day_offset": 2, "session": "recovery", "workout_type": "recovery", "duration_min": 30},
-        {"day_offset": 3, "session": "easy", "workout_type": "base", "duration_min": 40},
-        {"day_offset": 4, "session": "rest", "workout_type": None, "duration_min": None},
-        {"day_offset": 5, "session": "easy", "workout_type": "base", "duration_min": 35},
-        {
-            "day_offset": 6,
-            "session": "long",
-            "workout_type": "long_run",
-            "duration_min": long_min,
-        },
-    ]
-
-
-def _attach_session_dates(
-    sessions: list[dict[str, Any]], upcoming: dict[str, Any]
-) -> list[dict[str, Any]]:
-    days = upcoming.get("days") or []
-    out: list[dict[str, Any]] = []
-    for slot in sessions:
-        row = dict(slot)
-        offset = row.pop("day_offset", 0)
-        if offset < len(days) and isinstance(days[offset], dict):
-            day = days[offset]
-            row["date"] = day.get("date")
-            row["avg_temp_c"] = day.get("avg_temp_c")
-            row["weather"] = day.get("weather")
-            temp = day.get("avg_temp_c")
-            if temp is not None and temp >= 28 and row.get("session") == "quality":
-                row["heat_note"] = "Move quality to a cooler day if possible; coach by HR."
-        out.append(row)
-    return out
 
 
 def _focus_for_week(week_type: str, intensity_flags: list[str], acwr_label: str) -> str:
@@ -331,7 +193,7 @@ def build_coaching_brief(
     events: dict[str, Any] | None = None,
     recent_activities: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build review, assessment, next-week proposal, and ready-to-read narrative."""
+    """Build review, assessment, next-week context, and ready-to-read narrative."""
     review_week = _latest_review_week(training_plan)
     upcoming = _week_by_description(training_plan, "upcoming_week")
     if not review_week:
@@ -353,13 +215,7 @@ def build_coaching_brief(
         upcoming_type = "recovery"
 
     focus = _focus_for_week(upcoming_type, intensity.get("flags") or [], acwr_label)
-    sessions = _apply_recent_activities(
-        _attach_session_dates(
-            _session_plan(upcoming_type, upcoming_target, acwr_label),
-            upcoming or {},
-        ),
-        recent_activities,
-    )
+    days = _proposal_days(upcoming)
 
     coaching_note = focus
     if events and events.get("latest_event"):
@@ -370,7 +226,7 @@ def build_coaching_brief(
         "week_type": upcoming_type,
         "target_km": upcoming_target,
         "focus": focus,
-        "sessions": sessions,
+        "days": days,
         "coaching_note": coaching_note,
     }
 

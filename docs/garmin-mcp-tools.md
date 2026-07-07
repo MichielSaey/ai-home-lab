@@ -6,7 +6,7 @@ Personal coach stack: one read tool, atomic helpers, workout actions.
 
 | Tool | Purpose |
 |------|---------|
-| **`get_coaching_brief`** | **Only tool for week review.** Profile, events, predictions, `training_plan`, `coaching_brief` (narrative + next-week sessions). |
+| **`get_coaching_brief`** | **Only tool for week review.** Profile, events, predictions, `training_plan`, `coaching_brief` (narrative + next-week context). |
 | `get_report` | Same data shape with `days` / `days_ago` window — for shifted lookback, not normal coaching. |
 
 ## Athlete context (profile skill / narrow questions)
@@ -57,7 +57,7 @@ All three are already inside `get_coaching_brief`.
 
 - `profile`, `race_predictions`, `events`
 - **`training_plan`** — week rows (past, current, upcoming): actuals, targets, load, weather
-- **`coaching_brief`** — `narrative`, `assessment`, `next_week_proposal`
+- **`coaching_brief`** — `narrative`, `assessment`, `next_week_proposal` (week_type, target_km, focus, per-day weather in `days`; agent proposes workouts), `recent_activities`
 - `window`, optional `activities`
 
 Coaching rules live in `coaching_brief.py` and `training_plan.py` (not a separate prompt tool).

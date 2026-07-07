@@ -608,8 +608,9 @@ def get_coaching_brief(
     """Primary coach tool — fetch all Garmin data and a deterministic coaching brief.
 
     Returns profile, race predictions, events, training_plan (lookback + upcoming
-    week rows), coaching_brief (review, assessment, next-week sessions,
-    ready-to-read narrative), and optional activities. Call once per coaching turn.
+    week rows), coaching_brief (review, assessment, next-week context with
+    per-day weather, ready-to-read narrative), and optional activities. Call once
+    per coaching turn.
     """
     return get_report(
         days=days_back,
