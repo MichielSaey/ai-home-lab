@@ -28,7 +28,7 @@ Use `natural language` + `Change Description` only if diff computation fails (la
 | Other subagent failure | Retry once with same prompt |
 | Same failure after retry | Stop; report blocker to user |
 
-Do not fix findings or rerun review unless the user explicitly asks.
+The **Bugbot subagent** reviews only — it does not fix findings. The **parent agent** following this skill fixes findings in step 7 and re-runs Bugbot until clean.
 
 ### Finding table format
 
