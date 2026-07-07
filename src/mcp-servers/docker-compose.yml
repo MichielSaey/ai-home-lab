@@ -29,12 +29,15 @@ services:
     image: sstefanov/actual-mcp:latest
     env_file: ../../.env
     environment:
+      ACTUAL_DATA_DIR: /data
       ACTUAL_SERVER_URL: ${ACTUAL_SERVER_URL}
       ACTUAL_PASSWORD: ${ACTUAL_PASSWORD}
       ACTUAL_BUDGET_SYNC_ID: ${ACTUAL_BUDGET_SYNC_ID:-}
       ACTUAL_BUDGET_ENCRYPTION_PASSWORD: ${ACTUAL_BUDGET_ENCRYPTION_PASSWORD:-}
       BEARER_TOKEN: ${ACTUAL_BEARER_TOKEN}
     command: ["--sse", "--enable-write", "--enable-bearer"]
+    volumes:
+      - actual-mcp-data:/data
     networks:
       - mcp-internal
       - edge
@@ -57,3 +60,6 @@ networks:
     driver: bridge
   mcp-internal:
     internal: true
+
+volumes:
+  actual-mcp-data:

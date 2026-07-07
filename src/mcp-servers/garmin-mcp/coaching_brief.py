@@ -211,6 +211,9 @@ def build_coaching_brief(
     upcoming_target = ((upcoming or {}).get("target") or {}).get("distance_km")
     if acwr_label == "spike" and upcoming_type == "build":
         upcoming_type = "recovery"
+        base_km = actuals.get("distance_km") or upcoming_target
+        if base_km is not None:
+            upcoming_target = round(float(base_km) * 0.8)
 
     focus = _focus_for_week(upcoming_type, intensity.get("flags") or [], acwr_label)
     days = _proposal_days(upcoming)
