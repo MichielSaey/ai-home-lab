@@ -7,7 +7,7 @@ Personal coach stack: one read tool, atomic helpers, workout actions.
 | Tool | Purpose |
 |------|---------|
 | **`get_coaching_brief`** | **Only tool for week review.** Profile, events, predictions, `training_plan`, `coaching_brief` (narrative + next-week context). |
-| `get_report` | Same data shape with `days` / `days_ago` window — for shifted lookback, not normal coaching. |
+| `get_report` | Same data shape with `days` / `days_ago` window — ends on yesterday for the default 7-day review block (today excluded from rollups). |
 
 ## Athlete context (profile skill / narrow questions)
 
@@ -23,7 +23,7 @@ All three are already inside `get_coaching_brief`.
 
 | Tool | Purpose |
 |------|---------|
-| `get_weekly_stats` | Weekly distance + HR zone table — no targets or periodization |
+| `get_weekly_stats` | Weekly distance + HR zone table — rolling 7-day blocks through yesterday; optional `end_date` is the latest block anchor (not today). |
 | `get_activities` | Activity list with optional HR zones |
 
 ## Workouts (schedule on Garmin)
@@ -58,7 +58,8 @@ All three are already inside `get_coaching_brief`.
 - `profile`, `race_predictions`, `events`
 - **`training_plan`** — week rows (past, current, upcoming): actuals, targets, load, weather
 - **`coaching_brief`** — `narrative`, `assessment`, `next_week_proposal` (week_type, target_km, focus, per-day weather in `days`; agent proposes workouts), `recent_activities`
-- `window`, optional `activities`
+- `window` — default 7-day review ends **yesterday** (today may appear only in `recent_activities`)
+- optional `activities`
 
 Coaching rules live in `coaching_brief.py` and `training_plan.py` (not a separate prompt tool).
 

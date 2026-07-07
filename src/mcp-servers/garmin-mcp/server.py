@@ -24,6 +24,7 @@ from nutrition_matrix import (
     intensity_for_template,
 )
 from rest_shim import mount_rest_routes
+from rolling_week import anchor_end as compute_anchor_end, window_bounds
 from training_plan import (
     build_training_plan,
     first_event_date,
@@ -256,14 +257,7 @@ def _garmin_health_payload() -> Dict[str, Any]:
 
 
 def _report_window(days: int, days_ago: int = 0) -> tuple[date, date]:
-    if days < 1:
-        raise ValueError("days must be at least 1")
-    if days_ago < 0:
-        raise ValueError("days_ago must be zero or positive")
-
-    end_date = date.today() - timedelta(days=days_ago)
-    start_date = end_date - timedelta(days=days - 1)
-    return start_date, end_date
+    return window_bounds(days, days_ago)
 
 
 def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
@@ -323,14 +317,10 @@ def _activities_table(
     days_ago: int = 0,
     include_hr_zones: bool = True,
 ) -> Dict[str, Any] | dict[str, Any]:
-    if days is not None:
-        window_start, window_end = _report_window(days, days_ago)
-        start_date = window_start.isoformat()
-        end_date = window_end.isoformat()
-    else:
-        today = date.today()
-        start_date = (today - timedelta(days=days_back)).isoformat()
-        end_date = today.isoformat()
+    effective_days = days if days is not None else days_back
+    window_start, window_end = window_bounds(effective_days, days_ago)
+    start_date = window_start.isoformat()
+    end_date = window_end.isoformat()
 
     activities = _running_activities_in_range(client, start_date, end_date)
     if isinstance(activities, dict) and activities.get("error"):
@@ -346,20 +336,18 @@ def _activities_table(
         )
         rows.append(_activity_row(activity, zones, include_hr_zones=include_hr_zones))
 
-    payload: Dict[str, Any] = {
+    return {
         "Garmin Activities": {
             "Headers": headers,
             "Rows": rows,
-        }
-    }
-    if days is not None:
-        payload["window"] = {
+        },
+        "window": {
             "start_date": start_date,
             "end_date": end_date,
-            "days": days,
+            "days": effective_days,
             "days_ago": days_ago,
-        }
-    return payload
+        },
+    }
 
 
 def _recent_activity_summaries(
@@ -389,15 +377,14 @@ def _recent_activity_summaries(
 
 
 def _weekly_stats_table(
-    client: Garmin, weeks: int = 4, *, end_date: Optional[date] = None
+    client: Garmin, weeks: int = 4, *, anchor_end: Optional[date] = None
 ) -> Dict[str, Any] | dict[str, Any]:
-    report_end = end_date or date.today()
-    anchor_end = report_end - timedelta(days=1)
+    anchor = anchor_end if anchor_end is not None else compute_anchor_end()
     lookback_days = weeks * 7
     activities = _running_activities_in_range(
         client,
-        (anchor_end - timedelta(days=lookback_days - 1)).isoformat(),
-        report_end.isoformat(),
+        (anchor - timedelta(days=lookback_days - 1)).isoformat(),
+        date.today().isoformat(),
     )
     if isinstance(activities, dict) and activities.get("error"):
         return activities
@@ -412,7 +399,7 @@ def _weekly_stats_table(
     return {
         "Garmin Weekly Stats": {
             "Headers": WEEKLY_STATS_HEADERS,
-            "Rows": weekly_stats_rows(activities, activity_zones, anchor_end, num_blocks=weeks),
+            "Rows": weekly_stats_rows(activities, activity_zones, anchor, num_blocks=weeks),
         },
         "_activities": activities,
     }
@@ -423,9 +410,9 @@ def _training_plan_table(
     events: Dict[str, Any],
     weeks: int = 4,
     *,
-    end_date: Optional[date] = None,
+    anchor_end: Optional[date] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | dict[str, Any]:
-    stats = _weekly_stats_table(client, weeks=weeks, end_date=end_date)
+    stats = _weekly_stats_table(client, weeks=weeks, anchor_end=anchor_end)
     if isinstance(stats, dict) and stats.get("error"):
         return stats
 
@@ -525,17 +512,21 @@ def get_activities(
 
 @mcp.tool()
 def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str, Any]:
-    """Weekly running distance and HR zone rollups (rolling 7-day blocks through yesterday)."""
+    """Weekly running distance and HR zone rollups (rolling 7-day blocks).
+
+    ``end_date``, when provided, is the anchor end of the latest complete block
+    (typically yesterday), not a fetch-through date.
+    """
     client, error = _get_client_or_error()
     if error:
         return error
-    report_end: Optional[date] = None
+    anchor: Optional[date] = None
     if end_date is not None:
         try:
-            report_end = date.fromisoformat(end_date)
+            anchor = date.fromisoformat(end_date)
         except ValueError:
             return {"error": "end_date must be an ISO date (YYYY-MM-DD)"}
-    result = _weekly_stats_table(client, weeks=weeks, end_date=report_end)
+    result = _weekly_stats_table(client, weeks=weeks, anchor_end=anchor)
     if isinstance(result, dict):
         result.pop("_activities", None)
     return result
@@ -550,7 +541,8 @@ def get_report(
         return {"error": "days must be between 1 and 90"}
 
     try:
-        start_date, end_date = _report_window(days, days_ago)
+        anchor = compute_anchor_end(days_ago)
+        start_date, end_date = window_bounds(days, days_ago)
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -570,7 +562,7 @@ def get_report(
     if isinstance(events, dict) and events.get("error"):
         return events
 
-    plan_result = _training_plan_table(client, events, end_date=end_date)
+    plan_result = _training_plan_table(client, events, anchor_end=anchor)
     if isinstance(plan_result, dict) and plan_result.get("error"):
         return plan_result
 

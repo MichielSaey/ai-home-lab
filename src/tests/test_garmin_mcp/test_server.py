@@ -31,6 +31,14 @@ def test_get_activities_uses_readable_headers_and_zone_minutes() -> None:
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
         result = server.get_activities(days_back=7)
 
+    yesterday = date.today() - timedelta(days=1)
+    week_start = yesterday - timedelta(days=6)
+    mock_client.get_activities_by_date.assert_called_once_with(
+        week_start.isoformat(),
+        yesterday.isoformat(),
+    )
+    assert result["window"]["end_date"] == yesterday.isoformat()
+
     table = result["Garmin Activities"]
     assert table["Headers"][0] == "name"
     assert table["Headers"][-1] == "zone_5_min"
