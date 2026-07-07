@@ -67,9 +67,17 @@ def test_build_coaching_brief_spike_downgrades_proposal() -> None:
     brief = build_coaching_brief(plan)
     assert brief["assessment"]["acwr_label"] == "spike"
     assert brief["next_week_proposal"]["week_type"] == "recovery"
-    assert brief["next_week_proposal"]["target_km"] == 34
-    assert brief["upcoming_week"]["target"]["distance_km"] == 34
-    assert "34 km" in brief["narrative"]["proposal_summary"]
+    assert brief["next_week_proposal"]["target_km"] == 21
+    assert brief["upcoming_week"]["target"]["distance_km"] == 21
+    assert "21 km" in brief["narrative"]["proposal_summary"]
+
+
+def test_build_coaching_brief_spike_caps_recovery_target_to_planned_volume() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["acwr"] = 1.45
+    plan[0]["actuals"]["distance_km"] = 60.0
+    brief = build_coaching_brief(plan)
+    assert brief["next_week_proposal"]["target_km"] == 21
 
 
 def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -> None:

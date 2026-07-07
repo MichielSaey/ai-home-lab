@@ -215,12 +215,16 @@ def build_coaching_brief(
     volume = _volume_assessment(actuals, target)
 
     upcoming_type = (upcoming or {}).get("week_type", "build")
-    upcoming_target = ((upcoming or {}).get("target") or {}).get("distance_km")
+    planned_target_km = ((upcoming or {}).get("target") or {}).get("distance_km")
+    upcoming_target = planned_target_km
     if acwr_label == "spike" and upcoming_type == "build":
         upcoming_type = "recovery"
-        base_km = actuals.get("distance_km") or upcoming_target
+        base_km = actuals.get("distance_km") or planned_target_km
         if base_km is not None:
-            upcoming_target = round(float(base_km) * 0.8)
+            deload_km = round(float(base_km) * 0.8)
+            if planned_target_km is not None:
+                deload_km = min(deload_km, int(planned_target_km))
+            upcoming_target = deload_km
 
     focus = _focus_for_week(upcoming_type, intensity.get("flags") or [], acwr_label)
     days = _proposal_days(upcoming)
