@@ -45,10 +45,7 @@ Do NOT modify:
 
 When done:
 - Run: python3 -m pytest src/tests/test_garmin_mcp/ -q (if Garmin untouched, skip)
-- Commit with clear message
-- Do not push
-
-Return: files changed, decisions, manual user steps
+- Return: files changed, decisions, manual user steps (do not push)
 ```
 
 ## Example: parallel dispatch

@@ -64,7 +64,7 @@ Launch `generalPurpose` subagents (or domain-specific types when available) with
 - Target branch name (already checked out)
 - Concrete file paths, patterns, and **do-not-touch** boundaries
 - Test commands to run before commit
-- Instruction: commit locally, do **not** push (parent agent owns PR)
+- Instruction: implement changes; **prefer not to commit** (parent agent owns integration and commit). If the subagent already committed, parent reviews before push.
 
 **Parallelize read-only work** (explore, analysis) freely.
 
@@ -84,7 +84,7 @@ Branch: cursor/<name>-d886
 Context: <docs, patterns, constraints>
 Files to change: <paths>
 Do NOT modify: <paths>
-When done: run <test command>, commit with clear message, do not push
+When done: run <test command>, return summary (do not push; avoid committing unless unavoidable)
 Return: summary of changes, decisions, manual user steps
 ```
 
@@ -93,8 +93,8 @@ Return: summary of changes, decisions, manual user steps
 Parent agent after subagents return:
 
 1. Review diffs for scope creep and convention drift.
-2. Run tests (`python3 -m pytest src/tests/…` for Garmin MCP; project-specific commands otherwise).
-3. Fix integration issues between parallel slices.
+2. Fix integration issues between parallel slices.
+3. Run tests (`python3 -m pytest src/tests/…` for Garmin MCP; project-specific commands otherwise).
 4. Stage any parent-agent edits, commit only when there are changes, then push:
 
 ```bash
