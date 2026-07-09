@@ -6,6 +6,7 @@ from workout_templates import (
     build_base_workout_steps,
     build_combined_workout,
     build_sprint_workout_steps,
+    build_threshold_workout_steps,
     build_template_steps,
     build_template_workout,
     combine_template_steps,
@@ -35,6 +36,20 @@ def test_build_sprint_workout_steps_uses_repeat_block() -> None:
     steps = build_sprint_workout_steps(repetitions=3)
     assert steps[1]["type"] == "repeat"
     assert steps[1]["iterations"] == 3
+
+
+def test_build_threshold_workout_steps_uses_repeat_block() -> None:
+    steps = build_threshold_workout_steps(repetitions=5, interval_minutes=4)
+    assert steps[1]["type"] == "repeat"
+    assert steps[1]["iterations"] == 5
+    assert steps[1]["steps"][0]["workout_type"] == "threshold"
+    assert steps[1]["steps"][0]["duration_minutes"] == 4
+    assert steps[1]["steps"][1]["duration_minutes"] == 2
+
+
+def test_build_threshold_workout_steps_default_recovery() -> None:
+    steps = build_threshold_workout_steps()
+    assert steps[1]["steps"][1]["duration_minutes"] == 2
 
 
 def test_hill_repeats_alias_matches_sprint_structure() -> None:

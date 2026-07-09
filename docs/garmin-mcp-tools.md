@@ -33,7 +33,7 @@ All three are already inside `get_coaching_brief`.
 | `create_base_workout` | Easy Z2 aerobic |
 | `create_recovery_workout` | Z1 recovery |
 | `create_long_run_workout` | Long easy |
-| `create_threshold_workout` | Z4 intervals |
+| `create_threshold_workout` | Z4 threshold repeats (`repetitions`, `interval_minutes`, 2 min recovery default) |
 | `create_sprint_workout` | Z5 sprints |
 | `create_hill_repeats_workout` | Z5 hill sprints |
 | `create_weighted_pack_workout` | Loaded pack / ruck |

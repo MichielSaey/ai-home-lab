@@ -1055,20 +1055,24 @@ def create_recovery_workout(
 
 @mcp.tool()
 def create_threshold_workout(
-    duration_minutes: int = 20,
+    repetitions: int = 4,
+    interval_minutes: int = 5,
+    recovery_minutes: int = 2,
     warmup_minutes: int = 10,
     cooldown_minutes: int = 10,
     name: str = "Threshold Run",
     include_nutrition_cues: bool = False,
     workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a lactate-threshold run with warmup and cooldown (main block HR
+    """Create lactate-threshold repeats with warmup and cooldown (efforts in HR
     zone 4). Pass workout_date (YYYY-MM-DD) to also schedule it in the same call."""
     return _create_from_template(
         "threshold",
         name,
         params={
-            "duration_minutes": duration_minutes,
+            "repetitions": repetitions,
+            "interval_minutes": interval_minutes,
+            "recovery_minutes": recovery_minutes,
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
         },
