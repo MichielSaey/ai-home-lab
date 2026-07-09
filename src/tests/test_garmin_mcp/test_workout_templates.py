@@ -126,6 +126,11 @@ def test_combine_template_steps_validation_errors(segments, message: str) -> Non
         combine_template_steps(segments)
 
 
+def test_build_template_steps_rejects_threshold_duration_minutes() -> None:
+    with pytest.raises(ValueError, match="no longer accepts duration_minutes"):
+        build_template_steps("threshold", {"duration_minutes": 20})
+
+
 def test_build_template_steps_rejects_unknown_template() -> None:
     with pytest.raises(ValueError, match="Unknown template 'fartlek'"):
         build_template_steps("fartlek")

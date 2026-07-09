@@ -138,6 +138,11 @@ def build_template_steps(template: str, params: Optional[Dict[str, Any]] = None)
     if template_key == "recovery":
         return build_recovery_workout_steps(int(params.get("duration_minutes", 25)))
     if template_key == "threshold":
+        if "duration_minutes" in params:
+            raise ValueError(
+                "threshold template no longer accepts duration_minutes; "
+                "use repetitions and interval_minutes instead."
+            )
         return build_threshold_workout_steps(
             repetitions=int(params.get("repetitions", 4)),
             interval_minutes=int(params.get("interval_minutes", 5)),
