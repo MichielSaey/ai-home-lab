@@ -34,9 +34,9 @@ services:
       ACTUAL_PASSWORD: ${ACTUAL_PASSWORD}
       ACTUAL_BUDGET_SYNC_ID: ${ACTUAL_BUDGET_SYNC_ID:-}
       ACTUAL_BUDGET_ENCRYPTION_PASSWORD: ${ACTUAL_BUDGET_ENCRYPTION_PASSWORD:-}
+      # Optional: set ACTUAL_BEARER_TOKEN in .env and add --enable-bearer to command
       # BEARER_TOKEN: ${ACTUAL_BEARER_TOKEN}
-    command: ["--sse", "--enable-write", "--enable-bearer"]
-    # command: ["--sse", "--enable-write", "--enable-bearer"]
+    command: ["--sse", "--enable-write"]
     volumes:
       - actual-mcp-data:/data
     networks:
