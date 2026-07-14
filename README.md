@@ -25,11 +25,13 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 | Odysseus | 7000 | Agent UI, memory, MCP client |
 | ntfy | 8091 | Push notifications (bundled with Odysseus) |
 | garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
+| actual-mcp | 3000 (internal) | Actual Budget MCP server (SSE) |
+| todoist-mcp | 3001 (internal) | Todoist MCP server (Streamable HTTP) |
 | chromadb / searxng | bundled with Odysseus | Vector store, search |
 
 ## Running locally
 
-1. Copy `.env.example` to `.env` at the **repo root** and fill in values. This one file configures garmin-mcp and Odysseus — you do not need `services/odysseus/.env`.
+1. Copy `.env.example` to `.env` at the **repo root** and fill in values. This one file configures garmin-mcp, actual-mcp, todoist-mcp, and Odysseus — you do not need `services/odysseus/.env`.
 2. Vendor Odysseus (first run only):
    ```bash
    ./scripts/ensure-odysseus.sh
@@ -135,7 +137,7 @@ Include these paths in your CasaOS or homelab backup routine.
 
 ```
 docker-compose.yml                    # root — includes mcp + services
-src/mcp-servers/docker-compose.yml    # garmin-mcp (code lives alongside)
+src/mcp-servers/docker-compose.yml    # garmin-mcp, actual-mcp, todoist-mcp
 services/docker-compose.yml           # Odysseus stack (includes vendored compose)
 casaos/docker-compose.yml             # optional CasaOS dashboard import
 services/odysseus/                    # cloned by scripts/ensure-odysseus.sh (gitignored except .gitkeep)

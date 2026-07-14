@@ -62,16 +62,29 @@ def build_recovery_workout_steps(duration_minutes: int) -> List[Dict[str, Any]]:
 
 
 def build_threshold_workout_steps(
-    threshold_minutes: int,
+    repetitions: int = 4,
+    interval_minutes: int = 5,
+    recovery_minutes: int = 2,
     warmup_minutes: int = 10,
     cooldown_minutes: int = 10,
 ) -> List[Dict[str, Any]]:
     return [
         {"type": "warmup", "duration_minutes": warmup_minutes, "workout_type": "warmup"},
         {
-            "type": "interval",
-            "duration_minutes": threshold_minutes,
-            "workout_type": "threshold",
+            "type": "repeat",
+            "iterations": repetitions,
+            "steps": [
+                {
+                    "type": "interval",
+                    "duration_minutes": interval_minutes,
+                    "workout_type": "threshold",
+                },
+                {
+                    "type": "recovery",
+                    "duration_minutes": recovery_minutes,
+                    "workout_type": "interval_recovery",
+                },
+            ],
         },
         {
             "type": "cooldown",
@@ -125,8 +138,15 @@ def build_template_steps(template: str, params: Optional[Dict[str, Any]] = None)
     if template_key == "recovery":
         return build_recovery_workout_steps(int(params.get("duration_minutes", 25)))
     if template_key == "threshold":
+        if "duration_minutes" in params:
+            raise ValueError(
+                "threshold template no longer accepts duration_minutes; "
+                "use repetitions and interval_minutes instead."
+            )
         return build_threshold_workout_steps(
-            threshold_minutes=int(params.get("duration_minutes", 20)),
+            repetitions=int(params.get("repetitions", 4)),
+            interval_minutes=int(params.get("interval_minutes", 5)),
+            recovery_minutes=int(params.get("recovery_minutes", 2)),
             warmup_minutes=int(params.get("warmup_minutes", 10)),
             cooldown_minutes=int(params.get("cooldown_minutes", 10)),
         )
@@ -226,7 +246,7 @@ TEMPLATE_DESCRIPTIONS = {
     "base": "Single continuous easy aerobic run in HR zone 2.",
     "long_run": "Extended easy aerobic run in HR zone 2.",
     "recovery": "Short recovery jog in HR zone 1.",
-    "threshold": "Warmup, lactate-threshold block in HR zone 4, cooldown.",
+    "threshold": "Warmup, lactate-threshold repeats in HR zone 4 with recoveries, cooldown.",
     "sprint": "Warmup, short max-effort sprints in HR zone 5 with jog recoveries, cooldown.",
     "hill_repeats": "Sprints run uphill: warmup, max-effort hill reps in HR zone 5 with jog recoveries, cooldown.",
     "weighted_pack": "Base aerobic run in HR zone 2 carrying a loaded pack (rucking).",

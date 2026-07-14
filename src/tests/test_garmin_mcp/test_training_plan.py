@@ -197,9 +197,21 @@ def test_build_training_plan_omits_weather_when_none() -> None:
         stat_rows, event_date=None, load_at_week_end=lambda _e: {}
     )
 
-    for block in plan:
-        assert "avg_temp_c" not in block
-        assert "days" not in block
+    past_week = plan[0]
+    upcoming_week = plan[1]
+    assert "avg_temp_c" not in past_week
+    assert "days" not in past_week
+    assert "avg_temp_c" not in upcoming_week
+    assert [day["date"] for day in upcoming_week["days"]] == [
+        "2026-06-02",
+        "2026-06-03",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-06",
+        "2026-06-07",
+        "2026-06-08",
+    ]
+    assert all(day["avg_temp_c"] is None for day in upcoming_week["days"])
 
 
 def test_parse_training_status_extracts_load() -> None:

@@ -1,7 +1,7 @@
 ---
 name: garmin-week-review
 description: "Garmin week review via get_coaching_brief — ACWR, intensity split, next-week proposal (garmin-mcp, agent mode)."
-version: 2.3.2
+version: 2.4.0
 category: health
 tags: [running, garmin, coaching, acwr, get_coaching_brief, garmin-mcp]
 status: published
@@ -58,12 +58,13 @@ Do **not** call any other tool before `get_coaching_brief` returns.
    - `load_check`
    - `proposal_summary`
    - `coaching_note`
-3. Add a day-by-day table from `coaching_brief.next_week_proposal.sessions`
-   (date, session, workout_type, duration_min, `status`/`logged_activity` if any,
-   heat_note if any). Skip or annotate days already marked `completed`.
-4. Mention recent runs from `coaching_brief.recent_activities` when relevant
-   (e.g. recovery run yesterday → do not prescribe another recovery today).
-5. Call `create_*_workout` only when the user asks to upload workouts to Garmin
+3. Propose a day-by-day workout plan yourself using:
+   - `next_week_proposal.week_type`, `target_km`, `focus`, `coaching_note`
+   - `next_week_proposal.days` for date, `avg_temp_c`, and `weather` (move hard
+     sessions off hot days when `avg_temp_c` ≥ 28)
+   - `recent_activities` when relevant (e.g. recovery run yesterday → avoid
+     stacking recovery today)
+4. Call `create_*_workout` only when the user asks to upload workouts to Garmin
    Connect (optional `workout_date`).
 
 ## Never call (wrong tools)
@@ -98,4 +99,4 @@ this skill. There is no fixture to invent.
 
 - First garmin MCP tool in the transcript ends with `get_coaching_brief`.
 - Numbers from `coaching_brief.narrative`, not placeholders.
-- Session dates from `next_week_proposal.sessions`.
+- Workout plan is agent-authored from `next_week_proposal` context and `days` weather.

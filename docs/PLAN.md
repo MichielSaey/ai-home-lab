@@ -15,7 +15,8 @@ Checklists, milestones, and GitHub issues. Architecture: [DESIGN.md](./DESIGN.md
 | Chainlit `agent_hub` | Removed |
 | `garmin_trainer` | Removed (A.6) |
 | ntfy | Bundled; mobile setup open (Track D) |
-| n8n, Proton bridge, actual-mcp | Planned |
+| n8n, Proton bridge | Planned |
+| actual-mcp (compose service) | Implemented (G.3); Odysseus wiring open (G.4) |
 | epub2audiobook | Implemented; #1 #2 open |
 | Garmin coach Phase 2 | Research only (Track B.2) |
 

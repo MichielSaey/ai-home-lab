@@ -25,8 +25,69 @@ services:
       start_period: 45s
     restart: unless-stopped
 
+  actual-mcp:
+    image: sstefanov/actual-mcp:latest
+    env_file: ../../.env
+    environment:
+      ACTUAL_DATA_DIR: /data
+      ACTUAL_SERVER_URL: ${ACTUAL_SERVER_URL}
+      ACTUAL_PASSWORD: ${ACTUAL_PASSWORD}
+      ACTUAL_BUDGET_SYNC_ID: ${ACTUAL_BUDGET_SYNC_ID:-}
+      ACTUAL_BUDGET_ENCRYPTION_PASSWORD: ${ACTUAL_BUDGET_ENCRYPTION_PASSWORD:-}
+      # Optional: set ACTUAL_BEARER_TOKEN in .env and add --enable-bearer to command
+      # BEARER_TOKEN: ${ACTUAL_BEARER_TOKEN}
+    command: ["--sse", "--enable-write"]
+    volumes:
+      - actual-mcp-data:/data
+    networks:
+      - mcp-internal
+      - edge
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('net').createConnection(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+
+  todoist-mcp:
+    build:
+      context: .
+      dockerfile: todoist-mcp/Dockerfile
+    env_file: ../../.env
+    environment:
+      TODOIST_API_KEY: ${TODOIST_API_KEY}
+      HOST: 0.0.0.0
+      PORT: 3001
+      ALLOWED_HOSTS: todoist-mcp,localhost,127.0.0.1
+    networks:
+      - mcp-internal
+      - edge
+    expose:
+      - "3001"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:3001/health',r=>{r.statusCode===200?process.exit(0):process.exit(1)}).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
 networks:
   edge:
     driver: bridge
   mcp-internal:
     internal: true
+
+volumes:
+  actual-mcp-data:

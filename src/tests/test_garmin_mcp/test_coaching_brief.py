@@ -1,4 +1,5 @@
 from coaching_brief import build_coaching_brief
+from training_plan import build_training_plan
 
 
 def _sample_plan() -> list[dict]:
@@ -52,7 +53,11 @@ def test_build_coaching_brief_includes_narrative_and_proposal() -> None:
     assert "latest 7 days" in brief["narrative"]["review_summary"]
     assert "ACWR 0.84" in brief["narrative"]["load_check"]
     assert brief["next_week_proposal"]["target_km"] == 21
-    assert len(brief["next_week_proposal"]["sessions"]) == 7
+    assert "sessions" not in brief["next_week_proposal"]
+    days = brief["next_week_proposal"]["days"]
+    assert len(days) == 7
+    assert days[0] == {"date": "2026-07-07", "avg_temp_c": 18, "weather": "clear"}
+    assert days[6] == {"date": "2026-07-13", "avg_temp_c": 30, "weather": "hot"}
     assert "medium_pct_creep" in brief["assessment"]["intensity"]["flags"]
 
 
@@ -62,9 +67,20 @@ def test_build_coaching_brief_spike_downgrades_proposal() -> None:
     brief = build_coaching_brief(plan)
     assert brief["assessment"]["acwr_label"] == "spike"
     assert brief["next_week_proposal"]["week_type"] == "recovery"
+    assert brief["next_week_proposal"]["target_km"] == 21
+    assert brief["upcoming_week"]["target"]["distance_km"] == 21
+    assert "21 km" in brief["narrative"]["proposal_summary"]
 
 
-def test_build_coaching_brief_marks_completed_and_avoids_stacked_recovery() -> None:
+def test_build_coaching_brief_spike_caps_recovery_target_to_planned_volume() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["acwr"] = 1.45
+    plan[0]["actuals"]["distance_km"] = 60.0
+    brief = build_coaching_brief(plan)
+    assert brief["next_week_proposal"]["target_km"] == 21
+
+
+def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -> None:
     plan = _sample_plan()
     recent = [
         {
@@ -81,15 +97,25 @@ def test_build_coaching_brief_marks_completed_and_avoids_stacked_recovery() -> N
         },
     ]
     brief = build_coaching_brief(plan, recent_activities=recent)
-    sessions = brief["next_week_proposal"]["sessions"]
-    completed = [s for s in sessions if s.get("status") == "completed"]
-    assert len(completed) == 1
-    assert completed[0]["date"] == "2026-07-08"
-    rest_day = next(s for s in sessions if s.get("date") == "2026-07-07")
-    assert rest_day.get("logged_activity", {}).get("name") == "Recovery Run"
-    day_09 = next(s for s in sessions if s.get("date") == "2026-07-09")
-    assert day_09["session"] == "easy"
-    assert day_09.get("adjustment_note")
+    assert brief["recent_activities"] == recent
+    days = brief["next_week_proposal"]["days"]
+    assert all("session" not in day for day in days)
+    assert all("workout_type" not in day for day in days)
+    assert all("duration_min" not in day for day in days)
+
+
+def test_build_coaching_brief_proposal_days_without_weather() -> None:
+    stat_rows = [
+        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+    ]
+    plan = build_training_plan(
+        stat_rows, event_date=None, load_at_week_end=lambda _e: {}
+    )
+    brief = build_coaching_brief(plan)
+    days = brief["next_week_proposal"]["days"]
+    assert len(days) == 7
+    assert days[0]["date"] == "2026-06-02"
+    assert days[0]["avg_temp_c"] is None
 
 
 def test_build_coaching_brief_empty_plan() -> None:
