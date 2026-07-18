@@ -282,6 +282,25 @@ def test_get_personal_records_keeps_race_ladder_and_longest() -> None:
     assert result["records"][-1]["display_value"] == "40.00 km"
 
 
+def test_get_personal_records_label_only_15k_sorts_before_longest() -> None:
+    mock_client = MagicMock()
+    mock_client.get_personal_record.return_value = [
+        {"typeId": 7, "value": 40000, "activityType": "running"},
+        {"prType": "15K Best", "value": 3600, "activityType": "running"},
+        {"typeId": 4, "value": 2400, "activityType": "running"},
+        {"activityName": "Longest Ride", "value": 90000},  # excluded
+    ]
+
+    with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
+        result = server.get_personal_records()
+
+    assert [row["label"] for row in result["records"]] == [
+        "10K",
+        "15K Best",
+        "Longest Run",
+    ]
+
+
 def test_get_personal_records_handles_unexpected_shape() -> None:
     mock_client = MagicMock()
     mock_client.get_personal_record.return_value = "not-a-payload"

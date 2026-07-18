@@ -833,7 +833,17 @@ _PR_INCLUDED_LABEL_HINTS = (
     "15k",
     "half",
     "marathon",
-    "longest",
+    "longest run",
+)
+_PR_SORT_ORDER_BY_TYPE = {3: 0, 4: 1, 5: 3, 6: 4, 7: 5}
+# 15K sits between 10K and half when matched by label only.
+_PR_SORT_ORDER_BY_LABEL = (
+    ("5k", 0),
+    ("10k", 1),
+    ("15k", 2),
+    ("half", 3),
+    ("marathon", 4),
+    ("longest", 5),
 )
 
 
@@ -863,6 +873,9 @@ def _pr_label_is_included(label: str) -> bool:
     if any(hint in label_l for hint in _PR_EXCLUDED_LABEL_HINTS):
         # "15k" contains "5k" but not excluded hints; "1 mile" / "1k" drop here.
         return False
+    if "longest" in label_l and "run" not in label_l:
+        # Avoid longest ride / swim when typeId is missing.
+        return False
     return any(hint in label_l for hint in _PR_INCLUDED_LABEL_HINTS)
 
 
@@ -871,6 +884,20 @@ def _include_personal_record(item: dict[str, Any], label: str, type_id: int | No
     if type_id is not None:
         return type_id in _PR_INCLUDED_TYPE_IDS
     return _pr_label_is_included(label)
+
+
+def _pr_sort_key(row: dict[str, Any]) -> tuple[int, str]:
+    type_id = row.get("type_id")
+    if isinstance(type_id, int) and type_id in _PR_SORT_ORDER_BY_TYPE:
+        return (_PR_SORT_ORDER_BY_TYPE[type_id], str(row.get("label") or ""))
+    label_l = str(row.get("label") or "").lower()
+    # Prefer more specific hints first (15k before 5k).
+    for hint, rank in sorted(
+        _PR_SORT_ORDER_BY_LABEL, key=lambda item: -len(item[0])
+    ):
+        if hint in label_l:
+            return (rank, str(row.get("label") or ""))
+    return (50, str(row.get("label") or ""))
 
 
 def _format_duration_seconds(secs: float) -> str:
@@ -959,14 +986,8 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
             }
         )
 
-    # Stable coaching order: race times then longest distance.
-    order = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4}
-    records.sort(
-        key=lambda row: (
-            order.get(row.get("type_id"), 50),
-            str(row.get("label") or ""),
-        )
-    )
+    # Stable coaching order: 5K → 10K → 15K → half → marathon → longest.
+    records.sort(key=_pr_sort_key)
 
     return {
         "records": records,
