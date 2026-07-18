@@ -289,6 +289,7 @@ def test_get_personal_records_label_only_15k_sorts_before_longest() -> None:
         {"prType": "15K Best", "value": 3600, "activityType": "running"},
         {"typeId": 4, "value": 2400, "activityType": "running"},
         {"activityName": "Longest Ride", "value": 90000},  # excluded
+        {"prType": "25K Best", "value": 7200, "activityType": "running"},  # excluded
     ]
 
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):

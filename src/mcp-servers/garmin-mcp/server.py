@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -868,15 +869,19 @@ def _pr_label(item: dict[str, Any]) -> str:
     return "PR"
 
 
+def _label_has_token(label: str, token: str) -> bool:
+    """Match distance tokens without substring false positives (5k vs 15k/25k)."""
+    return re.search(rf"(?<!\d){re.escape(token)}\b", label, flags=re.IGNORECASE) is not None
+
+
 def _pr_label_is_included(label: str) -> bool:
     label_l = label.lower()
-    if any(hint in label_l for hint in _PR_EXCLUDED_LABEL_HINTS):
-        # "15k" contains "5k" but not excluded hints; "1 mile" / "1k" drop here.
+    if any(_label_has_token(label_l, hint) for hint in _PR_EXCLUDED_LABEL_HINTS):
         return False
     if "longest" in label_l and "run" not in label_l:
         # Avoid longest ride / swim when typeId is missing.
         return False
-    return any(hint in label_l for hint in _PR_INCLUDED_LABEL_HINTS)
+    return any(_label_has_token(label_l, hint) for hint in _PR_INCLUDED_LABEL_HINTS)
 
 
 def _include_personal_record(item: dict[str, Any], label: str, type_id: int | None) -> bool:
@@ -895,7 +900,7 @@ def _pr_sort_key(row: dict[str, Any]) -> tuple[int, str]:
     for hint, rank in sorted(
         _PR_SORT_ORDER_BY_LABEL, key=lambda item: -len(item[0])
     ):
-        if hint in label_l:
+        if _label_has_token(label_l, hint):
             return (rank, str(row.get("label") or ""))
     return (50, str(row.get("label") or ""))
 
@@ -934,7 +939,10 @@ def _format_pr_value(value: Any, label: str, type_id: Any = None) -> str:
     label_l = label.lower()
     if "longest" in label_l or "distance" in label_l:
         return f"{float(value) / 1000:.2f} km"
-    if any(hint in label_l for hint in ("5k", "10k", "15k", "half", "marathon")):
+    if any(
+        _label_has_token(label_l, hint)
+        for hint in ("5k", "10k", "15k", "half", "marathon")
+    ):
         return _format_duration_seconds(float(value))
     return str(value)
 
