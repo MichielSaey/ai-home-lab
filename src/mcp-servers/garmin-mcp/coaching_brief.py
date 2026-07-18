@@ -199,29 +199,32 @@ def _personal_records_summary(personal_records: dict[str, Any] | None) -> str:
     return "No personal records on file."
 
 
+def _positive_minutes(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        minutes = float(value)
+    except (TypeError, ValueError):
+        return None
+    return minutes if minutes > 0 else None
+
+
 def _time_intensity_overview(actuals: dict[str, Any]) -> str:
     """Primary intensity overview in minutes (workout-type independent)."""
-    total = actuals.get("total_zone_min")
-    z1 = actuals.get("zone_1_min")
-    z2 = actuals.get("zone_2_min")
-    z3 = actuals.get("zone_3_min")
-    z4 = actuals.get("zone_4_min")
-    z5 = actuals.get("zone_5_min")
-    if total is None and all(v is None for v in (z1, z2, z3, z4, z5)):
+    total = _positive_minutes(actuals.get("total_zone_min"))
+    zone_values = [
+        ("Z1", _positive_minutes(actuals.get("zone_1_min"))),
+        ("Z2", _positive_minutes(actuals.get("zone_2_min"))),
+        ("Z3", _positive_minutes(actuals.get("zone_3_min"))),
+        ("Z4", _positive_minutes(actuals.get("zone_4_min"))),
+        ("Z5", _positive_minutes(actuals.get("zone_5_min"))),
+    ]
+    if total is None and all(value is None for _, value in zone_values):
         return "Time-in-zone data unavailable for the latest block."
     parts: list[str] = []
     if total is not None:
         parts.append(f"{total} min total in HR zones")
-    zone_bits = []
-    for label, value in (
-        ("Z1", z1),
-        ("Z2", z2),
-        ("Z3", z3),
-        ("Z4", z4),
-        ("Z5", z5),
-    ):
-        if value is not None:
-            zone_bits.append(f"{label} {value}")
+    zone_bits = [f"{label} {value}" for label, value in zone_values if value is not None]
     if zone_bits:
         parts.append("minutes: " + " / ".join(zone_bits))
     return "Time-based intensity — " + "; ".join(parts) + "."
@@ -347,7 +350,10 @@ def build_coaching_brief(
     upcoming_target = planned_target_km
     if acwr_label == "spike" and upcoming_type == "build":
         upcoming_type = "recovery"
-        base_km = actuals.get("distance_km") or planned_target_km
+        # Use explicit None-check so cross-training weeks with 0 run km do not
+        # fall through to the (often large) planned running target.
+        dist_km = actuals.get("distance_km")
+        base_km = float(dist_km) if dist_km is not None else planned_target_km
         if base_km is not None:
             deload_km = round(float(base_km) * 0.8)
             if planned_target_km is not None:

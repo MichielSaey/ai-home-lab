@@ -211,6 +211,30 @@ def test_build_coaching_brief_nudge_for_under_sprint() -> None:
     assert "Z5" in brief["next_week_proposal"]["focus"]
 
 
+def test_time_intensity_overview_treats_zero_as_unavailable() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["total_zone_min"] = 0.0
+    plan[0]["actuals"]["zone_1_min"] = 0.0
+    plan[0]["actuals"]["zone_2_min"] = 0.0
+    plan[0]["actuals"]["zone_3_min"] = 0.0
+    plan[0]["actuals"]["zone_4_min"] = 0.0
+    plan[0]["actuals"]["zone_5_min"] = 0.0
+    brief = build_coaching_brief(plan)
+    assert "unavailable" in brief["narrative"]["intensity_check"]
+    assert "0 min total" not in brief["narrative"]["intensity_check"]
+
+
+def test_spike_deload_respects_zero_run_distance() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["acwr"] = 1.45
+    plan[0]["actuals"]["distance_km"] = 0.0
+    plan[0]["actuals"]["total_zone_min"] = 180.0
+    brief = build_coaching_brief(plan)
+    assert brief["assessment"]["acwr_label"] == "spike"
+    assert brief["next_week_proposal"]["week_type"] == "recovery"
+    assert brief["next_week_proposal"]["target_km"] == 0
+
+
 def test_build_coaching_brief_cross_training_uses_time_not_zero_km() -> None:
     plan = _sample_plan()
     plan[0]["actuals"]["distance_km"] = 0.0
