@@ -217,6 +217,13 @@ def test_get_personal_records_normalizes_list() -> None:
     mock_client = MagicMock()
     mock_client.get_personal_record.return_value = [
         {
+            "typeId": 1,  # 1K — excluded from coaching card
+            "activityName": "Track Running",
+            "value": 201,
+            "activityType": {"typeKey": "running"},
+            "prStartTimeGMT": "2026-05-02T10:00:00.000Z",
+        },
+        {
             "typeId": 3,
             "activityName": "Track Running",
             "value": 1200,
@@ -230,19 +237,49 @@ def test_get_personal_records_normalizes_list() -> None:
             "activityType": {"typeKey": "running"},
             "prStartTimeGMT": "2026-04-01T08:00:00.000Z",
         },
+        {
+            "typeId": 12,  # steps — excluded
+            "activityName": "Steps",
+            "value": 25000,
+            "activityType": {"typeKey": "walking"},
+        },
     ]
 
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
         result = server.get_personal_records()
 
     assert result["summary"] == "2 personal record(s)"
-    assert result["records"][0]["label"] == "5K"
+    labels = [row["label"] for row in result["records"]]
+    assert labels == ["5K", "Longest Run"]
     assert result["records"][0]["value"] == 1200
     assert result["records"][0]["display_value"] == "20:00"
     assert result["records"][0]["activity_type"] == "running"
     assert result["records"][0]["date"] == "2026-05-01"
-    assert result["records"][1]["label"] == "Longest Run"
     assert result["records"][1]["display_value"] == "32.10 km"
+
+
+def test_get_personal_records_keeps_race_ladder_and_longest() -> None:
+    mock_client = MagicMock()
+    mock_client.get_personal_record.return_value = [
+        {"typeId": 7, "value": 40000, "activityType": "running"},
+        {"typeId": 6, "value": 11186, "activityType": "running"},
+        {"typeId": 4, "value": 2400, "activityType": "running"},
+        {"typeId": 5, "value": 5301, "activityType": "running"},
+        {"typeId": 2, "value": 360, "activityType": "running"},  # mile excluded
+        {"typeId": 3, "value": 1200, "activityType": "running"},
+    ]
+
+    with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
+        result = server.get_personal_records()
+
+    assert [row["label"] for row in result["records"]] == [
+        "5K",
+        "10K",
+        "Half Marathon",
+        "Marathon",
+        "Longest Run",
+    ]
+    assert result["records"][-1]["display_value"] == "40.00 km"
 
 
 def test_get_personal_records_handles_unexpected_shape() -> None:

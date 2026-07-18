@@ -16,7 +16,7 @@ Personal coach stack: one read tool, atomic helpers, workout actions.
 | `get_profile` | Age, VO2 max, thresholds, weight |
 | `get_events` | Upcoming races + `latest_event` (past 28 days) |
 | `get_race_predictions` | Garmin predicted race times |
-| `get_personal_records` | Personal records from Garmin Connect |
+| `get_personal_records` | Running PRs for coaching: 5K, 10K, half, marathon, longest run (drops 1K/mile/steps/etc.) |
 
 All four are already inside `get_coaching_brief`.
 

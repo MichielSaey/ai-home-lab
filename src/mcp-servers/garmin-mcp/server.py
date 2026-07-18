@@ -805,39 +805,36 @@ def _pr_date(item: dict[str, Any]) -> str | None:
     return None
 
 
-# Garmin personal-record typeId → (label, unit). value is seconds / meters /
-# count / days depending on unit. Observed IDs from Garmin Connect PR API.
+# Coaching card PRs only: 5K / 10K / half / marathon / longest run.
+# Garmin Connect does not expose a standard 15K (or 1K/3K/20K) typeId; 15K is
+# kept via label match if a payload ever includes it.
 _PR_TYPE_META: dict[int, tuple[str, str]] = {
-    1: ("1K", "seconds"),
-    2: ("1 Mile", "seconds"),
     3: ("5K", "seconds"),
     4: ("10K", "seconds"),
     5: ("Half Marathon", "seconds"),
     6: ("Marathon", "seconds"),
     7: ("Longest Run", "meters"),
-    8: ("Longest Ride", "meters"),
-    9: ("Longest Swim", "meters"),
-    12: ("Most Steps in a Day", "count"),
-    13: ("Most Steps in a Week", "count"),
-    14: ("Most Steps in a Month", "count"),
-    15: ("Longest Goal Streak", "days"),
 }
-
-_PR_TIME_LABEL_HINTS = (
+_PR_INCLUDED_TYPE_IDS = frozenset(_PR_TYPE_META)
+_PR_EXCLUDED_LABEL_HINTS = (
+    "1k",
+    "1 km",
+    "3k",
+    "3 km",
+    "20k",
+    "20 km",
+    "1 mile",
+    "1-mile",
+    "1mi",
+)
+_PR_INCLUDED_LABEL_HINTS = (
     "5k",
     "10k",
     "15k",
-    "20k",
     "half",
     "marathon",
-    "mile",
-    "1k",
-    "3k",
-    "fastest",
-    "best time",
-    "time",
+    "longest",
 )
-_PR_DISTANCE_LABEL_HINTS = ("longest", "distance", "farthest", "furthest")
 
 
 def _pr_type_id(item: dict[str, Any]) -> int | None:
@@ -859,6 +856,21 @@ def _pr_label(item: dict[str, Any]) -> str:
         if value is not None and str(value).strip():
             return str(value)
     return "PR"
+
+
+def _pr_label_is_included(label: str) -> bool:
+    label_l = label.lower()
+    if any(hint in label_l for hint in _PR_EXCLUDED_LABEL_HINTS):
+        # "15k" contains "5k" but not excluded hints; "1 mile" / "1k" drop here.
+        return False
+    return any(hint in label_l for hint in _PR_INCLUDED_LABEL_HINTS)
+
+
+def _include_personal_record(item: dict[str, Any], label: str, type_id: int | None) -> bool:
+    """Keep coaching-relevant race PRs + longest run; drop short junk distances."""
+    if type_id is not None:
+        return type_id in _PR_INCLUDED_TYPE_IDS
+    return _pr_label_is_included(label)
 
 
 def _format_duration_seconds(secs: float) -> str:
@@ -891,17 +903,11 @@ def _format_pr_value(value: Any, label: str, type_id: Any = None) -> str:
         return _format_duration_seconds(float(value))
     if unit == "meters":
         return f"{float(value) / 1000:.2f} km"
-    if unit == "count":
-        return f"{int(round(float(value))):,}"
-    if unit == "days":
-        days = int(round(float(value)))
-        return f"{days} day{'s' if days != 1 else ''}"
 
-    # Fallback when typeId is unknown: label heuristics.
     label_l = label.lower()
-    if any(hint in label_l for hint in _PR_DISTANCE_LABEL_HINTS):
+    if "longest" in label_l or "distance" in label_l:
         return f"{float(value) / 1000:.2f} km"
-    if any(hint in label_l for hint in _PR_TIME_LABEL_HINTS):
+    if any(hint in label_l for hint in ("5k", "10k", "15k", "half", "marathon")):
         return _format_duration_seconds(float(value))
     return str(value)
 
@@ -938,8 +944,10 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
         if not isinstance(item, dict):
             continue
         label = _pr_label(item)
-        value = item.get("value")
         type_id = _pr_type_id(item)
+        if not _include_personal_record(item, label, type_id):
+            continue
+        value = item.get("value")
         records.append(
             {
                 "label": label,
@@ -950,6 +958,15 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
                 "type_id": type_id,
             }
         )
+
+    # Stable coaching order: race times then longest distance.
+    order = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4}
+    records.sort(
+        key=lambda row: (
+            order.get(row.get("type_id"), 50),
+            str(row.get("label") or ""),
+        )
+    )
 
     return {
         "records": records,
@@ -963,7 +980,11 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
 
 @mcp.tool()
 def get_personal_records() -> Dict[str, Any]:
-    """Personal records from Garmin Connect (all sports when available)."""
+    """Running personal records for coaching: 5K, 10K, half, marathon, longest run.
+
+    Drops short/noise distances (1K, mile, steps, etc.). Garmin does not expose
+    a standard 15K typeId; longest run distance is always included when present.
+    """
     client, error = _get_client_or_error()
     if error:
         return error
