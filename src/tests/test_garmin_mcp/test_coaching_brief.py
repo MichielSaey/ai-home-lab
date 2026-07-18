@@ -100,6 +100,7 @@ def test_build_coaching_brief_includes_personal_records_summary() -> None:
             {
                 "label": "5K Best",
                 "value": 1200,
+                "display_value": "20:00",
                 "activity_type": "running",
                 "date": "2026-05-01",
             }
@@ -107,7 +108,10 @@ def test_build_coaching_brief_includes_personal_records_summary() -> None:
         "summary": "1 personal record(s)",
     }
     brief = build_coaching_brief(_sample_plan(), personal_records=prs)
-    assert "5K Best" in brief["narrative"]["personal_records_summary"]
+    summary = brief["narrative"]["personal_records_summary"]
+    assert "5K Best" in summary
+    assert "20:00" in summary
+    assert "1200" not in summary
 
 
 def test_build_coaching_brief_spike_downgrades_proposal() -> None:

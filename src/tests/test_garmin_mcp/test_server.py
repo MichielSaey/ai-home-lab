@@ -203,6 +203,7 @@ def test_get_personal_records_normalizes_list() -> None:
     assert result["summary"] == "1 personal record(s)"
     assert result["records"][0]["label"] == "5K Best"
     assert result["records"][0]["value"] == 1200
+    assert result["records"][0]["display_value"] == "20:00"
     assert result["records"][0]["activity_type"] == "running"
     assert result["records"][0]["date"] == "2026-05-01"
 

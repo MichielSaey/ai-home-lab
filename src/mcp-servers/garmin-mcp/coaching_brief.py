@@ -181,9 +181,11 @@ def _personal_records_summary(personal_records: dict[str, Any] | None) -> str:
             if not isinstance(record, dict):
                 continue
             label = record.get("label") or "PR"
-            value = record.get("value")
+            display = record.get("display_value")
+            if display is None:
+                display = record.get("value")
             pr_date = record.get("date")
-            piece = f"{label}: {value}" if value is not None else str(label)
+            piece = f"{label}: {display}" if display is not None else str(label)
             if pr_date:
                 piece += f" ({pr_date})"
             bits.append(piece)

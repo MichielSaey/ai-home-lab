@@ -818,6 +818,48 @@ def _pr_label(item: dict[str, Any]) -> str:
     return "PR"
 
 
+_PR_TIME_LABEL_HINTS = (
+    "5k",
+    "10k",
+    "15k",
+    "20k",
+    "half",
+    "marathon",
+    "mile",
+    "1k",
+    "3k",
+    "fastest",
+    "best time",
+    "time",
+)
+_PR_DISTANCE_LABEL_HINTS = ("longest", "distance", "farthest", "furthest")
+
+
+def _format_duration_seconds(secs: float) -> str:
+    total = int(round(secs))
+    if total < 0:
+        return str(secs)
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def _format_pr_value(value: Any, label: str) -> str:
+    """Format Garmin PR values for coach-facing text (times / distances)."""
+    if value is None:
+        return "—"
+    if not isinstance(value, (int, float)):
+        return str(value)
+    label_l = label.lower()
+    if any(hint in label_l for hint in _PR_DISTANCE_LABEL_HINTS):
+        return f"{float(value) / 1000:.2f} km"
+    if any(hint in label_l for hint in _PR_TIME_LABEL_HINTS):
+        return _format_duration_seconds(float(value))
+    return str(value)
+
+
 def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
     """Normalize Garmin personal-record payloads into a readable structure."""
     if isinstance(raw, dict) and raw.get("error"):
@@ -849,10 +891,13 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
     for item in items:
         if not isinstance(item, dict):
             continue
+        label = _pr_label(item)
+        value = item.get("value")
         records.append(
             {
-                "label": _pr_label(item),
-                "value": item.get("value"),
+                "label": label,
+                "value": value,
+                "display_value": _format_pr_value(value, label),
                 "activity_type": _pr_activity_type(item),
                 "date": _pr_date(item),
                 "type_id": item.get("typeId"),
