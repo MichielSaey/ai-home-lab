@@ -810,13 +810,23 @@ def _pr_date(item: dict[str, Any]) -> str | None:
     return None
 
 
-def _pr_label(item: dict[str, Any]) -> str:
-    for key in ("activityName", "name", "prType", "typeId"):
-        value = item.get(key)
-        if value is not None and str(value).strip():
-            return str(value)
-    return "PR"
-
+# Garmin personal-record typeId → (label, unit). value is seconds / meters /
+# count / days depending on unit. Observed IDs from Garmin Connect PR API.
+_PR_TYPE_META: dict[int, tuple[str, str]] = {
+    1: ("1K", "seconds"),
+    2: ("1 Mile", "seconds"),
+    3: ("5K", "seconds"),
+    4: ("10K", "seconds"),
+    5: ("Half Marathon", "seconds"),
+    6: ("Marathon", "seconds"),
+    7: ("Longest Run", "meters"),
+    8: ("Longest Ride", "meters"),
+    9: ("Longest Swim", "meters"),
+    12: ("Most Steps in a Day", "count"),
+    13: ("Most Steps in a Week", "count"),
+    14: ("Most Steps in a Month", "count"),
+    15: ("Longest Goal Streak", "days"),
+}
 
 _PR_TIME_LABEL_HINTS = (
     "5k",
@@ -835,6 +845,27 @@ _PR_TIME_LABEL_HINTS = (
 _PR_DISTANCE_LABEL_HINTS = ("longest", "distance", "farthest", "furthest")
 
 
+def _pr_type_id(item: dict[str, Any]) -> int | None:
+    raw = item.get("typeId")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pr_label(item: dict[str, Any]) -> str:
+    type_id = _pr_type_id(item)
+    if type_id is not None and type_id in _PR_TYPE_META:
+        return _PR_TYPE_META[type_id][0]
+    for key in ("prType", "name", "activityName", "typeId"):
+        value = item.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return "PR"
+
+
 def _format_duration_seconds(secs: float) -> str:
     total = int(round(secs))
     if total < 0:
@@ -846,12 +877,32 @@ def _format_duration_seconds(secs: float) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-def _format_pr_value(value: Any, label: str) -> str:
+def _format_pr_value(value: Any, label: str, type_id: Any = None) -> str:
     """Format Garmin PR values for coach-facing text (times / distances)."""
     if value is None:
         return "—"
     if not isinstance(value, (int, float)):
         return str(value)
+
+    unit: str | None = None
+    try:
+        tid = int(type_id) if type_id is not None else None
+    except (TypeError, ValueError):
+        tid = None
+    if tid is not None and tid in _PR_TYPE_META:
+        unit = _PR_TYPE_META[tid][1]
+
+    if unit == "seconds":
+        return _format_duration_seconds(float(value))
+    if unit == "meters":
+        return f"{float(value) / 1000:.2f} km"
+    if unit == "count":
+        return f"{int(round(float(value))):,}"
+    if unit == "days":
+        days = int(round(float(value)))
+        return f"{days} day{'s' if days != 1 else ''}"
+
+    # Fallback when typeId is unknown: label heuristics.
     label_l = label.lower()
     if any(hint in label_l for hint in _PR_DISTANCE_LABEL_HINTS):
         return f"{float(value) / 1000:.2f} km"
@@ -893,14 +944,15 @@ def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
             continue
         label = _pr_label(item)
         value = item.get("value")
+        type_id = _pr_type_id(item)
         records.append(
             {
                 "label": label,
                 "value": value,
-                "display_value": _format_pr_value(value, label),
+                "display_value": _format_pr_value(value, label, type_id),
                 "activity_type": _pr_activity_type(item),
                 "date": _pr_date(item),
-                "type_id": item.get("typeId"),
+                "type_id": type_id,
             }
         )
 

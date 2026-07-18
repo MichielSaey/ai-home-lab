@@ -189,23 +189,32 @@ def test_get_personal_records_normalizes_list() -> None:
     mock_client = MagicMock()
     mock_client.get_personal_record.return_value = [
         {
-            "typeId": 1,
-            "activityName": "5K Best",
+            "typeId": 3,
+            "activityName": "Track Running",
             "value": 1200,
             "activityType": {"typeKey": "running"},
             "prStartTimeGMT": "2026-05-01T10:00:00.000Z",
-        }
+        },
+        {
+            "typeId": 7,
+            "activityName": "Long Sunday",
+            "value": 32100,
+            "activityType": {"typeKey": "running"},
+            "prStartTimeGMT": "2026-04-01T08:00:00.000Z",
+        },
     ]
 
     with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
         result = server.get_personal_records()
 
-    assert result["summary"] == "1 personal record(s)"
-    assert result["records"][0]["label"] == "5K Best"
+    assert result["summary"] == "2 personal record(s)"
+    assert result["records"][0]["label"] == "5K"
     assert result["records"][0]["value"] == 1200
     assert result["records"][0]["display_value"] == "20:00"
     assert result["records"][0]["activity_type"] == "running"
     assert result["records"][0]["date"] == "2026-05-01"
+    assert result["records"][1]["label"] == "Longest Run"
+    assert result["records"][1]["display_value"] == "32.10 km"
 
 
 def test_get_personal_records_handles_unexpected_shape() -> None:
