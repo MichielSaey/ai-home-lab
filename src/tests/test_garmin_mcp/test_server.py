@@ -104,6 +104,34 @@ def test_get_weekly_stats_combines_distance_and_zones() -> None:
     assert current_week[4] == 20.0  # zone_1_min
 
 
+def test_get_activities_handles_null_activity_type() -> None:
+    mock_client = MagicMock()
+    mock_client.get_activities_by_date.return_value = [
+        {
+            "activityId": 501,
+            "activityName": "Mystery",
+            "activityType": None,
+            "distance": 1000,
+            "movingDuration": 600,
+            "averageSpeed": None,
+            "maxSpeed": None,
+            "maxHR": 120,
+            "averageHR": 100,
+            "aerobicTrainingEffect": 1.0,
+            "anaerobicTrainingEffect": 0.0,
+            "trainingEffectLabel": "Recovery",
+            "startTimeLocal": "2026-06-16 07:00:00",
+        }
+    ]
+    mock_client.get_activity_hr_in_timezones.return_value = []
+
+    with patch.object(server, "_get_client_or_error", return_value=(mock_client, None)):
+        result = server.get_activities(days_back=7)
+
+    assert len(result["Garmin Activities"]["Rows"]) == 1
+    assert result["Garmin Activities"]["Rows"][0][1] is None
+
+
 def test_get_activities_includes_non_running_types() -> None:
     mock_client = MagicMock()
     mock_client.get_activities_by_date.return_value = [

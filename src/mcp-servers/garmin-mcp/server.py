@@ -35,6 +35,7 @@ from training_status import parse_training_status
 from weather import fetch_daily_weather
 from zones import (
     activity_date,
+    activity_type_key,
     normalize_hr_zones,
     weekly_stats_rows,
     zones_to_minute_columns,
@@ -301,7 +302,7 @@ def _activity_row(
     max_speed = activity.get("maxSpeed")
     row: list[Any] = [
         activity.get("activityName"),
-        activity.get("activityType", {}).get("typeKey"),
+        activity_type_key(activity),
         round((activity.get("distance", 0) or 0) / 1000, 2),
         round((activity.get("movingDuration", 0) or 0) / 60, 2),
         round((1000 / avg_speed) / 60, 2) if avg_speed else None,
@@ -369,17 +370,11 @@ def _recent_activity_summaries(
         act_date = activity_date(activity)
         if act_date is None:
             continue
-        activity_type = activity.get("activityType", {})
-        type_key = (
-            activity_type.get("typeKey")
-            if isinstance(activity_type, dict)
-            else activity_type
-        )
         summaries.append(
             {
                 "date": act_date.isoformat(),
                 "name": activity.get("activityName"),
-                "activity_type": type_key,
+                "activity_type": activity_type_key(activity),
                 "distance_km": round((activity.get("distance", 0) or 0) / 1000, 2),
                 "duration_min": round((activity.get("movingDuration", 0) or 0) / 60, 1),
                 "training_effect": activity.get("trainingEffectLabel"),
