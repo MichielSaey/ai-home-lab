@@ -9,9 +9,17 @@ def _sample_plan() -> list[dict]:
             "week_type": "build",
             "actuals": {
                 "distance_km": 42.77,
+                "total_zone_min": 210.0,
+                "zone_1_min": 40.0,
+                "zone_2_min": 140.0,
+                "zone_3_min": 13.0,
+                "zone_4_min": 12.0,
+                "zone_5_min": 5.0,
                 "easy_pct": 89.7,
                 "medium_pct": 6.2,
                 "hard_pct": 4.0,
+                "zone_4_pct": 3.0,
+                "zone_5_pct": 1.0,
                 "acute_load": 473,
                 "chronic_load": 564,
                 "acwr": 0.84,
@@ -20,20 +28,36 @@ def _sample_plan() -> list[dict]:
                 "distance_km": 27,
                 "easy_pct": 80,
                 "medium_pct": 0,
+                "zone_4_pct": 15,
+                "zone_5_pct": 5,
                 "hard_pct": 20,
             },
         },
         {
             "week_description": "past_week",
             "week_type": "build",
-            "actuals": {"distance_km": 10.0},
-            "target": {"distance_km": 30, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20},
+            "actuals": {"distance_km": 10.0, "total_zone_min": 50.0},
+            "target": {
+                "distance_km": 30,
+                "easy_pct": 80,
+                "medium_pct": 0,
+                "zone_4_pct": 15,
+                "zone_5_pct": 5,
+                "hard_pct": 20,
+            },
         },
         {
             "week_description": "upcoming_week",
             "week_type": "build",
             "actuals": {},
-            "target": {"distance_km": 21, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20},
+            "target": {
+                "distance_km": 21,
+                "easy_pct": 80,
+                "medium_pct": 0,
+                "zone_4_pct": 15,
+                "zone_5_pct": 5,
+                "hard_pct": 20,
+            },
             "days": [
                 {"date": "2026-07-07", "avg_temp_c": 18, "weather": "clear"},
                 {"date": "2026-07-08", "avg_temp_c": 20, "weather": "clear"},
@@ -51,14 +75,43 @@ def test_build_coaching_brief_includes_narrative_and_proposal() -> None:
     brief = build_coaching_brief(_sample_plan())
     assert "narrative" in brief
     assert "latest 7 days" in brief["narrative"]["review_summary"]
+    assert "210.0 min in HR zones" in brief["narrative"]["review_summary"]
+    assert "Time-based intensity" in brief["narrative"]["intensity_check"]
+    assert "15% Z4" in brief["narrative"]["intensity_check"]
+    assert "5% Z5" in brief["narrative"]["intensity_check"]
     assert "ACWR 0.84" in brief["narrative"]["load_check"]
+    assert "personal_records_summary" in brief["narrative"]
+    assert brief["presentation_order"][3] == "personal_records_summary"
     assert brief["next_week_proposal"]["target_km"] == 21
     assert "sessions" not in brief["next_week_proposal"]
     days = brief["next_week_proposal"]["days"]
     assert len(days) == 7
     assert days[0] == {"date": "2026-07-07", "avg_temp_c": 18, "weather": "clear"}
     assert days[6] == {"date": "2026-07-13", "avg_temp_c": 30, "weather": "hot"}
-    assert "medium_pct_creep" in brief["assessment"]["intensity"]["flags"]
+    flags = brief["assessment"]["intensity"]["flags"]
+    assert "medium_pct_creep" in flags
+    assert "under_zone_5" in flags
+    assert "under_sprint" in flags
+
+
+def test_build_coaching_brief_includes_personal_records_summary() -> None:
+    prs = {
+        "records": [
+            {
+                "label": "5K Best",
+                "value": 1200,
+                "display_value": "20:00",
+                "activity_type": "running",
+                "date": "2026-05-01",
+            }
+        ],
+        "summary": "1 personal record(s)",
+    }
+    brief = build_coaching_brief(_sample_plan(), personal_records=prs)
+    summary = brief["narrative"]["personal_records_summary"]
+    assert "5K Best" in summary
+    assert "20:00" in summary
+    assert "1200" not in summary
 
 
 def test_build_coaching_brief_spike_downgrades_proposal() -> None:
@@ -86,12 +139,14 @@ def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -
         {
             "date": "2026-07-07",
             "name": "Recovery Run",
+            "activity_type": "running",
             "distance_km": 8.0,
             "training_effect": "Recovery",
         },
         {
             "date": "2026-07-08",
             "name": "Easy Run",
+            "activity_type": "running",
             "distance_km": 6.0,
             "training_effect": "Base",
         },
@@ -105,8 +160,28 @@ def test_build_coaching_brief_passes_recent_activities_without_prescriptions() -
 
 
 def test_build_coaching_brief_proposal_days_without_weather() -> None:
+    # Layout: start, end, distance, total_zone_min, z1..z5,
+    # easy/medium/hard min, easy/medium/hard pct, zone_4/5 pct
     stat_rows = [
-        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+        [
+            "2026-05-26",
+            "2026-06-01",
+            40.0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            80.0,
+            0.0,
+            20.0,
+            15.0,
+            5.0,
+        ],
     ]
     plan = build_training_plan(
         stat_rows, event_date=None, load_at_week_end=lambda _e: {}
@@ -121,3 +196,59 @@ def test_build_coaching_brief_proposal_days_without_weather() -> None:
 def test_build_coaching_brief_empty_plan() -> None:
     brief = build_coaching_brief([])
     assert brief.get("error") == "no_review_week"
+
+
+def test_build_coaching_brief_nudge_for_under_sprint() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["medium_pct"] = 0.0
+    plan[0]["actuals"]["zone_3_min"] = 0.0
+    plan[0]["actuals"]["easy_pct"] = 96.0
+    plan[0]["actuals"]["hard_pct"] = 4.0
+    plan[0]["actuals"]["zone_4_pct"] = 3.0
+    plan[0]["actuals"]["zone_5_pct"] = 1.0
+    brief = build_coaching_brief(plan)
+    assert "under_sprint" in brief["assessment"]["intensity"]["flags"]
+    assert "Z5" in brief["next_week_proposal"]["focus"]
+
+
+def test_time_intensity_overview_treats_zero_as_unavailable() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["total_zone_min"] = 0.0
+    plan[0]["actuals"]["zone_1_min"] = 0.0
+    plan[0]["actuals"]["zone_2_min"] = 0.0
+    plan[0]["actuals"]["zone_3_min"] = 0.0
+    plan[0]["actuals"]["zone_4_min"] = 0.0
+    plan[0]["actuals"]["zone_5_min"] = 0.0
+    brief = build_coaching_brief(plan)
+    assert "unavailable" in brief["narrative"]["intensity_check"]
+    assert "0 min total" not in brief["narrative"]["intensity_check"]
+
+
+def test_spike_deload_respects_zero_run_distance() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["acwr"] = 1.45
+    plan[0]["actuals"]["distance_km"] = 0.0
+    plan[0]["actuals"]["total_zone_min"] = 180.0
+    brief = build_coaching_brief(plan)
+    assert brief["assessment"]["acwr_label"] == "spike"
+    assert brief["next_week_proposal"]["week_type"] == "recovery"
+    assert brief["next_week_proposal"]["target_km"] == 0
+
+
+def test_build_coaching_brief_cross_training_uses_time_not_zero_km() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["distance_km"] = 0.0
+    plan[0]["actuals"]["total_zone_min"] = 180.0
+    plan[0]["actuals"]["medium_pct"] = 0.0
+    plan[0]["actuals"]["zone_3_min"] = 0.0
+    plan[0]["actuals"]["easy_pct"] = 80.0
+    plan[0]["actuals"]["hard_pct"] = 20.0
+    plan[0]["actuals"]["zone_4_pct"] = 15.0
+    plan[0]["actuals"]["zone_5_pct"] = 5.0
+    brief = build_coaching_brief(plan)
+    summary = brief["narrative"]["review_summary"]
+    assert "180.0 min training time" in summary
+    assert "0 km" not in summary
+    assert "below the plan target" not in summary
+    assert brief["assessment"]["volume"]["vs_target"] is None
+    assert brief["assessment"]["volume"].get("note") == "cross_training_time"

@@ -12,9 +12,10 @@ source: taught
 ## When to Use
 
 Fetch Garmin athlete context: profile (age, VO2 max, thresholds), upcoming
-events, and race predictions. Use when the user asks who they are as an athlete,
-what races are on the calendar, or what paces Garmin predicts. **Agent mode
-only.** Example: `/garmin-profile show my profile and races`.
+events, race predictions, and personal records. Use when the user asks who they
+are as an athlete, what races are on the calendar, what paces Garmin predicts,
+or what PRs they hold. **Agent mode only.** Example:
+`/garmin-profile show my profile and races`.
 
 ## Procedure
 
@@ -22,8 +23,9 @@ only.** Example: `/garmin-profile show my profile and races`.
    stats.
 2. Call `get_events` — upcoming races with dates and distances.
 3. Call `get_race_predictions` — predicted times for standard distances.
-4. Present a short structured summary (profile → events → predictions). If the
-   user asked a narrow question, answer that part first.
+4. Call `get_personal_records` — PRs from Garmin Connect when relevant.
+5. Present a short structured summary (profile → events → predictions → PRs).
+   If the user asked a narrow question, answer that part first.
 
 ## Pitfalls
 
