@@ -1,6 +1,39 @@
 from datetime import date, timedelta
 from typing import Any
 
+# Distance for volume targets stays run-like only. HR zones roll up from every
+# activity type so intensity is workout-independent / cross-training friendly.
+_RUNNING_DISTANCE_TYPE_KEYS = frozenset(
+    {
+        "running",
+        "trail_running",
+        "treadmill_running",
+        "track_running",
+        "virtual_run",
+        "indoor_running",
+        "ultramarathon",
+    }
+)
+
+
+def activity_type_key(activity: dict[str, Any]) -> str | None:
+    activity_type = activity.get("activityType")
+    if isinstance(activity_type, dict):
+        key = activity_type.get("typeKey")
+        return str(key) if key is not None else None
+    if isinstance(activity_type, str) and activity_type:
+        return activity_type
+    return None
+
+
+def counts_toward_run_distance(activity: dict[str, Any]) -> bool:
+    """True when activity distance should feed running volume targets."""
+    key = activity_type_key(activity)
+    if key is None:
+        # Legacy fixtures / bare rows without type — treat as run distance.
+        return True
+    return key in _RUNNING_DISTANCE_TYPE_KEYS
+
 
 def normalize_hr_zones(raw: Any) -> dict[int, float]:
     zones: dict[int, float] = {}
@@ -102,7 +135,9 @@ def weekly_stats_rows(
             act_date = activity_date(activity)
             if act_date is None or not (block_start <= act_date <= block_end):
                 continue
-            block_distance_km += (activity.get("distance", 0) or 0) / 1000
+            # km volume = run-like sports only (avoid cycling km inflating targets)
+            if counts_toward_run_distance(activity):
+                block_distance_km += (activity.get("distance", 0) or 0) / 1000
             zones = activity_zones.get(activity.get("activityId"), {})
             for zone, secs in zones.items():
                 if 1 <= zone <= 5:

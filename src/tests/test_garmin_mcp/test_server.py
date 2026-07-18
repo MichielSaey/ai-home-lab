@@ -180,7 +180,8 @@ def test_get_weekly_stats_includes_non_running_types() -> None:
         result = server.get_weekly_stats(weeks=1)
 
     current_week = result["Garmin Weekly Stats"]["Rows"][-1]
-    assert current_week[2] == 30.0
+    # Non-run distance excluded from km volume; zones still roll up from all sports
+    assert current_week[2] == 0.0
     assert current_week[3] == 60.0  # 40 + 20 zone minutes
 
 

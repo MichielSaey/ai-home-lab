@@ -205,3 +205,22 @@ def test_build_coaching_brief_nudge_for_under_sprint() -> None:
     brief = build_coaching_brief(plan)
     assert "under_sprint" in brief["assessment"]["intensity"]["flags"]
     assert "Z5" in brief["next_week_proposal"]["focus"]
+
+
+def test_build_coaching_brief_cross_training_uses_time_not_zero_km() -> None:
+    plan = _sample_plan()
+    plan[0]["actuals"]["distance_km"] = 0.0
+    plan[0]["actuals"]["total_zone_min"] = 180.0
+    plan[0]["actuals"]["medium_pct"] = 0.0
+    plan[0]["actuals"]["zone_3_min"] = 0.0
+    plan[0]["actuals"]["easy_pct"] = 80.0
+    plan[0]["actuals"]["hard_pct"] = 20.0
+    plan[0]["actuals"]["zone_4_pct"] = 15.0
+    plan[0]["actuals"]["zone_5_pct"] = 5.0
+    brief = build_coaching_brief(plan)
+    summary = brief["narrative"]["review_summary"]
+    assert "180.0 min training time" in summary
+    assert "0 km" not in summary
+    assert "below the plan target" not in summary
+    assert brief["assessment"]["volume"]["vs_target"] is None
+    assert brief["assessment"]["volume"].get("note") == "cross_training_time"

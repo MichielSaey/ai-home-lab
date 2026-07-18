@@ -116,8 +116,23 @@ def _intensity_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> di
 def _volume_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     dist = actuals.get("distance_km")
     target_km = target.get("distance_km")
+    total_zone = actuals.get("total_zone_min")
     if dist is None or target_km is None:
-        return {"distance_km": dist, "target_km": target_km, "vs_target": None}
+        return {
+            "distance_km": dist,
+            "target_km": target_km,
+            "total_zone_min": total_zone,
+            "vs_target": None,
+        }
+    # Cross-training weeks can have zone time with ~0 run km — don't judge km.
+    if float(dist) <= 0 and total_zone is not None and float(total_zone) > 0:
+        return {
+            "distance_km": dist,
+            "target_km": target_km,
+            "total_zone_min": total_zone,
+            "vs_target": None,
+            "note": "cross_training_time",
+        }
     delta = round(float(dist) - float(target_km), 2)
     if abs(delta) <= 2:
         vs = "on_target"
@@ -125,7 +140,13 @@ def _volume_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[
         vs = "above_target"
     else:
         vs = "below_target"
-    return {"distance_km": dist, "target_km": target_km, "delta_km": delta, "vs_target": vs}
+    return {
+        "distance_km": dist,
+        "target_km": target_km,
+        "total_zone_min": total_zone,
+        "delta_km": delta,
+        "vs_target": vs,
+    }
 
 
 def _focus_for_week(week_type: str, intensity_flags: list[str], acwr_label: str) -> str:
@@ -220,10 +241,16 @@ def _narrative(
     vol = assessment.get("volume") or {}
 
     review_bits = []
-    if dist is not None:
+    # Prefer time-in-zone when run distance is absent/zero but HR time exists
+    # (cross-training / non-run weeks).
+    has_run_distance = dist is not None and float(dist) > 0
+    has_zone_time = total_zone is not None and float(total_zone) > 0
+    if has_run_distance:
         review_bits.append(f"{dist} km in a {week_type} week")
-    elif total_zone is not None:
+    elif has_zone_time:
         review_bits.append(f"{total_zone} min training time in a {week_type} week")
+    elif dist is not None:
+        review_bits.append(f"{dist} km in a {week_type} week")
     if target_km is not None and vol.get("vs_target"):
         if vol["vs_target"] == "above_target":
             review_bits.append(f"above the plan target of {target_km} km")
@@ -237,7 +264,7 @@ def _narrative(
             + ", which is ".join(review_bits)
             + "."
         )
-        if total_zone is not None and dist is not None:
+        if has_run_distance and has_zone_time:
             review_summary = (
                 review_summary[:-1] + f" ({total_zone} min in HR zones)."
             )

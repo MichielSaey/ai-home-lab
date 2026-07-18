@@ -116,15 +116,23 @@ def test_weekly_stats_rows_includes_non_running_activities() -> None:
             "activityType": {"typeKey": "strength_training"},
             "startTimeLocal": "2026-06-15 18:00:00",
         },
+        {
+            "activityId": 3,
+            "distance": 8000,
+            "activityType": {"typeKey": "running"},
+            "startTimeLocal": "2026-06-14 07:00:00",
+        },
     ]
     activity_zones = {
         1: {1: 0, 2: 1800, 3: 0, 4: 600, 5: 0},
         2: {1: 300, 2: 900, 3: 0, 4: 0, 5: 0},
+        3: {1: 600, 2: 0, 3: 0, 4: 0, 5: 0},
     }
     rows = weekly_stats_rows(activities, activity_zones, anchor_end, num_blocks=1)
     latest = rows[0]
-    assert latest[2] == 20.0  # cycling distance only
-    assert latest[3] == 60.0  # (1800+600+300+900)/60
+    # Run distance only — cycling km must not inflate volume targets
+    assert latest[2] == 8.0
+    assert latest[3] == 70.0  # (1800+600+300+900+600)/60
     assert latest[5] == 45.0  # z2 minutes
 
 
