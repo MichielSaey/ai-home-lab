@@ -96,10 +96,13 @@ ACTIVITY_HEADERS = [
 
 ACTIVITY_HEADERS_NO_ZONES = ACTIVITY_HEADERS[:11]
 
+# Matches weekly_stats_rows layout (see zones.py):
+# start, end, distance_km, total_zone_min, z1..z5, easy/medium/hard min+pct, z4/z5 pct
 WEEKLY_STATS_HEADERS = [
     "week_start",
     "week_end",
     "distance_km",
+    "total_zone_min",
     "zone_1_min",
     "zone_2_min",
     "zone_3_min",
@@ -111,6 +114,8 @@ WEEKLY_STATS_HEADERS = [
     "easy_pct",
     "medium_pct",
     "hard_pct",
+    "zone_4_pct",
+    "zone_5_pct",
 ]
 
 
@@ -267,20 +272,23 @@ def _fetch_hr_zones(client: Garmin, activity_id: Any) -> dict[int, float]:
     return normalize_hr_zones(raw)
 
 
-def _running_activities_in_range(
+def _activities_in_range(
     client: Garmin, start_date: str, end_date: str
 ) -> list[dict[str, Any]] | dict[str, Any]:
+    """Return all dict activities in the date range (any activity type)."""
     activities = _call_optional(client, "get_activities_by_date", start_date, end_date)
     if isinstance(activities, dict) and activities.get("error"):
         return activities
     if not isinstance(activities, list):
         return {"error": "No activities returned from Garmin"}
-    return [
-        activity
-        for activity in activities
-        if isinstance(activity, dict)
-        and activity.get("activityType", {}).get("typeKey") == "running"
-    ]
+    return [activity for activity in activities if isinstance(activity, dict)]
+
+
+def _running_activities_in_range(
+    client: Garmin, start_date: str, end_date: str
+) -> list[dict[str, Any]] | dict[str, Any]:
+    """Backward-compatible alias for ``_activities_in_range``."""
+    return _activities_in_range(client, start_date, end_date)
 
 
 def _activity_row(
@@ -322,7 +330,7 @@ def _activities_table(
     start_date = window_start.isoformat()
     end_date = window_end.isoformat()
 
-    activities = _running_activities_in_range(client, start_date, end_date)
+    activities = _activities_in_range(client, start_date, end_date)
     if isinstance(activities, dict) and activities.get("error"):
         return activities
 
@@ -353,7 +361,7 @@ def _activities_table(
 def _recent_activity_summaries(
     activities: list[dict[str, Any]], *, limit: int = 10
 ) -> list[dict[str, Any]]:
-    """Lightweight recent runs for the coach (includes today through yesterday)."""
+    """Lightweight recent activities for the coach (includes today through yesterday)."""
     summaries: list[dict[str, Any]] = []
     for activity in sorted(
         activities, key=lambda row: row.get("startTimeLocal", ""), reverse=True
@@ -361,10 +369,17 @@ def _recent_activity_summaries(
         act_date = activity_date(activity)
         if act_date is None:
             continue
+        activity_type = activity.get("activityType", {})
+        type_key = (
+            activity_type.get("typeKey")
+            if isinstance(activity_type, dict)
+            else activity_type
+        )
         summaries.append(
             {
                 "date": act_date.isoformat(),
                 "name": activity.get("activityName"),
+                "activity_type": type_key,
                 "distance_km": round((activity.get("distance", 0) or 0) / 1000, 2),
                 "duration_min": round((activity.get("movingDuration", 0) or 0) / 60, 1),
                 "training_effect": activity.get("trainingEffectLabel"),
@@ -381,7 +396,7 @@ def _weekly_stats_table(
 ) -> Dict[str, Any] | dict[str, Any]:
     anchor = anchor_end if anchor_end is not None else compute_anchor_end()
     lookback_days = weeks * 7
-    activities = _running_activities_in_range(
+    activities = _activities_in_range(
         client,
         (anchor - timedelta(days=lookback_days - 1)).isoformat(),
         date.today().isoformat(),
@@ -497,7 +512,7 @@ def get_activities(
     days: Optional[int] = None,
     days_ago: int = 0,
 ) -> Dict[str, Any]:
-    """Running activities in a date window. Use days/days_ago for rollable windows."""
+    """Activities of all types in a date window. Use days/days_ago for rollable windows."""
     client, error = _get_client_or_error()
     if error:
         return error
@@ -512,10 +527,11 @@ def get_activities(
 
 @mcp.tool()
 def get_weekly_stats(weeks: int = 4, end_date: Optional[str] = None) -> Dict[str, Any]:
-    """Weekly running distance and HR zone rollups (rolling 7-day blocks).
+    """Weekly distance and HR zone rollups across all activity types (rolling 7-day blocks).
 
     ``end_date``, when provided, is the anchor end of the latest complete block
-    (typically yesterday), not a fetch-through date.
+    (typically yesterday), not a fetch-through date. Includes ``total_zone_min``
+    for a time-based intensity overview.
     """
     client, error = _get_client_or_error()
     if error:
@@ -558,6 +574,17 @@ def get_report(
     if isinstance(race_predictions, dict) and race_predictions.get("error"):
         return race_predictions
 
+    personal_records = get_personal_records()
+    if isinstance(personal_records, dict) and personal_records.get("error"):
+        # Soft-fail: PRs are optional athlete context, not a hard report blocker.
+        if personal_records.get("code"):
+            return personal_records
+        personal_records = {
+            "records": [],
+            "summary": str(personal_records.get("error")),
+            "raw_error": personal_records,
+        }
+
     events = get_events()
     if isinstance(events, dict) and events.get("error"):
         return events
@@ -578,6 +605,7 @@ def get_report(
         },
         "profile": profile,
         "race_predictions": race_predictions,
+        "personal_records": personal_records,
         "events": events,
         "training_plan": training_plan,
     }
@@ -589,6 +617,7 @@ def get_report(
         training_plan if isinstance(training_plan, list) else [],
         events if isinstance(events, dict) else None,
         recent_activities=recent_activities,
+        personal_records=personal_records if isinstance(personal_records, dict) else None,
     )
     return report
 
@@ -765,6 +794,97 @@ def get_race_predictions() -> Dict[str, Any]:
             ],
         }
     }
+
+
+def _pr_activity_type(item: dict[str, Any]) -> Any:
+    activity_type = item.get("activityType")
+    if isinstance(activity_type, dict):
+        return activity_type.get("typeKey") or activity_type.get("typeId")
+    return activity_type
+
+
+def _pr_date(item: dict[str, Any]) -> str | None:
+    for key in ("prStartTimeGMT", "startTimeGMT", "date", "calendarDate"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value[:10]
+    return None
+
+
+def _pr_label(item: dict[str, Any]) -> str:
+    for key in ("activityName", "name", "prType", "typeId"):
+        value = item.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return "PR"
+
+
+def _normalize_personal_records(raw: Any) -> Dict[str, Any]:
+    """Normalize Garmin personal-record payloads into a readable structure."""
+    if isinstance(raw, dict) and raw.get("error"):
+        return raw
+
+    items: list[Any]
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        for key in ("personalRecords", "records", "prList", "itemList"):
+            nested = raw.get(key)
+            if isinstance(nested, list):
+                items = nested
+                break
+        else:
+            return {
+                "raw": raw,
+                "records": [],
+                "summary": "Unexpected personal records shape",
+            }
+    else:
+        return {
+            "raw": raw,
+            "records": [],
+            "summary": "Unexpected personal records shape",
+        }
+
+    records: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        records.append(
+            {
+                "label": _pr_label(item),
+                "value": item.get("value"),
+                "activity_type": _pr_activity_type(item),
+                "date": _pr_date(item),
+                "type_id": item.get("typeId"),
+            }
+        )
+
+    return {
+        "records": records,
+        "summary": (
+            f"{len(records)} personal record(s)"
+            if records
+            else "No personal records"
+        ),
+    }
+
+
+@mcp.tool()
+def get_personal_records() -> Dict[str, Any]:
+    """Personal records from Garmin Connect (all sports when available)."""
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    # garminconnect 0.3.6 exposes get_personal_record (singular).
+    raw = _call_optional(client, "get_personal_record")
+    if raw is None:
+        return {
+            "records": [],
+            "summary": "Personal records not available from this Garmin client",
+        }
+    return _normalize_personal_records(raw)
 
 
 def _upload_running_workout(client: Garmin, workout) -> Dict[str, Any]:

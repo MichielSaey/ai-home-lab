@@ -4,14 +4,50 @@ from typing import Any, Callable, Optional
 from weather import average_temp, days_in_range
 
 # Polarized targets: medium (Zone 3) should always be ~0 — it is the gray zone
-# to minimize. easy_pct + hard_pct therefore sum to 100 for every week type.
+# to minimize. Hard work splits ~75%/25% into Z4 / Z5 (e.g. build 15/5).
+# easy_pct + zone_4_pct + zone_5_pct ≈ 100 for every week type.
 WEEK_TYPE_SPECS = {
-    "build": {"multiplier": 1.10, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "prev"},
+    "build": {
+        "multiplier": 1.10,
+        "easy_pct": 80,
+        "medium_pct": 0,
+        "zone_4_pct": 15,
+        "zone_5_pct": 5,
+        "ref": "prev",
+    },
     # Recovery volume is 80% of peak build-week km, not the prior partial week.
-    "recovery": {"multiplier": 0.80, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "peak"},
-    "taper_first": {"multiplier": 0.80, "easy_pct": 80, "medium_pct": 0, "hard_pct": 20, "ref": "peak"},
-    "taper_final": {"multiplier": 0.64, "easy_pct": 85, "medium_pct": 0, "hard_pct": 15, "ref": "peak"},
-    "race": {"multiplier": 0.30, "easy_pct": 90, "medium_pct": 0, "hard_pct": 10, "ref": "prev"},
+    "recovery": {
+        "multiplier": 0.80,
+        "easy_pct": 90,
+        "medium_pct": 0,
+        "zone_4_pct": 8,
+        "zone_5_pct": 2,
+        "ref": "peak",
+    },
+    "taper_first": {
+        "multiplier": 0.80,
+        "easy_pct": 80,
+        "medium_pct": 0,
+        "zone_4_pct": 15,
+        "zone_5_pct": 5,
+        "ref": "peak",
+    },
+    "taper_final": {
+        "multiplier": 0.64,
+        "easy_pct": 85,
+        "medium_pct": 0,
+        "zone_4_pct": 11,
+        "zone_5_pct": 4,
+        "ref": "peak",
+    },
+    "race": {
+        "multiplier": 0.30,
+        "easy_pct": 90,
+        "medium_pct": 0,
+        "zone_4_pct": 8,
+        "zone_5_pct": 2,
+        "ref": "prev",
+    },
 }
 
 
@@ -170,11 +206,16 @@ def build_target(
     week_type: str, prev_km: float | None, peak_km: float
 ) -> dict[str, Any]:
     spec = WEEK_TYPE_SPECS[week_type]
+    zone_4_pct = spec["zone_4_pct"]
+    zone_5_pct = spec["zone_5_pct"]
     return {
         "distance_km": calc_distance_target(week_type, prev_km, peak_km),
         "easy_pct": spec["easy_pct"],
         "medium_pct": spec["medium_pct"],
-        "hard_pct": spec["hard_pct"],
+        "zone_4_pct": zone_4_pct,
+        "zone_5_pct": zone_5_pct,
+        # Convenience: combined hard = Z4 + Z5
+        "hard_pct": zone_4_pct + zone_5_pct,
     }
 
 
@@ -185,18 +226,26 @@ def calc_acwr(acute: Any, chronic: Any) -> float | None:
 
 
 def actuals_from_stat_row(row: list[Any], load: dict[str, Any]) -> dict[str, Any]:
-    # Row layout (weekly_stats_rows): start, end, distance, z1..z5,
-    # easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct
-    easy_pct = row[11]
-    medium_pct = row[12]
-    hard_pct = row[13]
+    # Row layout (weekly_stats_rows):
+    #   0 start, 1 end, 2 distance_km, 3 total_zone_min,
+    #   4..8 z1..z5,
+    #   9 easy_min, 10 medium_min, 11 hard_min,
+    #   12 easy_pct, 13 medium_pct, 14 hard_pct, 15 zone_4_pct, 16 zone_5_pct
     acute = load.get("acute_load")
     chronic = load.get("chronic_load")
     return {
         "distance_km": row[2],
-        "easy_pct": easy_pct,
-        "medium_pct": medium_pct,
-        "hard_pct": hard_pct,
+        "total_zone_min": row[3],
+        "zone_1_min": row[4],
+        "zone_2_min": row[5],
+        "zone_3_min": row[6],
+        "zone_4_min": row[7],
+        "zone_5_min": row[8],
+        "easy_pct": row[12],
+        "medium_pct": row[13],
+        "hard_pct": row[14],
+        "zone_4_pct": row[15],
+        "zone_5_pct": row[16],
         "acute_load": acute,
         "chronic_load": chronic,
         "acwr": calc_acwr(acute, chronic),
@@ -206,9 +255,17 @@ def actuals_from_stat_row(row: list[Any], load: dict[str, Any]) -> dict[str, Any
 def empty_actuals() -> dict[str, Any]:
     return {
         "distance_km": None,
+        "total_zone_min": None,
+        "zone_1_min": None,
+        "zone_2_min": None,
+        "zone_3_min": None,
+        "zone_4_min": None,
+        "zone_5_min": None,
         "easy_pct": None,
         "medium_pct": None,
         "hard_pct": None,
+        "zone_4_pct": None,
+        "zone_5_pct": None,
         "acute_load": None,
         "chronic_load": None,
         "acwr": None,

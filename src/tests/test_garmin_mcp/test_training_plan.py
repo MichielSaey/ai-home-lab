@@ -1,6 +1,8 @@
 from datetime import date
 
 from training_plan import (
+    WEEK_TYPE_SPECS,
+    build_target,
     build_training_plan,
     classify_plan_week,
     classify_week_type,
@@ -9,6 +11,42 @@ from training_plan import (
     weeks_until_event,
 )
 from training_status import parse_training_status
+
+
+def _stat_row(
+    start: str,
+    end: str,
+    distance: float,
+    *,
+    easy_pct: float = 80.0,
+    medium_pct: float = 0.0,
+    hard_pct: float = 20.0,
+    zone_4_pct: float = 15.0,
+    zone_5_pct: float = 5.0,
+    total_zone_min: float = 0.0,
+) -> list:
+    # Layout: start, end, distance_km, total_zone_min, z1..z5,
+    # easy_min, medium_min, hard_min, easy_pct, medium_pct, hard_pct,
+    # zone_4_pct, zone_5_pct
+    return [
+        start,
+        end,
+        distance,
+        total_zone_min,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        easy_pct,
+        medium_pct,
+        hard_pct,
+        zone_4_pct,
+        zone_5_pct,
+    ]
 
 
 def test_classify_week_type_recovery_only_when_scheduled() -> None:
@@ -93,13 +131,32 @@ def test_past_race_week_labeled_race_not_recovery() -> None:
     )
 
 
+def test_week_type_specs_use_80_15_5_hard_split() -> None:
+    build = WEEK_TYPE_SPECS["build"]
+    assert build["easy_pct"] == 80
+    assert build["medium_pct"] == 0
+    assert build["zone_4_pct"] == 15
+    assert build["zone_5_pct"] == 5
+    recovery = WEEK_TYPE_SPECS["recovery"]
+    assert recovery["zone_4_pct"] == 8
+    assert recovery["zone_5_pct"] == 2
+
+
+def test_build_target_includes_zone_pcts() -> None:
+    target = build_target("build", prev_km=40, peak_km=48)
+    assert target["easy_pct"] == 80
+    assert target["zone_4_pct"] == 15
+    assert target["zone_5_pct"] == 5
+    assert target["hard_pct"] == 20
+
+
 def test_build_training_plan_latest_week_recovery_after_recent_race() -> None:
     today = date(2026, 6, 5)
     stat_rows = [
-        ["2026-05-05", "2026-05-11", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
-        ["2026-05-12", "2026-05-18", 44.0, 0, 0, 0, 0, 0, 0, 0, 0, 82.0, 0.0, 18.0],
-        ["2026-05-19", "2026-05-25", 48.0, 0, 0, 0, 0, 0, 0, 0, 0, 78.0, 0.0, 22.0],
-        ["2026-05-26", "2026-06-01", 30.0, 0, 0, 0, 0, 0, 0, 0, 0, 85.0, 0.0, 15.0],
+        _stat_row("2026-05-05", "2026-05-11", 40.0),
+        _stat_row("2026-05-12", "2026-05-18", 44.0, easy_pct=82.0, hard_pct=18.0),
+        _stat_row("2026-05-19", "2026-05-25", 48.0, easy_pct=78.0, hard_pct=22.0),
+        _stat_row("2026-05-26", "2026-06-01", 30.0, easy_pct=85.0, hard_pct=15.0),
     ]
     plan = build_training_plan(
         stat_rows,
@@ -111,19 +168,19 @@ def test_build_training_plan_latest_week_recovery_after_recent_race() -> None:
     assert plan[-2]["week_description"] == "latest_week"
     assert plan[-2]["week_type"] == "recovery"
     assert plan[-2]["target"]["easy_pct"] == 90
+    assert plan[-2]["target"]["zone_4_pct"] == 8
+    assert plan[-2]["target"]["zone_5_pct"] == 2
     # Recovery upcoming week: 80% of peak build week (48 km) ≈ 38 km
     assert plan[-1]["week_type"] == "recovery"
     assert plan[-1]["target"]["distance_km"] == 38
 
 
 def test_build_training_plan_includes_upcoming_week() -> None:
-    # Layout: start, end, distance, z1..z5, easy_min, medium_min, hard_min,
-    # easy_pct, medium_pct, hard_pct
     stat_rows = [
-        ["2026-05-05", "2026-05-11", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
-        ["2026-05-12", "2026-05-18", 44.0, 0, 0, 0, 0, 0, 0, 0, 0, 82.0, 0.0, 18.0],
-        ["2026-05-19", "2026-05-25", 48.0, 0, 0, 0, 0, 0, 0, 0, 0, 78.0, 0.0, 22.0],
-        ["2026-05-26", "2026-06-01", 30.0, 0, 0, 0, 0, 0, 0, 0, 0, 85.0, 0.0, 15.0],
+        _stat_row("2026-05-05", "2026-05-11", 40.0),
+        _stat_row("2026-05-12", "2026-05-18", 44.0, easy_pct=82.0, hard_pct=18.0),
+        _stat_row("2026-05-19", "2026-05-25", 48.0, easy_pct=78.0, hard_pct=22.0),
+        _stat_row("2026-05-26", "2026-06-01", 30.0, easy_pct=85.0, hard_pct=15.0),
     ]
 
     def load_at(_week_end: date) -> dict:
@@ -137,16 +194,21 @@ def test_build_training_plan_includes_upcoming_week() -> None:
     # Lookback rows are not retroactively labeled recovery without an event taper.
     assert plan[3]["week_type"] == "build"
     assert plan[-1]["actuals"]["distance_km"] is None
+    assert plan[-1]["actuals"]["total_zone_min"] is None
     assert plan[-1]["target"]["distance_km"] is not None
     assert plan[0]["actuals"]["medium_pct"] == 0.0
     assert plan[0]["actuals"]["hard_pct"] == 20.0
+    assert plan[0]["actuals"]["zone_4_pct"] == 15.0
+    assert plan[0]["actuals"]["zone_5_pct"] == 5.0
     assert plan[-1]["target"]["medium_pct"] == 0
+    assert plan[-1]["target"]["zone_4_pct"] == 15
+    assert plan[-1]["target"]["zone_5_pct"] == 5
 
 
 def test_build_training_plan_enriches_weather() -> None:
     stat_rows = [
-        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
-        ["2026-06-02", "2026-06-08", 44.0, 0, 0, 0, 0, 0, 0, 0, 0, 82.0, 0.0, 18.0],
+        _stat_row("2026-05-26", "2026-06-01", 40.0),
+        _stat_row("2026-06-02", "2026-06-08", 44.0, easy_pct=82.0, hard_pct=18.0),
     ]
 
     def load_at(_week_end: date) -> dict:
@@ -190,7 +252,7 @@ def test_build_training_plan_enriches_weather() -> None:
 
 def test_build_training_plan_omits_weather_when_none() -> None:
     stat_rows = [
-        ["2026-05-26", "2026-06-01", 40.0, 0, 0, 0, 0, 0, 0, 0, 0, 80.0, 0.0, 20.0],
+        _stat_row("2026-05-26", "2026-06-01", 40.0),
     ]
 
     plan = build_training_plan(

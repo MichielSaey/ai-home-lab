@@ -1,9 +1,9 @@
 ---
 name: garmin-week-review
-description: "Garmin week review via get_coaching_brief — ACWR, intensity split, next-week proposal (garmin-mcp, agent mode)."
-version: 2.4.0
+description: "Garmin week review via get_coaching_brief — ACWR, time-in-zone intensity, next-week proposal (garmin-mcp, agent mode)."
+version: 2.5.0
 category: health
-tags: [running, garmin, coaching, acwr, get_coaching_brief, garmin-mcp]
+tags: [garmin, coaching, acwr, get_coaching_brief, garmin-mcp]
 status: published
 source: taught
 ---
@@ -26,8 +26,8 @@ retrieval surfaces them.
 
 ## When to Use
 
-Garmin running coach: week reviews, training load, intensity feedback, next-week
-proposals. **Agent mode only.**
+Garmin coach: week reviews across all workout types, training load, time-based
+intensity feedback (Z1–Z5), next-week proposals. **Agent mode only.**
 
 ## Mandatory first step
 
@@ -56,6 +56,7 @@ Do **not** call any other tool before `get_coaching_brief` returns.
    - `review_summary`
    - `intensity_check`
    - `load_check`
+   - `personal_records_summary`
    - `proposal_summary`
    - `coaching_note`
 3. Propose a day-by-day workout plan yourself using:
@@ -72,7 +73,7 @@ Do **not** call any other tool before `get_coaching_brief` returns.
 | Forbidden | Why |
 |-----------|-----|
 | `get_weekly_report`, `get_weekly_review`, `get_coach_prompt`, `get_training_plan`, `get_plan_weeks` | Removed from garmin-mcp |
-| `get_profile`, `get_events`, `get_race_predictions` | Already inside `get_coaching_brief` |
+| `get_profile`, `get_events`, `get_race_predictions`, `get_personal_records` | Already inside `get_coaching_brief` |
 | `create_document`, `manage_notes` | No synthetic Garmin data |
 | `manage_skills`, `manage_mcp`, `list_models` | Admin / discovery — not coaching |
 | `manage_calendar` | User means training plan, not calendar events |
@@ -92,7 +93,7 @@ this skill. There is no fixture to invent.
 - One `get_coaching_brief` per turn — review and proposal are both in the response.
 - Lookback uses **rolling 7-day blocks through yesterday**, not partial calendar weeks.
 - Recovery-week volume target is **80% of your peak build-week km**, not the partial latest block.
-- Polarized only (easy or hard) — no Zone 3 / tempo prescriptions.
+- Polarized easy + quality: ≈80% Z1-2 / 0% Z3 / 15% Z4 / 5% Z5 (build week) — no Zone 3 / tempo prescriptions.
 - Do not ask the user to paste Garmin data.
 
 ## Verification
