@@ -27,11 +27,14 @@ def activity_type_key(activity: dict[str, Any]) -> str | None:
 
 
 def counts_toward_run_distance(activity: dict[str, Any]) -> bool:
-    """True when activity distance should feed running volume targets."""
+    """True when activity distance should feed running volume targets.
+
+    Missing/unknown type keys do **not** count — after multi-sport rollups,
+    untyped Garmin rows must not inflate run km.
+    """
     key = activity_type_key(activity)
     if key is None:
-        # Legacy fixtures / bare rows without type — treat as run distance.
-        return True
+        return False
     return key in _RUNNING_DISTANCE_TYPE_KEYS
 
 

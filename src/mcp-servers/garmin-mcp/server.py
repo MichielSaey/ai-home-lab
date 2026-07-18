@@ -576,9 +576,8 @@ def get_report(
 
     personal_records = get_personal_records()
     if isinstance(personal_records, dict) and personal_records.get("error"):
-        # Soft-fail: PRs are optional athlete context, not a hard report blocker.
-        if personal_records.get("code"):
-            return personal_records
+        # Always soft-fail: PRs are optional athlete context. Auth/client failures
+        # already abort earlier via profile / race_predictions / events.
         personal_records = {
             "records": [],
             "summary": str(personal_records.get("error")),

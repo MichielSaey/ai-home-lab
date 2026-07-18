@@ -85,6 +85,7 @@ def test_weekly_stats_rows_combines_distance_and_zones() -> None:
         {
             "activityId": 1,
             "distance": 5000,
+            "activityType": {"typeKey": "running"},
             "startTimeLocal": "2026-06-16 07:00:00",
         }
     ]
@@ -99,6 +100,21 @@ def test_weekly_stats_rows_combines_distance_and_zones() -> None:
     assert latest_week[2] == 5.0
     assert latest_week[3] == 10.0
     assert latest_week[4] == 10.0
+
+
+def test_weekly_stats_rows_untyped_distance_does_not_count() -> None:
+    anchor_end = date(2026, 6, 16)
+    activities = [
+        {
+            "activityId": 1,
+            "distance": 12000,
+            "startTimeLocal": "2026-06-16 07:00:00",
+        }
+    ]
+    activity_zones = {1: {2: 1800}}
+    rows = weekly_stats_rows(activities, activity_zones, anchor_end, num_blocks=1)
+    assert rows[0][2] == 0.0
+    assert rows[0][3] == 30.0
 
 
 def test_weekly_stats_rows_includes_non_running_activities() -> None:

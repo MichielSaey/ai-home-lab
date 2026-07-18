@@ -290,6 +290,70 @@ def test_get_coaching_brief_includes_personal_records() -> None:
     activities_table.assert_not_called()
 
 
+def test_get_coaching_brief_soft_fails_coded_personal_record_errors() -> None:
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
+        patch.object(server, "get_profile", return_value={"weight": 70}),
+        patch.object(server, "get_race_predictions", return_value={"Garmin Race Predictions": {}}),
+        patch.object(
+            server,
+            "get_personal_records",
+            return_value={"error": "PR endpoint failed", "code": "garmin_api_error"},
+        ),
+        patch.object(server, "get_events", return_value={"Garmin Events": {}, "latest_event": None}),
+        patch.object(
+            server,
+            "_training_plan_table",
+            return_value=(
+                [
+                    {
+                        "week_description": "latest_week",
+                        "week_type": "build",
+                        "actuals": {
+                            "distance_km": 40,
+                            "total_zone_min": 100,
+                            "easy_pct": 80,
+                            "medium_pct": 0,
+                            "hard_pct": 20,
+                            "zone_4_pct": 15,
+                            "zone_5_pct": 5,
+                            "acwr": 1.0,
+                        },
+                        "target": {
+                            "distance_km": 40,
+                            "easy_pct": 80,
+                            "medium_pct": 0,
+                            "zone_4_pct": 15,
+                            "zone_5_pct": 5,
+                            "hard_pct": 20,
+                        },
+                    },
+                    {
+                        "week_description": "upcoming_week",
+                        "week_type": "build",
+                        "actuals": {},
+                        "target": {
+                            "distance_km": 44,
+                            "easy_pct": 80,
+                            "medium_pct": 0,
+                            "zone_4_pct": 15,
+                            "zone_5_pct": 5,
+                            "hard_pct": 20,
+                        },
+                        "days": [],
+                    },
+                ],
+                [],
+            ),
+        ),
+    ):
+        result = server.get_coaching_brief()
+
+    assert "coaching_brief" in result
+    assert result["personal_records"]["records"] == []
+    assert "PR endpoint failed" in result["personal_records"]["summary"]
+
+
 def test_get_coaching_brief_is_primary_coach_bundle() -> None:
     with (
         patch.object(server, "_get_client_or_error", return_value=(MagicMock(), None)),
