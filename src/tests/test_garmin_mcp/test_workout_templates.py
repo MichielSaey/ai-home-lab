@@ -36,6 +36,31 @@ def test_build_sprint_workout_steps_uses_repeat_block() -> None:
     steps = build_sprint_workout_steps(repetitions=3)
     assert steps[1]["type"] == "repeat"
     assert steps[1]["iterations"] == 3
+    effort = steps[1]["steps"][0]
+    assert effort["distance_meters"] == 100
+    assert effort["target"] == "speed"
+    assert effort["speed_mps_min"] == 5.5
+    assert effort["speed_mps_max"] == 6.5
+    assert "duration_minutes" not in effort
+    assert "workout_type" not in effort
+
+
+def test_build_sprint_workout_steps_custom_distance_and_speed() -> None:
+    steps = build_sprint_workout_steps(
+        repetitions=4,
+        sprint_distance_meters=200,
+        target_speed_mps_min=6.0,
+        target_speed_mps_max=7.0,
+    )
+    effort = steps[1]["steps"][0]
+    assert effort["distance_meters"] == 200
+    assert effort["speed_mps_min"] == 6.0
+    assert effort["speed_mps_max"] == 7.0
+
+
+def test_build_template_steps_rejects_sprint_seconds() -> None:
+    with pytest.raises(ValueError, match="no longer accepts sprint_seconds"):
+        build_template_steps("sprint", {"sprint_seconds": 30})
 
 
 def test_build_threshold_workout_steps_uses_repeat_block() -> None:

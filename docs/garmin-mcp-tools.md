@@ -35,8 +35,8 @@ All four are already inside `get_coaching_brief`.
 | `create_recovery_workout` | Z1 recovery |
 | `create_long_run_workout` | Long easy |
 | `create_threshold_workout` | Z4 threshold repeats (`repetitions`, `interval_minutes`, 2 min recovery default) |
-| `create_sprint_workout` | Z5 sprints |
-| `create_hill_repeats_workout` | Z5 hill sprints |
+| `create_sprint_workout` | Distance sprints with speed (m/s) targets |
+| `create_hill_repeats_workout` | Hill distance sprints with speed targets |
 | `create_weighted_pack_workout` | Loaded pack / ruck |
 | `combine_workout_templates` | Multi-segment workout |
 | `workout` | Low-level custom steps |
