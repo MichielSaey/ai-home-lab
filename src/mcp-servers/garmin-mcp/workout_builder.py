@@ -182,6 +182,11 @@ def _build_executable_step(
         meters = float(distance_meters)
         if meters <= 0:
             raise ValueError("distance_meters must be positive.")
+        if not _uses_speed_target(step):
+            raise ValueError(
+                "distance_meters steps require a speed target "
+                "(target='speed' with speed_mps_min / speed_mps_max)."
+            )
         end_condition = _distance_end_condition()
         end_value = meters
     else:

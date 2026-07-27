@@ -145,6 +145,16 @@ def test_extract_workout_id_handles_common_response_shapes() -> None:
             "duration_minutes or distance_meters, not both",
         ),
         (
+            [
+                {
+                    "type": "interval",
+                    "distance_meters": 100,
+                    "workout_type": "sprint",
+                }
+            ],
+            "require a speed target",
+        ),
+        (
             [{"type": "jog", "duration_minutes": 10}],
             "Unsupported step type 'jog'.",
         ),
