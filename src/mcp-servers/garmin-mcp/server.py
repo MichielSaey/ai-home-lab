@@ -1109,13 +1109,15 @@ def workout(
 
     Each step is a dict with:
     - type: warmup | interval | recovery | cooldown | repeat
-    - duration_minutes: float (required for regular steps)
+    - duration_minutes: float (time end condition) OR distance_meters (distance end)
     - workout_type: optional preset zone key (base, threshold, sprint, ...)
     - heart_rate_zone: optional Garmin zone number 1-5 (overrides workout_type)
+    - target: optional "speed" with speed_mps_min / speed_mps_max (m/s range)
     - iterations + steps: required for repeat blocks
 
-    Heart rate targets are set automatically unless heart_rate_zone is provided.
-    Pass workout_date (YYYY-MM-DD) to also schedule it in the same call.
+    Default intensity target is HR zone. Sprint-style efforts can use
+    distance_meters + target="speed" instead. Pass workout_date (YYYY-MM-DD)
+    to also schedule it in the same call.
     """
     client, error = _get_client_or_error()
     if error:
@@ -1345,7 +1347,9 @@ def create_threshold_workout(
 @mcp.tool()
 def create_sprint_workout(
     repetitions: int = 6,
-    sprint_seconds: int = 30,
+    sprint_distance_meters: int = 100,
+    target_speed_mps_min: float = 5.5,
+    target_speed_mps_max: float = 6.5,
     recovery_seconds: int = 90,
     warmup_minutes: int = 15,
     cooldown_minutes: int = 10,
@@ -1353,14 +1357,21 @@ def create_sprint_workout(
     include_nutrition_cues: bool = False,
     workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create short sprint repeats with jog recoveries (efforts in HR zone 5).
-    Pass workout_date (YYYY-MM-DD) to also schedule it in the same call."""
+    """Create short sprint repeats with jog recoveries.
+
+    Each effort ends at ``sprint_distance_meters`` with a Garmin speed.zone
+    target (``target_speed_mps_min``–``target_speed_mps_max`` in m/s). Warmup,
+    recovery, and cooldown stay time-based with HR zones. Pass workout_date
+    (YYYY-MM-DD) to also schedule it in the same call.
+    """
     return _create_from_template(
         "sprint",
         name,
         params={
             "repetitions": repetitions,
-            "sprint_seconds": sprint_seconds,
+            "sprint_distance_meters": sprint_distance_meters,
+            "target_speed_mps_min": target_speed_mps_min,
+            "target_speed_mps_max": target_speed_mps_max,
             "recovery_seconds": recovery_seconds,
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,
@@ -1373,7 +1384,9 @@ def create_sprint_workout(
 @mcp.tool()
 def create_hill_repeats_workout(
     repetitions: int = 6,
-    sprint_seconds: int = 30,
+    sprint_distance_meters: int = 100,
+    target_speed_mps_min: float = 5.5,
+    target_speed_mps_max: float = 6.5,
     recovery_seconds: int = 90,
     warmup_minutes: int = 15,
     cooldown_minutes: int = 10,
@@ -1381,15 +1394,20 @@ def create_hill_repeats_workout(
     include_nutrition_cues: bool = False,
     workout_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create hill repeats — sprint repeats meant to be run uphill (efforts in
-    HR zone 5). Same structure as sprints; run them on a hill. Pass workout_date
-    (YYYY-MM-DD) to also schedule it in the same call."""
+    """Create hill repeats — distance sprints meant to be run uphill.
+
+    Same structure as ``create_sprint_workout`` (distance + speed targets on
+    efforts). Run them on a hill. Pass workout_date (YYYY-MM-DD) to also
+    schedule it in the same call.
+    """
     return _create_from_template(
         "hill_repeats",
         name,
         params={
             "repetitions": repetitions,
-            "sprint_seconds": sprint_seconds,
+            "sprint_distance_meters": sprint_distance_meters,
+            "target_speed_mps_min": target_speed_mps_min,
+            "target_speed_mps_max": target_speed_mps_max,
             "recovery_seconds": recovery_seconds,
             "warmup_minutes": warmup_minutes,
             "cooldown_minutes": cooldown_minutes,

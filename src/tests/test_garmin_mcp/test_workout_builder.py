@@ -47,6 +47,54 @@ def test_build_workout_steps_supports_repeat_blocks() -> None:
     assert len(repeat["workoutSteps"]) == 2
 
 
+def test_build_workout_steps_distance_speed_sprint_effort() -> None:
+    steps = build_workout_steps(
+        [
+            {
+                "type": "interval",
+                "distance_meters": 100,
+                "target": "speed",
+                "speed_mps_min": 5.5,
+                "speed_mps_max": 6.5,
+            }
+        ]
+    )
+    payload = steps[0].model_dump()
+    assert payload["endCondition"]["conditionTypeKey"] == "distance"
+    assert payload["endConditionValue"] == 100.0
+    assert payload["targetType"]["workoutTargetTypeKey"] == "speed.zone"
+    assert payload["targetValueOne"] == 5.5
+    assert payload["targetValueTwo"] == 6.5
+    assert "zoneNumber" not in payload
+
+
+def test_estimate_duration_seconds_counts_distance_speed_steps() -> None:
+    steps = build_workout_steps(
+        [
+            {
+                "type": "repeat",
+                "iterations": 2,
+                "steps": [
+                    {
+                        "type": "interval",
+                        "distance_meters": 120,
+                        "target": "speed",
+                        "speed_mps_min": 6.0,
+                        "speed_mps_max": 6.0,
+                    },
+                    {
+                        "type": "recovery",
+                        "duration_minutes": 0.5,
+                        "workout_type": "interval_recovery",
+                    },
+                ],
+            }
+        ]
+    )
+    # 2 * (120m / 6 m/s + 30s) = 2 * (20 + 30) = 100
+    assert estimate_duration_seconds(steps) == 100
+
+
 def test_estimate_duration_seconds_counts_repeat_iterations() -> None:
     steps = build_workout_steps(
         [
@@ -54,7 +102,7 @@ def test_estimate_duration_seconds_counts_repeat_iterations() -> None:
                 "type": "repeat",
                 "iterations": 2,
                 "steps": [
-                    {"type": "interval", "duration_minutes": 1, "workout_type": "sprint"},
+                    {"type": "interval", "duration_minutes": 1, "workout_type": "threshold"},
                     {
                         "type": "recovery",
                         "duration_minutes": 0.5,
@@ -83,7 +131,18 @@ def test_extract_workout_id_handles_common_response_shapes() -> None:
         ([], "At least one workout step is required."),
         (
             [{"type": "interval", "workout_type": "base"}],
-            "Each step requires duration_minutes.",
+            "Each step requires duration_minutes or distance_meters.",
+        ),
+        (
+            [
+                {
+                    "type": "interval",
+                    "duration_minutes": 1,
+                    "distance_meters": 100,
+                    "workout_type": "base",
+                }
+            ],
+            "duration_minutes or distance_meters, not both",
         ),
         (
             [{"type": "jog", "duration_minutes": 10}],

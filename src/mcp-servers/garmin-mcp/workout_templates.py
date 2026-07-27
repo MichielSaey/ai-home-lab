@@ -94,24 +94,58 @@ def build_threshold_workout_steps(
     ]
 
 
+def _sprint_effort_step(
+    distance_meters: int,
+    speed_mps_min: float,
+    speed_mps_max: float,
+) -> Dict[str, Any]:
+    """Sprint effort: distance end condition + speed target (not HR zone)."""
+    mid_speed = (float(speed_mps_min) + float(speed_mps_max)) / 2.0
+    estimated_minutes = (
+        float(distance_meters) / mid_speed / 60.0 if mid_speed > 0 else 0.5
+    )
+    return {
+        "type": "interval",
+        "distance_meters": distance_meters,
+        "target": "speed",
+        "speed_mps_min": speed_mps_min,
+        "speed_mps_max": speed_mps_max,
+        "estimated_duration_minutes": estimated_minutes,
+    }
+
+
 def build_sprint_workout_steps(
     repetitions: int = 6,
-    sprint_seconds: int = 30,
+    sprint_distance_meters: int = 100,
+    target_speed_mps_min: float = 5.5,
+    target_speed_mps_max: float = 6.5,
     recovery_seconds: int = 90,
     warmup_minutes: int = 15,
     cooldown_minutes: int = 10,
 ) -> List[Dict[str, Any]]:
+    """Sprint repeats with distance (m) + speed (m/s) targets on efforts.
+
+    Warmup / jog recovery / cooldown stay time-based with HR zones. Short
+    anaerobic efforts use speed instead of Z5 because HR lags on sprints.
+    """
+    if sprint_distance_meters <= 0:
+        raise ValueError("sprint_distance_meters must be positive.")
+    if target_speed_mps_min <= 0 or target_speed_mps_max <= 0:
+        raise ValueError("Sprint speed targets must be positive m/s values.")
+    if target_speed_mps_max < target_speed_mps_min:
+        raise ValueError("target_speed_mps_max must be >= target_speed_mps_min.")
+
     return [
         {"type": "warmup", "duration_minutes": warmup_minutes, "workout_type": "warmup"},
         {
             "type": "repeat",
             "iterations": repetitions,
             "steps": [
-                {
-                    "type": "interval",
-                    "duration_minutes": sprint_seconds / 60.0,
-                    "workout_type": "sprint",
-                },
+                _sprint_effort_step(
+                    sprint_distance_meters,
+                    target_speed_mps_min,
+                    target_speed_mps_max,
+                ),
                 {
                     "type": "recovery",
                     "duration_minutes": recovery_seconds / 60.0,
@@ -151,9 +185,17 @@ def build_template_steps(template: str, params: Optional[Dict[str, Any]] = None)
             cooldown_minutes=int(params.get("cooldown_minutes", 10)),
         )
     if template_key == "sprint":
+        if "sprint_seconds" in params:
+            raise ValueError(
+                "sprint template no longer accepts sprint_seconds; "
+                "use sprint_distance_meters with target_speed_mps_min/"
+                "target_speed_mps_max instead."
+            )
         return build_sprint_workout_steps(
             repetitions=int(params.get("repetitions", 6)),
-            sprint_seconds=int(params.get("sprint_seconds", 30)),
+            sprint_distance_meters=int(params.get("sprint_distance_meters", 100)),
+            target_speed_mps_min=float(params.get("target_speed_mps_min", 5.5)),
+            target_speed_mps_max=float(params.get("target_speed_mps_max", 6.5)),
             recovery_seconds=int(params.get("recovery_seconds", 90)),
             warmup_minutes=int(params.get("warmup_minutes", 15)),
             cooldown_minutes=int(params.get("cooldown_minutes", 10)),
@@ -247,7 +289,13 @@ TEMPLATE_DESCRIPTIONS = {
     "long_run": "Extended easy aerobic run in HR zone 2.",
     "recovery": "Short recovery jog in HR zone 1.",
     "threshold": "Warmup, lactate-threshold repeats in HR zone 4 with recoveries, cooldown.",
-    "sprint": "Warmup, short max-effort sprints in HR zone 5 with jog recoveries, cooldown.",
-    "hill_repeats": "Sprints run uphill: warmup, max-effort hill reps in HR zone 5 with jog recoveries, cooldown.",
+    "sprint": (
+        "Warmup, short distance sprints with speed targets (m/s) and jog "
+        "recoveries, cooldown. Efforts use distance + speed, not HR zone."
+    ),
+    "hill_repeats": (
+        "Sprints run uphill: warmup, distance hill reps with speed targets "
+        "and jog recoveries, cooldown. Efforts use distance + speed, not HR zone."
+    ),
     "weighted_pack": "Base aerobic run in HR zone 2 carrying a loaded pack (rucking).",
 }
