@@ -39,7 +39,7 @@ services:
       NODE_ENV: production
       API_URL: http://vibe-workflow-server:8000
     ports:
-      - "${VIBE_WORKFLOW_BIND:-127.0.0.1}:${VIBE_WORKFLOW_CLIENT_PORT:-3000}:3000"
+      - "${VIBE_WORKFLOW_BIND:-127.0.0.1}:${VIBE_WORKFLOW_CLIENT_PORT:-7300}:3000"
     healthcheck:
       test:
         [

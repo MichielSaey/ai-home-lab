@@ -27,7 +27,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 | garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
 | actual-mcp | 3000 (internal) | Actual Budget MCP server (SSE) |
 | todoist-mcp | 3001 (internal) | Todoist MCP server (Streamable HTTP) |
-| Vibe-Workflow | 3000 (UI), 8010 (API) | Node-based AI image/video workflow editor |
+| Vibe-Workflow | 7300 (UI), 8010 (API) | Node-based AI image/video workflow editor |
 | chromadb / searxng | bundled with Odysseus | Vector store, search |
 
 ## Running locally
@@ -49,7 +49,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
    - **URL:** `http://garmin-mcp:8000/mcp`
    - If you previously added the SSE endpoint (`…/sse`), delete that server and re-add with HTTP — SSE connections list tools but tool calls fail in Odysseus.
 7. Configure models in Odysseus (or `OLLAMA_BASE_URL` in `.env`)
-8. Open Vibe-Workflow at `http://localhost:3000` (set `MU_API_KEY` in `.env` first)
+8. Open Vibe-Workflow at `http://localhost:7300` (set `MU_API_KEY` in `.env` first)
 
 ### Spin up sections independently
 
