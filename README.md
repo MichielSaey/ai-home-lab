@@ -27,14 +27,16 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
 | garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
 | actual-mcp | 3000 (internal) | Actual Budget MCP server (SSE) |
 | todoist-mcp | 3001 (internal) | Todoist MCP server (Streamable HTTP) |
+| Vibe-Workflow | 3000 (UI), 8010 (API) | Node-based AI image/video workflow editor |
 | chromadb / searxng | bundled with Odysseus | Vector store, search |
 
 ## Running locally
 
-1. Copy `.env.example` to `.env` at the **repo root** and fill in values. This one file configures garmin-mcp, actual-mcp, todoist-mcp, and Odysseus — you do not need `services/odysseus/.env`.
-2. Vendor Odysseus (first run only):
+1. Copy `.env.example` to `.env` at the **repo root** and fill in values. This one file configures garmin-mcp, actual-mcp, todoist-mcp, Vibe-Workflow, and Odysseus — you do not need `services/odysseus/.env`.
+2. Vendor Odysseus and Vibe-Workflow (first run only):
    ```bash
    ./scripts/ensure-odysseus.sh
+   ./scripts/ensure-vibe-workflow.sh
    ```
 3. Start the full stack:
    ```bash
@@ -47,6 +49,7 @@ Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md]
    - **URL:** `http://garmin-mcp:8000/mcp`
    - If you previously added the SSE endpoint (`…/sse`), delete that server and re-add with HTTP — SSE connections list tools but tool calls fail in Odysseus.
 7. Configure models in Odysseus (or `OLLAMA_BASE_URL` in `.env`)
+8. Open Vibe-Workflow at `http://localhost:3000` (set `MU_API_KEY` in `.env` first)
 
 ### Spin up sections independently
 
@@ -86,6 +89,14 @@ Set `ODYSSEUS_REF` in `.env` to a branch, tag, or commit SHA. To update an exist
 
 ```bash
 ODYSSEUS_UPDATE=1 ./scripts/ensure-odysseus.sh
+```
+
+### Pinning Vibe-Workflow
+
+Set `VIBE_WORKFLOW_REF` in `.env` to a branch, tag, or commit SHA. To update an existing clone:
+
+```bash
+VIBE_WORKFLOW_UPDATE=1 ./scripts/ensure-vibe-workflow.sh
 ```
 
 ### Sending `.env` to CasaOS (for GitHub Actions runner)
@@ -138,7 +149,8 @@ Include these paths in your CasaOS or homelab backup routine.
 ```
 docker-compose.yml                    # root — includes mcp + services
 src/mcp-servers/docker-compose.yml    # garmin-mcp, actual-mcp, todoist-mcp
-services/docker-compose.yml           # Odysseus stack (includes vendored compose)
+services/docker-compose.yml           # Odysseus + Vibe-Workflow (includes vendored compose)
 casaos/docker-compose.yml             # optional CasaOS dashboard import
 services/odysseus/                    # cloned by scripts/ensure-odysseus.sh (gitignored except .gitkeep)
+services/vibe-workflow/               # cloned by scripts/ensure-vibe-workflow.sh (gitignored except .gitkeep)
 ```

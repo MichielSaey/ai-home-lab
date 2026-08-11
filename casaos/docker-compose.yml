@@ -11,9 +11,9 @@ x-casaos:
   category: AI
   description:
     en_us: |
-      Personal AI home lab: Odysseus agent UI, garmin-mcp, ntfy, ChromaDB, and SearXNG.
+      Personal AI home lab: Odysseus agent UI, Vibe-Workflow, garmin-mcp, ntfy, ChromaDB, and SearXNG.
 
-      Before first start, copy `.env.example` to `.env` in the repo root and run `./scripts/ensure-odysseus.sh`.
+      Before first start, copy `.env.example` to `.env` in the repo root and run `./scripts/ensure-odysseus.sh` and `./scripts/ensure-vibe-workflow.sh`.
   developer: ai-home-lab
   icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/odyssey.png
   index: /
@@ -26,7 +26,7 @@ x-casaos:
   tips:
     before_install:
       en_us: |
-        Requires a `.env` file at the repo root and an Odysseus clone under `services/odysseus/`.
+        Requires a `.env` file at the repo root and clones under `services/odysseus/` and `services/vibe-workflow/`.
         GitHub Actions deploy on the CasaOS runner handles both automatically.
   title:
     en_us: AI Home Lab

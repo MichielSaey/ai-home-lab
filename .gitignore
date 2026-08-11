@@ -28,4 +28,8 @@ src/tools/epub2audiobook/data/**
 # vendored Odysseus (cloned by scripts/ensure-odysseus.sh)
 services/odysseus/*
 !services/odysseus/.gitkeep
+
+# vendored Vibe-Workflow (cloned by scripts/ensure-vibe-workflow.sh)
+services/vibe-workflow/*
+!services/vibe-workflow/.gitkeep
 .env

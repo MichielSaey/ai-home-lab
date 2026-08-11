@@ -11,6 +11,7 @@ Checklists, milestones, and GitHub issues. Architecture: [DESIGN.md](./DESIGN.md
 | Area | State |
 |------|-------|
 | Odysseus + compose | Implemented |
+| Vibe-Workflow | Implemented |
 | garmin-mcp core tools | Implemented |
 | Chainlit `agent_hub` | Removed |
 | `garmin_trainer` | Removed (A.6) |

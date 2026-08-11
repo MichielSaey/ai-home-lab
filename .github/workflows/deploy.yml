@@ -34,6 +34,9 @@ jobs:
       - name: Vendor Odysseus
         run: chmod +x scripts/ensure-odysseus.sh && ./scripts/ensure-odysseus.sh
 
+      - name: Vendor Vibe-Workflow
+        run: chmod +x scripts/ensure-vibe-workflow.sh && ./scripts/ensure-vibe-workflow.sh
+
       - name: Build and start services
         run: docker compose up -d --build --remove-orphans --wait --wait-timeout 600
 
