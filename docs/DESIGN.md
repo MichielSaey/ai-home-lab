@@ -112,7 +112,7 @@ Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysse
 
 - Visual node editor (Weavy/Krea/ComfyUI-style) for AI media pipelines.
 - FastAPI backend + Next.js frontend in compose on the `edge` network.
-- Default UI: `http://localhost:7300`; API: `http://localhost:8010`.
+- Default UI: `http://<server-ip>:7300`; API: `http://<server-ip>:8010` (binds `0.0.0.0` for LAN access).
 - Requires `MU_API_KEY` from [muapi.ai](https://muapi.ai) for workflow execution (proxies model providers including OpenRouter Vision nodes).
 - Not wired into Odysseus MCP — standalone creative tool alongside the agent stack.
 
