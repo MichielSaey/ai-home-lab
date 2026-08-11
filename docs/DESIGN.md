@@ -106,6 +106,16 @@ Self-hosted workspace ([upstream](https://github.com/pewdiepie-archdaemon/odysse
 - Port `7000`. All **interactive** work happens here.
 - Connects to MCP servers over Streamable HTTP on the `edge` network.
 
+### Vibe-Workflow (implemented)
+
+[Vibe-Workflow](https://github.com/SamurAIGPT/Vibe-Workflow) — open-source node-based AI workflow builder for generative image and video pipelines. Vendored at `services/vibe-workflow` (cloned via `scripts/ensure-vibe-workflow.sh`).
+
+- Visual node editor (Weavy/Krea/ComfyUI-style) for AI media pipelines.
+- FastAPI backend + Next.js frontend in compose on the `edge` network.
+- Default UI: `http://localhost:3000`; API: `http://localhost:8010`.
+- Requires `MU_API_KEY` from [muapi.ai](https://muapi.ai) for workflow execution (proxies model providers including OpenRouter Vision nodes).
+- Not wired into Odysseus MCP — standalone creative tool alongside the agent stack.
+
 ### n8n (planned)
 
 Workflow orchestration in compose.

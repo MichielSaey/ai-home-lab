@@ -6,6 +6,8 @@ name: ai-home-lab-services
 include:
   - path: odysseus/docker-compose.yml
     env_file: ../.env
+  - path: vibe-workflow-compose.yml
+    env_file: ../.env
 
 services:
   odysseus:
