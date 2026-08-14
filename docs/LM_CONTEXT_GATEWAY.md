@@ -1,11 +1,11 @@
 # LM Context Gateway — Design
 
-**Status:** Draft / future work  
-**Last updated:** 2026-07-01
+**Status:** Draft / future work (not part of the current Nix / home-manager cutover)  
+**Last updated:** 2026-08-14
 
 A design for a small library and runtime that turns **deterministic MCP preloads + LLM narration** into an **OpenAI-compatible API endpoint**. Domain logic stays in MCP servers; orchestration of *when* and *how* context is injected moves out of general-purpose agents (Odysseus) and into a narrow, configurable gateway.
 
-Garmin running coach is the intended **reference recipe**. Todoist, home automation, or email digests would be additional recipes using the same scaffolding.
+Garmin running coach is the intended **reference recipe**. Todoist, Actual, or email digests would be additional recipes using the same scaffolding.
 
 Related today:
 
@@ -15,22 +15,78 @@ Related today:
 
 ---
 
+## 0. Decision (Odysseus replacement, 2026-08-14)
+
+Do **not** swap Odysseus for one mega-app. The gap is not “another chat UI.” It is an **agent-writable catalog**: Cursor (and other agents) must be able to add Garmin, Todoist, Actual, or a new MCP by editing git, after which the phone/PWA discovers a new capability with **no Admin clicks**.
+
+Odysseus can already attach MCP servers. Attachment lives in Admin UI → SQLite (`app.db`) and JSON under the data volume. Recreate the container and the rows are gone. Agents cannot fill that form. Cursor already has the other kind of dynamic via `mcp.json`. The homelab GUI does not.
+
+**LM Context Gateway is the shape that fixes that:**
+
+1. Point the GUI at **one** OpenAI-compatible endpoint, once.
+2. Recipes in git become entries on `GET /v1/models` (`garmin-coach`, `todoist-digest`, `actual-review`, …).
+3. An agent adding a capability is a YAML file + apply — not an Admin row.
+4. The GUI only **selects a model**. It never grows MCP URL rows.
+
+That is dynamic for the UI (new capabilities appear) and static for ops (git / Nix is the source of truth).
+
+### Two kinds of “dynamic MCP”
+
+| Kind | Who updates it | What the GUI does |
+| --- | --- | --- |
+| Odysseus Admin MCP rows | Human in the PWA | Stores URLs in `app.db`. Recreate the volume and it is gone. Agents cannot fill the form. |
+| Gateway recipes → `/v1/models` | Agent commits YAML (or Nix copies it in) | GUI already has one custom endpoint. New recipe shows up as a model to pick. |
+| LibreChat `librechat.yaml` MCP list | Agent edits YAML + restart | GUI grows a tool list. Better than Admin, but every new MCP is still a **client-side attach** — not one endpoint forever. |
+
+LibreChat is the closest git-friendly Odysseus-like UI. Use it as a **client of the gateway**, not as the place that accumulates MCP URLs. Open WebUI’s MCP Admin is the same class of problem as Odysseus. Do not fork Odysseus (AGPL vendor clone; DESIGN.md out of scope). Wrapping Odysseus in Nix houses the container; it does not fix agent semantics or config drift.
+
+### What to keep vs park
+
+| Keep | Drop or park |
+| --- | --- |
+| garmin-mcp, actual-mcp, todoist-mcp, `docs/skills` | Odysseus **agent mode** + tool-RAG as the coach |
+| LiteLLM as the model router | Wiring models only in Odysseus Admin |
+| n8n for unattended flows (cron, Proton→Paperless, bank sync, ntfy) | Langflow as the Garmin path (already the lesson) |
+| Gateway recipes in git | OpenClaw as the primary replacement (optional later sidecar) |
+
+Until this layer is built, Odysseus stays the GUI and MCP servers stay the domain layer. homelab-nix apply, home-manager, and Paperless are a **different track**.
+
+### Target architecture
+
+Split “chat app” from “what the model is allowed to do.” That is already the layering in DESIGN.md. The missing piece is a git-owned runtime between LiteLLM and MCP.
+
+| Layer | Owns | Lives in |
+| --- | --- | --- |
+| Nix flake / compose | Containers, networks, secrets, Homepage | homelab-nix |
+| MCP servers | Garmin / Actual / Todoist domain logic | `src/mcp-servers` (keep) |
+| LiteLLM | Which weights / cloud routes | Existing `:4000` (cut over to Nix later) |
+| **LM Context Gateway** | Recipes: preload, prompt, action-tool allowlist, pseudo-model name | New service; YAML in git |
+| Chat UI (LibreChat later) | Conversation, memory, phone-usable UI | New Nix-managed container; **one** custom endpoint |
+| n8n | Cron, webhooks, if/else | Already Nix-managed |
+
+A Garmin turn: client sends `model: garmin-coach` to the gateway. Gateway always calls `get_coaching_brief` on garmin-mcp, injects JSON into the system prompt, then optionally allows a short action-tool loop (`create_*_workout`). LiteLLM only sees a normal chat completion. The model cannot “forget” the brief. Same pattern for `todoist-digest` and `actual-review`.
+
+Suggested cutover when this *is* prioritised: (1) gateway + `garmin-coach` on `homelab-mcp`, (2) LibreChat pointed at that one endpoint, (3) more recipes, (4) park Odysseus compose (restic snapshot of `app.db`; do not delete until coach + Actual chat feel right).
+
+---
+
 ## 1. Problem
 
-General agent UIs (Odysseus agent mode, etc.) are built for **open-ended tool selection**:
+General agent UIs (Odysseus agent mode, Open WebUI MCP Admin, etc.) are built for **open-ended tool selection** *and* store that selection in a GUI database:
 
-- Tool-RAG may miss the right MCP tool on a given turn.
+- Tool-RAG may miss the right MCP tool on a given turn (Garmin coaching misses `get_coaching_brief`).
 - Short follow-ups can hit fast paths (e.g. low-signal replies) without tools or full context.
 - Multi-step flows (`get_coach_prompt` → `get_weekly_review` → analyze) depend on model discipline.
+- MCP servers, model endpoints, and presets live in SQLite/JSON under the data volume — not in git. Agents cannot update them.
 
 **Langflow-style workflows** worked for Garmin because they **always fetched the same data first**, then let the LLM talk. The valuable pattern is not the UI—it is:
 
 1. **Deterministic preload** from MCP (or REST).
 2. **Inject** results into the model context.
 3. **Optional** short tool loop for actions (schedule workout, create task).
-4. Expose as a **normal chat API** so any client (Odysseus chat mode, LiteLLM, curl) can use it as “just another model.”
+4. Expose as a **normal chat API** so any client (LibreChat, Odysseus chat mode until parked, LiteLLM, curl) can use it as “just another model.”
 
-The LM Context Gateway formalizes that pattern as reusable infrastructure.
+The LM Context Gateway formalizes that pattern as reusable infrastructure **and** as the agent-writable catalog (recipe files → `/v1/models`).
 
 ---
 
@@ -39,6 +95,7 @@ The LM Context Gateway formalizes that pattern as reusable infrastructure.
 | Goal | Detail |
 |------|--------|
 | **Recipe-driven** | YAML/JSON manifest: MCP connection, preload tool calls, context template, LLM route, exposed model name. |
+| **Agent-writable catalog** | Adding a recipe file is how an agent attaches a domain. GUI config does not grow. |
 | **Deterministic preload** | Named MCP tools run in declared order before every completion (or on cache TTL). |
 | **OpenAI-compatible surface** | `POST /v1/chat/completions`, optional streaming; `GET /v1/models` listing pseudo-models per recipe. |
 | **LiteLLM as backend** | Gateway calls LiteLLM for the actual LLM; supports local and cloud models. |
@@ -47,11 +104,14 @@ The LM Context Gateway formalizes that pattern as reusable infrastructure.
 
 ## 3. Non-goals (v1)
 
-- Replacing Odysseus or n8n globally.
+- Replacing Odysseus or n8n globally, or swapping Odysseus for one mega-app.
+- Forking Odysseus (AGPL; DESIGN.md out of scope) or growing `agent_loop.py`.
+- Teaching Odysseus a config API so agents can POST Admin MCP rows.
 - Visual workflow editor (Langflow/n8n territory).
 - Hosting or training models.
 - Multi-tenant auth, billing, or rate limiting beyond a simple API key.
 - Arbitrary agent loops (cap tool rounds; preload is the main event).
+- The current Nix cutover (containers, home-manager, Paperless). Build this when agents should add models instead of Admin rows.
 
 ---
 
@@ -64,6 +124,7 @@ The LM Context Gateway formalizes that pattern as reusable infrastructure.
 | **Preload** | Fixed list of MCP tool invocations that run before the LLM sees the user message. |
 | **Context bundle** | Merged JSON/text from preload results, rendered into system (or developer) message. |
 | **Pseudo-model** | Client-visible model name (`garmin-coach`) mapping to a recipe, not weights on disk. |
+| **Catalog** | `GET /v1/models` — one entry per enabled recipe. This is what the GUI lists. |
 | **Transform** | Optional post-processing of tool output (JSONPath, Jinja, or Python hook) before injection. |
 | **Action tools** | Subset of MCP tools still offered to the LLM after preload (e.g. `create_*_workout`). |
 
@@ -73,11 +134,11 @@ The LM Context Gateway formalizes that pattern as reusable infrastructure.
 
 ```mermaid
 flowchart TB
-    Client[OpenAI client\nOdysseus / LiteLLM / curl]
-    API["/v1/chat/completions"]
+    Client[OpenAI client\nLibreChat / curl / Odysseus chat until parked]
+    API["/v1/chat/completions + /v1/models"]
     GW[LM Context Gateway]
     Cache[(Preload cache)]
-    MCP[MCP server\ngarmin-mcp / todoist-mcp / ...]
+    MCP[MCP server\ngarmin-mcp / todoist-mcp / actual-mcp]
     LLM[LiteLLM → model]
 
     Client --> API --> GW
@@ -103,10 +164,12 @@ flowchart TB
 │  MCP client (official SDK: stdio / HTTP)     │
 └─────────────────────────────────────────────┘
               ▲
-              │ recipe manifest (per domain)
+              │ recipe manifest (per domain, in git)
 ```
 
 **Domain logic** remains in MCP servers (e.g. `coaching_brief.py` inside garmin-mcp). The gateway does not interpret ACWR or training zones—it calls tools and injects JSON.
+
+The chat UI is **not** in this box. It is a client that already knows one base URL. New recipes do not require a GUI config change.
 
 ---
 
@@ -133,7 +196,7 @@ flowchart TB
 |----------|----------|
 | `preload_ttl` | Reuse preload JSON for N minutes; skip MCP on cache hit. |
 | `refresh_on` | Optional keywords in latest user message force refresh (`refresh`, `latest data`). |
-| Session | Conversation history from client; preload cache independent per recipe. |
+| Session | Conversation history from the client; preload cache independent per recipe. |
 
 Garmin Connect is slow; **30–60 minute TTL** is a reasonable default for coach recipes.
 
@@ -228,7 +291,7 @@ spec:
 | Method | Path | Notes |
 |--------|------|-------|
 | `POST` | `/v1/chat/completions` | Primary; supports `stream: true` |
-| `GET` | `/v1/models` | Lists one entry per enabled recipe |
+| `GET` | `/v1/models` | **Catalog:** one entry per enabled recipe. This is how the GUI stays one-endpoint. |
 | `GET` | `/health` | Liveness; optional MCP reachability check |
 
 ### Request
@@ -241,7 +304,7 @@ Match OpenAI shape: `id`, `object`, `created`, `model`, `choices[]`, `usage` (es
 
 ### LiteLLM registration
 
-Homelab option: register gateway base URL in LiteLLM as a custom OpenAI-compatible provider so all UI traffic can route to `garmin-coach` without Odysseus agent mode.
+Homelab option: register gateway base URL in LiteLLM as a custom OpenAI-compatible provider so all UI traffic can route to `garmin-coach` without Odysseus agent mode. Prefer the GUI talking to the gateway directly so `/v1/models` is the catalog the user picks from.
 
 ---
 
@@ -280,7 +343,7 @@ Preload is **not** re-run on action rounds unless cache expired.
 - Single user; API key on gateway env (`GATEWAY_API_KEY`).
 - MCP credentials stay on MCP server (Garmin login), not in gateway.
 - Gateway should not log full preload JSON by default (health data).
-- Bind to tailnet or localhost unless explicitly exposed.
+- Bind to the `homelab` / `homelab-mcp` Docker networks or Tailscale; do not publish MCP or the gateway publicly.
 
 ---
 
@@ -294,28 +357,21 @@ Maps to current ai-home-lab stack.
 | Week rows + narrative | `training_plan`, `coaching_brief` in response | Injected JSON |
 | LLM | Odysseus agent + skill | LiteLLM via gateway |
 | Schedule workouts | `create_*_workout` MCP tools | `action_tools` (optional) |
-| Client | Odysseus agent mode + skill | Odysseus **chat mode** → `model: garmin-coach` |
+| Client | Odysseus agent mode + skill | Any OpenAI client → `model: garmin-coach` (LibreChat later; Odysseus **chat mode** as interim) |
 
-**Odysseus skill becomes optional** when the gateway is the model endpoint.
+Odysseus **skills become optional** when the gateway is the model endpoint. Do not rely on agent mode or tool-RAG to remember `get_coaching_brief`.
 
-### Future: Odysseus fork with “Generate agent”
+### GUI is a client, not a recipe builder
 
-A possible evolution—not required for v0—is a **forked Odysseus** (or companion UI) that does not patch upstream agent orchestration. Instead it offers something like **Generate agent**:
-
-- User picks a **configured LLM** (from existing Odysseus/LiteLLM endpoints).
-- User picks one or more **configured MCP servers**.
-- User defines **preload tools** (deterministic calls) and optional **action tools**.
-- The UI emits a **recipe manifest** and starts (or registers) an LM Context Gateway instance behind the scenes.
-
-The chat experience is then a normal Odysseus conversation against the resulting **pseudo-model** (`garmin-coach`, `todoist-digest`, …), with preload handled by the gateway library—not by skills, tool-RAG, or low-signal fast paths.
-
-This enhances Odysseus **by composition** (gateway as model endpoint + recipe builder) rather than by growing `agent_loop.py`. Upstream Odysseus stays untouched; the fork only adds recipe authoring and routes selected chats to gateway models.
+An earlier sketch was a forked Odysseus “Generate agent” UI that emitted recipes. **Do not do that.** Forking Odysseus is out of scope (AGPL). Recipe authoring belongs in git (agents edit YAML). The GUI only lists `/v1/models` and chats. LibreChat (or curl, or Odysseus chat mode until parked) is the client.
 
 ---
 
-## 12. Second recipe (sketch): Todoist digest
+## 12. Further recipes (sketches)
 
-Validates generalization without Garmin-specific code in the library.
+Validates generalization without Garmin-specific code in the library. Same gateway binary; different manifest files.
+
+### Todoist digest
 
 ```yaml
 metadata:
@@ -324,8 +380,8 @@ spec:
   model:
     id: todoist-digest
   mcp:
-    transport: stdio
-    command: todoist-mcp
+    transport: streamable-http
+    url: ${TODOIST_MCP_URL:-http://todoist-mcp:3001/mcp}
   preload:
     - tool: list_tasks
       arguments: { filter: today | overdue }
@@ -341,21 +397,32 @@ spec:
     max_rounds: 2
 ```
 
-Same gateway binary; different manifest file.
+### Actual review
+
+Same pattern against actual-mcp (preload balances / transactions, optional write tools behind `action_tools`). Model id `actual-review`. Domain rules stay in the MCP server.
 
 ---
 
 ## 13. Comparison to existing tools
 
-| Project | Overlap | Gap |
-|---------|---------|-----|
-| **Odysseus agent mode** | MCP tools, LiteLLM | General orchestration; no deterministic preload contract |
-| **LiteLLM proxy** | OpenAI surface, custom handlers | No first-class recipe/preload/MCP manifest |
-| **n8n / Langflow** | Deterministic steps + LLM | UI workflows; not a library; weak OpenAI model abstraction |
-| **mcpo** | MCP exposure | OpenAPI tools only; no preload + LLM pipeline |
-| **Dify / FastGPT** | App + API | Heavy platform; not MCP-first |
+Scores below are for **this lab** (git/Nix as source of truth, native MCP, usable chat, homelab ops) — not general popularity.
 
-The niche: **declarative preload from MCP + pseudo-model OpenAI API + thin LiteLLM backend.**
+| Project | Overlap | Gap / verdict |
+|---------|---------|----------------|
+| **LM Context Gateway (this design)** | Recipes, preload, `/v1/models` | API only. **Build this.** Chat UI is a separate client. |
+| **LibreChat** | Chat UI; MCP in `librechat.yaml` | Best Odysseus-like UI. Point it at the gateway; do not make it the MCP catalog. |
+| **Odysseus agent mode** | MCP tools, LiteLLM | GUI/SQLite catalog; no deterministic preload; tool-RAG misses Garmin tools. |
+| **Odysseus Nix-wrapped** | Same PWA | Houses the container; does not fix semantics or config drift. |
+| **Open WebUI** | Polished chat | MCP is Admin Panel — same class of problem as Odysseus. |
+| **OpenClaw** | JSON MCP client | Already on disk; not Nix-native by default; deferred as primary replacement. |
+| **Block Goose / HF tiny-agents** | File-based agents | Strong for scripts; weak phone/PWA. |
+| **LiteLLM proxy** | OpenAI surface, custom handlers | No first-class recipe/preload/MCP manifest. Keep as the weight router. |
+| **n8n AI Agent + MCP Client** | Cron + tools | Keep n8n for unattended if/else. Do not make it the chat workspace. |
+| **Langflow / Dify / AnythingLLM / Letta** | App + LLM | Canvas or DB is the source of truth. |
+| **mcpo** | MCP exposure | OpenAPI tools only; no preload + LLM pipeline. |
+| **Fork Odysseus** | Familiar UI | Out of scope (AGPL vendor clone). |
+
+The niche: **declarative preload from MCP + pseudo-model OpenAI API + thin LiteLLM backend + git as the catalog.**
 
 ---
 
@@ -373,10 +440,14 @@ src/lm-context-gateway/
     recipe/       # Manifest loader + validation
   recipes/
     garmin-coach.yaml
+    todoist-digest.yaml
+    actual-review.yaml
   tests/
 ```
 
-Option B — separate repo when second recipe lands; ai-home-lab keeps `recipes/garmin-coach.yaml` and depends on published package.
+Nix (homelab-nix) would run this as a managed container on `homelab-mcp` when this track starts. Recipe files stay in git so `nix run .#apply` (or a dedicated gateway apply) is how an agent publishes a new model.
+
+Option B — separate repo when a second recipe lands; ai-home-lab keeps the YAML and depends on a published package.
 
 ---
 
@@ -384,14 +455,18 @@ Option B — separate repo when second recipe lands; ai-home-lab keeps `recipes/
 
 | Phase | Deliverable | Success criterion |
 |-------|-------------|-------------------|
-| **0 — Design** | This document | Shared understanding |
-| **1 — Garmin v0** | Single FastAPI app, hardcoded garmin preload, no library split | Odysseus chat mode calls `garmin-coach` and returns full review + proposal |
-| **2 — Manifest** | YAML loader + one schema | Change preload/model without code edits |
-| **3 — Extract library** | `lmcontextgateway` package | Second recipe (Todoist or mock) in &lt;50 lines YAML |
+| **0 — Design** | This document | Shared understanding (including the 2026-08-14 catalog decision) |
+| **1 — Garmin v0** | Single FastAPI app, hardcoded garmin preload, no library split | `curl` (then LibreChat or Odysseus chat mode) calls `garmin-coach` and returns full review + proposal |
+| **2 — Manifest** | YAML loader + one schema | Change preload/model without code edits; `/v1/models` lists the recipe |
+| **3 — Extract library** | `lmcontextgateway` package | Second recipe (Todoist or Actual) in &lt;50 lines YAML |
 | **4 — Polish** | Streaming, cache TTL, action_tools loop | Production-comfortable for daily coach use |
-| **5 — Optional** | LiteLLM custom provider plugin | Register gateway as native LiteLLM backend |
+| **5 — UI client** | LibreChat (or equivalent) with **one** custom endpoint | GUI picks `garmin-coach` from the model list; no Admin MCP rows |
+| **6 — Optional** | LiteLLM custom provider plugin | Register gateway as native LiteLLM backend |
+| **7 — Park Odysseus** | Stop Odysseus compose; restic snapshot of `app.db` | Coach + Actual chat feel right |
 
 **Do not start with the library.** Build Phase 1 against garmin-mcp; note every hardcoded line that would move into the package.
+
+**Do not start this as part of the Nix OS/home-manager/Paperless cutover.**
 
 ---
 
@@ -402,23 +477,26 @@ Option B — separate repo when second recipe lands; ai-home-lab keeps `recipes/
 3. **Streaming + preload latency** — Emit status events (`preloading…`) before tokens? Or block until preload completes?
 4. **Multi-recipe routing** — One gateway process per recipe or one process, many models? Prefer one process, many recipes on `/v1/models`.
 5. **Name** — Working title: **LM Context Gateway** (`lm-context-gateway`, import `lmcontextgateway`). Alternatives: MCP Context Gateway, RecipeLLM.
+6. **Interim client** — Keep Odysseus chat mode pointed at the gateway until LibreChat exists, or skip the PWA and use curl/Homepage first?
 
 ---
 
 ## 17. Relationship to ai-home-lab principles
 
-From [DESIGN.md](./DESIGN.md):
+From [DESIGN.md](./DESIGN.md), updated by the 2026-08-14 review:
 
-- **Domain logic in MCP** — unchanged; gateway never replaces garmin-mcp.
-- **Odysseus for judgment + chat** — Odysseus becomes a client of a specialist pseudo-model when domain is narrow; general agent remains for open-ended work.
-- **n8n for cron/if-else** — n8n can still ping ntfy or trigger gateway via HTTP for scheduled “weekly review” messages without chat UI.
+- **Domain logic in MCP** — unchanged; gateway never replaces garmin-mcp / actual-mcp / todoist-mcp.
+- **Chat UI for judgment** — Odysseus today; LibreChat (or similar) later as a client of specialist pseudo-models. General open-ended agent work is not the Garmin/Actual path.
+- **n8n for cron/if-else** — n8n can still ping ntfy or trigger the gateway via HTTP for scheduled “weekly review” messages without a chat UI.
+- **Git / Nix as source of truth** — recipes are files. Apply publishes them. GUI databases are not the catalog.
 
 The gateway is a **new layer** between “MCP domain servers” and “LLM clients”:
 
 ```
 n8n (when) → optional
-Odysseus / apps (chat UI) → LM Context Gateway (preload + API) → MCP servers (data)
-                                                          → LiteLLM (narration)
+LibreChat / Odysseus chat / curl  →  LM Context Gateway (preload + /v1/models)
+                                      → MCP servers (data)
+                                      → LiteLLM (narration)
 ```
 
 ---
@@ -426,10 +504,12 @@ Odysseus / apps (chat UI) → LM Context Gateway (preload + API) → MCP servers
 ## 18. Next steps (when prioritised)
 
 1. Spike Phase 1: FastAPI + `get_coaching_brief` via MCP HTTP + one LiteLLM call + OpenAI JSON response.
-2. Point Odysseus preset at gateway URL in **chat mode**; validate no agent/tools needed.
-3. Document env vars and docker-compose service next to garmin-mcp.
-4. Revisit manifest schema after spike pain points.
-5. Consider upstream OSS if the abstraction stabilises and others want the same pattern.
+2. Confirm `GET /v1/models` lists `garmin-coach` so a GUI can pick it with no MCP config.
+3. Point a client (curl first, then LibreChat or Odysseus **chat mode**) at the gateway; validate no agent/tools needed.
+4. Document env vars and a Nix-managed compose service on `homelab-mcp`.
+5. Add `todoist-digest` / `actual-review` as YAML once the loader exists.
+6. Revisit manifest schema after spike pain points.
+7. Park Odysseus only after coach + Actual chat feel right; keep a restic snapshot of `app.db`.
 
 ---
 
