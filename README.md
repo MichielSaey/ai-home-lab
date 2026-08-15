@@ -4,6 +4,17 @@ Pure Python monorepo for home-lab MCP microservices, Odysseus integration, share
 
 Further reading: [docs/DESIGN.md](docs/DESIGN.md) (architecture), [docs/PLAN.md](docs/PLAN.md) (execution and issues).
 
+## Deploy (GitHub Actions)
+
+Push to `main` deploys this compose stack on the CasaOS host via self-hosted runner `casaos` (`actions.runner.MichielSaey-ai-home-lab.casaos.service`).
+
+- Workflow: `.github/workflows/deploy.yml` (`docker compose up -d --build`, wait, ntfy notify)
+- Skips deploy for doc-only commits (`docs/**`, `*.md`)
+- Manual: Actions → deploy → Run workflow
+- Requires `.env` in the runner checkout (`clean: false` so it is kept)
+
+Homelab containers owned by [homelab-nix](https://github.com/MichielSaey/homelab-nix) (Jellyfin, Paperless, n8n, …) are **not** part of this workflow — push that repo instead.
+
 ## Architecture
 
 - **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).

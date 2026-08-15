@@ -1,17 +1,25 @@
 name: deploy
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # Doc-only commits should not rebuild Odysseus / MCP.
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+      - ".gitignore"
   workflow_dispatch:
 
 jobs:
   deploy:
-    if: false
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
         id: checkout
         with:
           submodules: false
+          # Keep .env and vendored trees on the runner checkout.
           clean: false
 
       - name: Check runner disk space
