@@ -45,7 +45,10 @@ jobs:
         run: chmod +x scripts/ensure-vibe-workflow.sh && ./scripts/ensure-vibe-workflow.sh
 
       - name: Build and start services
-        run: docker compose up -d --build --remove-orphans --wait --wait-timeout 600
+        # Do not --wait on the full project: optional MCPs (e.g. todoist without
+        # TODOIST_API_KEY) can be unhealthy and would fail the job. Odysseus is
+        # checked in the next step.
+        run: docker compose up -d --build --remove-orphans
 
       - name: Wait for stack health
         run: chmod +x scripts/wait-for-stack.sh && ./scripts/wait-for-stack.sh

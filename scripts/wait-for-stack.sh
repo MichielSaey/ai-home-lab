@@ -17,10 +17,10 @@ TIMEOUT="${DEPLOY_WAIT_TIMEOUT:-300}"
 INTERVAL=5
 elapsed=0
 
-echo "Waiting up to ${TIMEOUT}s for containers to become healthy..."
-if ! docker compose up --wait --wait-timeout "${TIMEOUT}" >/dev/null 2>&1; then
-  echo "docker compose --wait failed or timed out; falling back to HTTP checks"
-fi
+echo "Waiting up to ${TIMEOUT}s for containers (best-effort compose --wait)..."
+# Optional MCP sidecars may be unhealthy without API keys; do not fail the job here.
+docker compose up --wait --wait-timeout "${TIMEOUT}" >/dev/null 2>&1 || \
+  echo "docker compose --wait incomplete; falling back to Odysseus HTTP check"
 
 odysseus_url="http://${APP_BIND}:${APP_PORT}/"
 echo "Checking Odysseus at ${odysseus_url} ..."
