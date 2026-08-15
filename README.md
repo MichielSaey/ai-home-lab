@@ -37,7 +37,7 @@ Homelab containers owned by [homelab-nix](https://github.com/MichielSaey/homelab
 | ntfy | 8091 | Push notifications (bundled with Odysseus) |
 | garmin-mcp | 8000 (internal) | Garmin Connect MCP server |
 | actual-mcp | 3000 (internal) | Actual Budget MCP server (SSE) |
-| todoist-mcp | 3001 (internal) | Todoist MCP server (Streamable HTTP) |
+| todoist-mcp | 3001 (internal) | Todoist MCP — **optional**; enabled only when `TODOIST_API_KEY` is set (compose profile `todoist`) |
 | Vibe-Workflow | 7300 (UI), 8010 (API) | Node-based AI image/video workflow editor (LAN by default) |
 | chromadb / searxng | bundled with Odysseus | Vector store, search |
 

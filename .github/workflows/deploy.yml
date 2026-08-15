@@ -45,13 +45,33 @@ jobs:
         run: chmod +x scripts/ensure-vibe-workflow.sh && ./scripts/ensure-vibe-workflow.sh
 
       - name: Build and start services
-        # Do not --wait on the full project: optional MCPs (e.g. todoist without
-        # TODOIST_API_KEY) can be unhealthy and would fail the job. Odysseus is
-        # checked in the next step.
-        run: docker compose up -d --build --remove-orphans
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          source .env
+          set +a
+          chmod +x scripts/compose-profiles.sh
+          # shellcheck disable=SC1091
+          source scripts/compose-profiles.sh
+          # Remove disabled optional services left from older deploys.
+          if [ -z "${TODOIST_API_KEY:-}" ]; then
+            docker compose stop todoist-mcp >/dev/null 2>&1 || true
+            docker compose rm -f todoist-mcp >/dev/null 2>&1 || true
+          fi
+          docker compose up -d --build --remove-orphans
 
       - name: Wait for stack health
-        run: chmod +x scripts/wait-for-stack.sh && ./scripts/wait-for-stack.sh
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          source .env
+          set +a
+          # shellcheck disable=SC1091
+          source scripts/compose-profiles.sh
+          chmod +x scripts/wait-for-stack.sh
+          ./scripts/wait-for-stack.sh
 
       - name: Show service status
         run: docker compose ps

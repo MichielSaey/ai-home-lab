@@ -57,6 +57,8 @@ services:
     restart: unless-stopped
 
   todoist-mcp:
+    # Off unless COMPOSE_PROFILES includes "todoist" (set when TODOIST_API_KEY is present).
+    profiles: [todoist]
     build:
       context: .
       dockerfile: todoist-mcp/Dockerfile
