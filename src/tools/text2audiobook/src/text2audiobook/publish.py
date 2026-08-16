@@ -76,12 +76,9 @@ def resolved_mode(config: PublishConfig) -> str:
 
 
 def resolved_container_root(config: PublishConfig) -> str | None:
+    """Only the path Jellyfin sees inside its container. Never guess from the host path."""
     if config.container_path:
         return config.container_path.rstrip("/")
-    if config.rsync_target:
-        return remote_root_from_rsync_target(config.rsync_target).rstrip("/")
-    if config.library_root is not None:
-        return str(config.library_root).rstrip("/")
     return None
 
 
@@ -200,9 +197,16 @@ def publish_audiobook(config: PublishConfig, m4b_path: Path, metadata: BookMetad
     notified = False
     if config.api_key and container_root:
         item_path = jellyfin_item_path(container_root, metadata.author, metadata.title)
-        notify_jellyfin(config, item_path)
-        notified = True
-        logger.info("Jellyfin scan requested for %s", item_path)
+        try:
+            notify_jellyfin(config, item_path)
+            notified = True
+            logger.info("Jellyfin scan requested for %s", item_path)
+        except Exception as exc:
+            logger.warning(
+                "Published %s but Jellyfin scan failed: %s",
+                dest_file,
+                exc,
+            )
     elif not config.api_key:
         logger.warning("Published %s but skipped Jellyfin scan — set JELLYFIN_API_KEY", dest_file)
     else:

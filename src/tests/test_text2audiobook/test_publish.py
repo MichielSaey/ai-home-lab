@@ -67,13 +67,15 @@ def test_resolved_mode_prefers_rsync_when_target_set() -> None:
     assert resolved_mode(PublishConfig(mode="copy", rsync_target="user@host:/media")) == "copy"
 
 
-def test_resolved_container_root_prefers_explicit_path() -> None:
+def test_resolved_container_root_requires_explicit_path() -> None:
     cfg = PublishConfig(
         container_path="/data/audiobooks",
         rsync_target="user@host:/mnt/media/audiobooks",
+        library_root=Path("/mnt/media/audiobooks"),
     )
     assert resolved_container_root(cfg) == "/data/audiobooks"
-    assert resolved_container_root(PublishConfig(rsync_target="user@host:/mnt/media")) == "/mnt/media"
+    assert resolved_container_root(PublishConfig(rsync_target="user@host:/mnt/media")) is None
+    assert resolved_container_root(PublishConfig(library_root=Path("/mnt/media"))) is None
 
 
 def test_copy_to_library_writes_m4b_and_cover(tmp_path: Path) -> None:
@@ -173,6 +175,45 @@ def test_publish_audiobook_copy_and_notify(tmp_path: Path) -> None:
     assert result.notified is True
     assert result.dest_path.endswith("The Tenant.m4b")
     notify.assert_called_once_with(cfg, "/data/audiobooks/Roland Topor/The Tenant/The Tenant.m4b")
+
+
+def test_publish_audiobook_keeps_dest_when_scan_fails(tmp_path: Path) -> None:
+    src = tmp_path / "book.m4b"
+    src.write_bytes(b"m4b-bytes")
+    metadata = _metadata(tmp_path)
+    cfg = PublishConfig(
+        mode="copy",
+        url="http://192.168.0.10:8096",
+        api_key="k",
+        library_root=tmp_path / "library",
+        container_path="/data/audiobooks",
+    )
+
+    with patch(
+        "epub2audiobook.publish.notify_jellyfin",
+        side_effect=RuntimeError("Jellyfin is unreachable"),
+    ):
+        result = publish_audiobook(cfg, src, metadata)
+
+    assert result.notified is False
+    assert Path(result.dest_path).exists()
+
+
+def test_publish_audiobook_skips_scan_without_container_path(tmp_path: Path) -> None:
+    src = tmp_path / "book.m4b"
+    src.write_bytes(b"m4b-bytes")
+    cfg = PublishConfig(
+        mode="copy",
+        api_key="k",
+        library_root=tmp_path / "library",
+        rsync_target="user@host:/mnt/media/audiobooks",
+    )
+
+    with patch("epub2audiobook.publish.notify_jellyfin") as notify:
+        result = publish_audiobook(cfg, src, _metadata(tmp_path))
+
+    assert result.notified is False
+    notify.assert_not_called()
 
 
 def test_publish_audiobook_skips_scan_without_api_key(tmp_path: Path) -> None:

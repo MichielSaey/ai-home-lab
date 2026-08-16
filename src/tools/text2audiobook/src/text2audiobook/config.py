@@ -211,14 +211,14 @@ def overlay_publish_env(cfg: PublishConfig) -> PublishConfig:
     if cfg.url:
         cfg.url = cfg.url.rstrip("/")
 
-    dest_set = cfg.library_root is not None or bool(cfg.rsync_target)
+    env_dest = library_root is not None or rsync_target is not None
     publish_flag = _env_bool("JELLYFIN_PUBLISH")
     if publish_flag is False:
         cfg.enabled = False
     elif publish_flag is True:
         cfg.enabled = True
-    else:
-        cfg.enabled = dest_set
+    elif env_dest:
+        cfg.enabled = True
     return cfg
 
 

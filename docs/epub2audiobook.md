@@ -47,7 +47,7 @@ Publish is **off** until you set a destination in the environment (devenv loads 
 | `JELLYFIN_API_KEY` | Dashboard → API Keys. Without it, files are still transferred; the scan is skipped |
 | `JELLYFIN_RSYNC_TARGET` | `user@192.168.0.10:/host/path/to/audiobooks` (typical: other host, SSH + rsync) |
 | `JELLYFIN_LIBRARY_ROOT` | Local/mounted library root for `copy` mode |
-| `JELLYFIN_CONTAINER_PATH` | Same folder as the Jellyfin **container** sees it (needed for a targeted scan) |
+| `JELLYFIN_CONTAINER_PATH` | Same folder as the Jellyfin **container** sees it. Required for a scan; host/rsync paths are never guessed |
 | `JELLYFIN_PUBLISH_MODE` | `auto` (default), `rsync`, or `copy` |
 | `JELLYFIN_PUBLISH` | `1` to force on, `0` to force off |
 

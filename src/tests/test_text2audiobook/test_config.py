@@ -51,3 +51,29 @@ def test_publish_env_can_disable(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("JELLYFIN_LIBRARY_ROOT", "/mnt/media/audiobooks")
     cfg = load_config(_write_config(tmp_path))
     assert cfg.publish.enabled is False
+
+
+def test_publish_json_enabled_false_is_kept(tmp_path: Path, monkeypatch) -> None:
+    for name in (
+        "JELLYFIN_PUBLISH",
+        "JELLYFIN_LIBRARY_ROOT",
+        "JELLYFIN_RSYNC_TARGET",
+        "JELLYFIN_API_KEY",
+        "JELLYFIN_URL",
+        "JELLYFIN_CONTAINER_PATH",
+        "JELLYFIN_PUBLISH_MODE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    cfg = load_config(
+        _write_config(
+            tmp_path,
+            {
+                "publish": {
+                    "enabled": False,
+                    "library_root": "/mnt/media/audiobooks",
+                }
+            },
+        )
+    )
+    assert cfg.publish.enabled is False
+    assert cfg.publish.library_root == Path("/mnt/media/audiobooks")
