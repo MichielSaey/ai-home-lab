@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-STAGES = ("parse", "classify", "clean", "tts", "encode", "m4b")
+STAGES = ("parse", "classify", "clean", "tts", "encode", "m4b", "publish")
 
 
 def _now_iso() -> str:
@@ -31,6 +31,8 @@ class BookRecord:
     status: str = "running"  # running | ok | skipped | failed
     error: str | None = None
     output_path: str | None = None
+    publish_path: str | None = None
+    publish_error: str | None = None
     chapter_count: int | None = None
     chunk_count: int | None = None
     word_count: int | None = None
@@ -182,6 +184,8 @@ class RunTracker:
             "status": record.status,
             "error": record.error,
             "output_path": record.output_path,
+            "publish_path": record.publish_path,
+            "publish_error": record.publish_error,
             "chapter_count": record.chapter_count,
             "chunk_count": record.chunk_count,
             "word_count": record.word_count,

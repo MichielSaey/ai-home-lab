@@ -18,7 +18,7 @@ Checklists, milestones, and GitHub issues. Architecture: [DESIGN.md](./DESIGN.md
 | ntfy | Bundled; mobile setup open (Track D) |
 | n8n, Proton bridge | Planned |
 | actual-mcp (compose service) | Implemented (G.3); Odysseus wiring open (G.4) |
-| epub2audiobook | Implemented; #1 #2 open |
+| epub2audiobook | Implemented; #1 #2 open; Jellyfin publish env-gated |
 | Garmin coach Phase 2 | Research only (Track B.2) |
 
 ---
@@ -124,6 +124,7 @@ Do not file implementation issues for Phase 2 until B.P2.1 is complete.
 |------|----------|-------|------|-----------|
 | C.1 | agent | [#1](https://github.com/MichielSaey/ai-home-lab/issues/1) | Dynamic voices — list, `--voice`, batch random | Voices selectable per run |
 | C.2 | agent | [#2](https://github.com/MichielSaey/ai-home-lab/issues/2) | Tables/graphs → ebook reference in TTS | No verbatim table readout |
+| C.3 | agent | — | Publish finished M4B to Jellyfin (rsync/copy + scan API) | Env-gated; book still succeeds if publish fails |
 
 See [epub2audiobook.md](./epub2audiobook.md).
 

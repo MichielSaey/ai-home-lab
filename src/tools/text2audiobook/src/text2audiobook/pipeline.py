@@ -42,6 +42,7 @@ from epub2audiobook.llm import (
     unload_llm,
 )
 from epub2audiobook.logging_setup import ProgressContext, setup_logging
+from epub2audiobook.publish import maybe_publish_book
 from epub2audiobook.tracking import BookRecord, RunTracker
 from epub2audiobook.tts import (
     KOKORO_REPO_ID,
@@ -178,6 +179,7 @@ def process_book(
     m4b_path = metadata.m4b_path
     if config.output.skip_existing and m4b_path.exists():
         logger.info("Skipping '%s' — audiobook already exists: %s", metadata.title, m4b_path)
+        maybe_publish_book(config, metadata, m4b_path, tracker=tracker, record=record)
         tracker.finish_book(record, status="skipped", output_path=m4b_path)
         return
 
@@ -302,6 +304,7 @@ def process_book(
                 shutil.rmtree(mp3_root)
                 logger.info("Removed MP3 directory: %s", mp3_root)
 
+        maybe_publish_book(config, metadata, m4b_path, tracker=tracker, record=record)
         tracker.finish_book(record, status="ok", output_path=m4b_path)
     finally:
         if own_llm is not None:

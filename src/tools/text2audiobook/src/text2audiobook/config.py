@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,22 @@ class PipelineConfig:
     queue_size: int = 32
 
 
+DEFAULT_JELLYFIN_URL = "http://192.168.0.10:8096"
+
+
+@dataclass
+class PublishConfig:
+    """Jellyfin publish settings. Secrets and host paths come from the environment."""
+
+    enabled: bool = False
+    mode: str = "auto"
+    url: str = DEFAULT_JELLYFIN_URL
+    api_key: str | None = None
+    library_root: Path | None = None
+    rsync_target: str | None = None
+    container_path: str | None = None
+
+
 @dataclass
 class AppConfig:
     paths: PathsConfig
@@ -97,11 +114,16 @@ class AppConfig:
     tts: TtsConfig
     output: OutputConfig
     pipeline: PipelineConfig
+    publish: PublishConfig
     config_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """JSON-serializable snapshot for run manifests."""
-        return _jsonable(asdict(self))
+        """JSON-serializable snapshot for run manifests (API key redacted)."""
+        data = _jsonable(asdict(self))
+        publish = data.get("publish")
+        if isinstance(publish, dict) and publish.get("api_key"):
+            publish["api_key"] = "***"
+        return data
 
 
 _SECTIONS: dict[str, type] = {
@@ -112,6 +134,7 @@ _SECTIONS: dict[str, type] = {
     "tts": TtsConfig,
     "output": OutputConfig,
     "pipeline": PipelineConfig,
+    "publish": PublishConfig,
 }
 
 
@@ -136,6 +159,69 @@ def _build_section(cls: type, data: Any, section: str) -> Any:
     return cls(**{key: value for key, value in data.items() if key in known})
 
 
+def _env_str(name: str) -> str | None:
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    raw = raw.strip()
+    return raw or None
+
+
+def _env_bool(name: str) -> bool | None:
+    raw = _env_str(name)
+    if raw is None:
+        return None
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def overlay_publish_env(cfg: PublishConfig) -> PublishConfig:
+    """Apply JELLYFIN_* environment variables. Env wins over config.json."""
+    url = _env_str("JELLYFIN_URL")
+    if url is not None:
+        cfg.url = url.rstrip("/")
+
+    api_key = _env_str("JELLYFIN_API_KEY")
+    if api_key is not None:
+        cfg.api_key = api_key
+
+    library_root = _env_str("JELLYFIN_LIBRARY_ROOT")
+    if library_root is not None:
+        cfg.library_root = Path(library_root)
+
+    rsync_target = _env_str("JELLYFIN_RSYNC_TARGET")
+    if rsync_target is not None:
+        cfg.rsync_target = rsync_target
+
+    container_path = _env_str("JELLYFIN_CONTAINER_PATH")
+    if container_path is not None:
+        cfg.container_path = container_path
+
+    mode = _env_str("JELLYFIN_PUBLISH_MODE")
+    if mode is not None:
+        cfg.mode = mode.lower()
+
+    if isinstance(cfg.library_root, str):
+        cfg.library_root = Path(cfg.library_root) if cfg.library_root else None
+    if cfg.api_key == "":
+        cfg.api_key = None
+    if cfg.rsync_target == "":
+        cfg.rsync_target = None
+    if cfg.container_path == "":
+        cfg.container_path = None
+    if cfg.url:
+        cfg.url = cfg.url.rstrip("/")
+
+    dest_set = cfg.library_root is not None or bool(cfg.rsync_target)
+    publish_flag = _env_bool("JELLYFIN_PUBLISH")
+    if publish_flag is False:
+        cfg.enabled = False
+    elif publish_flag is True:
+        cfg.enabled = True
+    else:
+        cfg.enabled = dest_set
+    return cfg
+
+
 def load_config(path: Path | None = None) -> AppConfig:
     """Load an AppConfig from a JSON file (default: the shipped experiment config)."""
     config_path = (Path(path) if path is not None else DEFAULT_CONFIG_PATH).resolve()
@@ -148,6 +234,7 @@ def load_config(path: Path | None = None) -> AppConfig:
 
     paths = _build_section(PathsConfig, data.get("paths"), "paths")
     paths.resolve_against(config_path.parent)
+    publish = overlay_publish_env(_build_section(PublishConfig, data.get("publish"), "publish"))
 
     return AppConfig(
         paths=paths,
@@ -157,5 +244,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         tts=_build_section(TtsConfig, data.get("tts"), "tts"),
         output=_build_section(OutputConfig, data.get("output"), "output"),
         pipeline=_build_section(PipelineConfig, data.get("pipeline"), "pipeline"),
+        publish=publish,
         config_path=config_path,
     )
