@@ -1,3 +1,6 @@
-mcp
+# FastMCP and streamable-http live in the 1.x SDK. mcp 2.0 renamed FastMCP
+# to MCPServer and removed streamablehttp_client, which breaks this server
+# and Odysseus's HTTP MCP client (reported as "mcp package not installed").
+mcp>=1.9,<2
 garminconnect==0.3.6
 pydantic

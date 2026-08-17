@@ -66,7 +66,7 @@ epub-audiobook = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp" }]
+requires-dist = [{ name = "mcp", specifier = ">=1.9,<2" }]
 
 [package.metadata.requires-dev]
 dev = [
