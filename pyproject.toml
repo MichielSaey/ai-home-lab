@@ -9,7 +9,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "mcp",
+    "mcp>=1.9,<2",
 ]
 
 [project.scripts]
