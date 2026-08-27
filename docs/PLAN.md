@@ -111,7 +111,7 @@ Predictive weekly training from goals + history (distance curve, next-week propo
 
 | Step | Assignee | Issue | Work | Done when |
 |------|----------|-------|------|-----------|
-| B.P2.1 | user | — | Research: predictive model + MCP proposal tool design | Written spike with approach, data needs, validation plan |
+| B.P2.1 | user/agent | — | Research + time-based weekly volume (chronic C, race curve, sessions) | Spike doc + formula shipped |
 | B.P2.2 | agent | — | *(blocked on B.P2.1)* | — |
 
 Do not file implementation issues for Phase 2 until B.P2.1 is complete.

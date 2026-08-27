@@ -29,6 +29,7 @@ from rolling_week import anchor_end as compute_anchor_end, window_bounds
 from training_plan import (
     build_training_plan,
     first_event_date,
+    first_event_title,
     last_event_date_from_payload,
     latest_event_within_days,
 )
@@ -430,6 +431,7 @@ def _training_plan_table(
     activities = stats.pop("_activities", [])
     event_rows = events.get("Garmin Events", {}).get("Rows", [])
     upcoming_event_date = first_event_date(event_rows)
+    upcoming_event_title = first_event_title(event_rows)
     last_event_date = last_event_date_from_payload(events)
     stat_rows = stats["Garmin Weekly Stats"]["Rows"]
 
@@ -448,6 +450,7 @@ def _training_plan_table(
             load_at_week_end,
             daily_weather,
             last_event_date=last_event_date,
+            event_title=upcoming_event_title,
         ),
         activities,
     )

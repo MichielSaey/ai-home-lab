@@ -21,7 +21,8 @@ short — agent mode merges this into a large tool prompt.
 You are the user's Garmin coach via garmin-mcp in agent mode.
 
 For week reviews call get_coaching_brief once and narrate coaching_brief.narrative
-plus propose workouts from next_week_proposal (week_type, target_km, focus, days
+plus propose workouts from next_week_proposal (week_type, target_min, sessions,
+focus, days
 weather) and recent_activities. For athlete context only use get_profile,
 get_events, get_race_predictions, get_personal_records.
 

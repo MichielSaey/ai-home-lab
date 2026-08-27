@@ -1,7 +1,7 @@
 ---
 name: garmin-week-review
-description: "Garmin week review via get_coaching_brief — ACWR, time-in-zone intensity, next-week proposal (garmin-mcp, agent mode)."
-version: 2.5.0
+description: "Garmin week review via get_coaching_brief — ACWR, time-in-zone intensity, minute-based next-week proposal (garmin-mcp, agent mode)."
+version: 2.6.0
 category: health
 tags: [garmin, coaching, acwr, get_coaching_brief, garmin-mcp]
 status: published
@@ -27,7 +27,7 @@ retrieval surfaces them.
 ## When to Use
 
 Garmin coach: week reviews across all workout types, training load, time-based
-intensity feedback (Z1–Z5), next-week proposals. **Agent mode only.**
+intensity feedback (Z1–Z5), next-week proposals in **minutes**. **Agent mode only.**
 
 ## Mandatory first step
 
@@ -59,14 +59,16 @@ Do **not** call any other tool before `get_coaching_brief` returns.
    - `personal_records_summary`
    - `proposal_summary`
    - `coaching_note`
-3. Propose a day-by-day workout plan yourself using:
-   - `next_week_proposal.week_type`, `target_km`, `focus`, `coaching_note`
-   - `next_week_proposal.days` for date, `avg_temp_c`, and `weather` (move hard
-     sessions off hot days when `avg_temp_c` ≥ 28)
-   - `recent_activities` when relevant (e.g. recovery run yesterday → avoid
-     stacking recovery today)
+3. Present the next-week plan from:
+   - `next_week_proposal.week_type`, `target_min`, `chronic_min`,
+     `outlier_weeks_dropped`, `focus`, `coaching_note`
+   - `next_week_proposal.sessions[]` — dated prescriptions with
+     `duration_minutes` (prefer these over inventing your own splits)
+   - `next_week_proposal.days` for weather context
+   - `recent_activities` — **all sports**. Bike/hike/etc. count toward weekly
+     training time; do not treat them as “missing run volume”
 4. Call `create_*_workout` only when the user asks to upload workouts to Garmin
-   Connect (optional `workout_date`).
+   Connect — use each session’s `duration_minutes` (optional `workout_date`).
 
 ## Never call (wrong tools)
 
@@ -92,12 +94,14 @@ this skill. There is no fixture to invent.
 
 - One `get_coaching_brief` per turn — review and proposal are both in the response.
 - Lookback uses **rolling 7-day blocks through yesterday**, not partial calendar weeks.
-- Recovery-week volume target is **80% of your peak build-week km**, not the partial latest block.
-- Polarized easy + quality: ≈80% Z1-2 / 0% Z3 / 15% Z4 / 5% Z5 (build week) — no Zone 3 / tempo prescriptions.
+- Weekly volume is **minutes** (`target_min`), not km. Build ≈ 115% of chronic minutes;
+  recovery ≈ 80% of chronic minutes (outliers >50% from the median are dropped).
+- Polarized easy + quality: ≈80% Z1-2 / 0% Z3 / 15% Z4 / 5% Z5 (build week).
+- Factor cross-training from `recent_activities` into the review.
 - Do not ask the user to paste Garmin data.
 
 ## Verification
 
 - First garmin MCP tool in the transcript ends with `get_coaching_brief`.
 - Numbers from `coaching_brief.narrative`, not placeholders.
-- Workout plan is agent-authored from `next_week_proposal` context and `days` weather.
+- Workout plan follows `next_week_proposal.sessions` (minutes) and weather `days`.

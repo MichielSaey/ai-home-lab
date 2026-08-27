@@ -1,13 +1,15 @@
-"""Deterministic coaching brief — review, assessment, and next-week context.
+"""Deterministic coaching brief — review, assessment, and next-week proposal.
 
-Computed server-side for past-week analysis and high-level proposal context.
-The agent (LLM) proposes day-by-day workouts using week_type, targets, focus,
-and per-day weather — not pre-filled session prescriptions.
+Computed server-side for past-week analysis and next-week context including
+session prescriptions (minutes). The agent narrates the brief and may upload
+workouts via create_*_workout using sessions[].
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from training_plan import split_week_sessions
 
 
 def _week_by_description(plan_weeks: list[dict[str, Any]], desc: str) -> dict[str, Any] | None:
@@ -34,7 +36,7 @@ def _latest_review_week(plan_weeks: list[dict[str, Any]]) -> dict[str, Any] | No
 
 
 def _proposal_days(upcoming: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Per-day weather context for the agent — no workout prescriptions."""
+    """Per-day weather context for the agent."""
     days = (upcoming or {}).get("days") or []
     out: list[dict[str, Any]] = []
     for day in days:
@@ -63,7 +65,7 @@ def _acwr_label(acwr: float | None) -> str:
 def _acwr_sentence(acwr: float | None) -> str:
     label = _acwr_label(acwr)
     if acwr is None:
-        return "Load ratio unavailable — use distance and feel alongside planned targets."
+        return "Load ratio unavailable — use training time and feel alongside planned targets."
     if label == "under_loading":
         return (
             f"ACWR {acwr} — under-loading / recovering; you can build again if "
@@ -72,6 +74,32 @@ def _acwr_sentence(acwr: float | None) -> str:
     if label == "building":
         return f"ACWR {acwr} — in the progressive overload zone; keep increases modest."
     return f"ACWR {acwr} — spike; hold or reduce volume before adding load."
+
+
+def _cross_training_note(recent_activities: list[dict[str, Any]] | None) -> str:
+    if not recent_activities:
+        return ""
+    non_run: list[str] = []
+    for act in recent_activities:
+        if not isinstance(act, dict):
+            continue
+        sport = str(act.get("activity_type") or "").lower()
+        if not sport or sport in ("running", "trail_running", "treadmill_running"):
+            continue
+        minutes = act.get("duration_min")
+        name = act.get("name") or sport
+        if minutes is not None:
+            non_run.append(f"{name} ({minutes} min)")
+        else:
+            non_run.append(str(name))
+    if not non_run:
+        return ""
+    shown = "; ".join(non_run[:5])
+    extra = f" (+{len(non_run) - 5} more)" if len(non_run) > 5 else ""
+    return (
+        f" Cross-training in recent activities (counts toward weekly time): "
+        f"{shown}{extra}."
+    )
 
 
 def _intensity_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
@@ -114,37 +142,28 @@ def _intensity_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> di
 
 
 def _volume_assessment(actuals: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
-    dist = actuals.get("distance_km")
-    target_km = target.get("distance_km")
     total_zone = actuals.get("total_zone_min")
-    if dist is None or target_km is None:
+    target_min = target.get("target_min")
+    dist = actuals.get("distance_km")
+    if total_zone is None or target_min is None:
         return {
-            "distance_km": dist,
-            "target_km": target_km,
             "total_zone_min": total_zone,
+            "target_min": target_min,
+            "distance_km": dist,
             "vs_target": None,
         }
-    # Cross-training weeks can have zone time with ~0 run km — don't judge km.
-    if float(dist) <= 0 and total_zone is not None and float(total_zone) > 0:
-        return {
-            "distance_km": dist,
-            "target_km": target_km,
-            "total_zone_min": total_zone,
-            "vs_target": None,
-            "note": "cross_training_time",
-        }
-    delta = round(float(dist) - float(target_km), 2)
-    if abs(delta) <= 2:
+    delta = round(float(total_zone) - float(target_min), 2)
+    if abs(delta) <= 15:
         vs = "on_target"
     elif delta > 0:
         vs = "above_target"
     else:
         vs = "below_target"
     return {
-        "distance_km": dist,
-        "target_km": target_km,
         "total_zone_min": total_zone,
-        "delta_km": delta,
+        "target_min": target_min,
+        "distance_km": dist,
+        "delta_min": delta,
         "vs_target": vs,
     }
 
@@ -236,43 +255,32 @@ def _narrative(
     assessment: dict[str, Any],
     proposal: dict[str, Any],
     personal_records: dict[str, Any] | None = None,
+    recent_activities: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     actuals = review_week.get("actuals") or {}
     target = review_week.get("target") or {}
     week_type = review_week.get("week_type", "build")
-    dist = actuals.get("distance_km")
     total_zone = actuals.get("total_zone_min")
-    target_km = target.get("distance_km")
+    target_min = target.get("target_min")
     vol = assessment.get("volume") or {}
 
     review_bits = []
-    # Prefer time-in-zone when run distance is absent/zero but HR time exists
-    # (cross-training / non-run weeks).
-    has_run_distance = dist is not None and float(dist) > 0
     has_zone_time = total_zone is not None and float(total_zone) > 0
-    if has_run_distance:
-        review_bits.append(f"{dist} km in a {week_type} week")
-    elif has_zone_time:
+    if has_zone_time:
         review_bits.append(f"{total_zone} min training time in a {week_type} week")
-    elif dist is not None:
-        review_bits.append(f"{dist} km in a {week_type} week")
-    if target_km is not None and vol.get("vs_target"):
+    if target_min is not None and vol.get("vs_target"):
         if vol["vs_target"] == "above_target":
-            review_bits.append(f"above the plan target of {target_km} km")
+            review_bits.append(f"above the plan target of {target_min} min")
         elif vol["vs_target"] == "below_target":
-            review_bits.append(f"below the plan target of {target_km} km")
+            review_bits.append(f"below the plan target of {target_min} min")
         else:
-            review_bits.append(f"on the plan target of {target_km} km")
+            review_bits.append(f"on the plan target of {target_min} min")
     if review_bits:
         review_summary = (
             "Your latest 7 days (through yesterday) were "
             + ", which is ".join(review_bits)
             + "."
         )
-        if has_run_distance and has_zone_time:
-            review_summary = (
-                review_summary[:-1] + f" ({total_zone} min in HR zones)."
-            )
     else:
         review_summary = "No completed 7-day block data available yet."
 
@@ -296,22 +304,38 @@ def _narrative(
         intensity_check += " Sprint (Z5) share is light — keep a small Z5 budget."
 
     load_check = _acwr_sentence(actuals.get("acwr"))
+    load_check += _cross_training_note(recent_activities)
+
+    chronic = proposal.get("chronic_min")
+    outliers = proposal.get("outlier_weeks_dropped") or []
+    if chronic is not None and outliers:
+        load_check += (
+            f" Chronic volume {chronic} min (dropped {len(outliers)} outlier "
+            "week(s) beyond 50% of the median)."
+        )
+    elif chronic is not None:
+        load_check += f" Chronic volume {chronic} min."
+
     personal_records_summary = _personal_records_summary(personal_records)
 
     upcoming_type = (upcoming or {}).get("week_type", "build")
-    upcoming_target = ((upcoming or {}).get("target") or {}).get("distance_km")
+    upcoming_target = ((upcoming or {}).get("target") or {}).get("target_min")
     proposal_summary = proposal.get("focus") or ""
-    proposal_target_km = proposal.get("target_km")
+    proposal_target_min = proposal.get("target_min")
     proposal_week_type = proposal.get("week_type", upcoming_type)
-    if proposal_target_km is not None:
+    if proposal_target_min is not None:
         proposal_summary = (
-            f"Upcoming {proposal_week_type} week target: {proposal_target_km} km. "
+            f"Upcoming {proposal_week_type} week target: {proposal_target_min} min. "
             f"{proposal_summary}"
         )
     elif upcoming_target is not None:
         proposal_summary = (
-            f"Upcoming {upcoming_type} week target: {upcoming_target} km. {proposal_summary}"
+            f"Upcoming {upcoming_type} week target: {upcoming_target} min. "
+            f"{proposal_summary}"
         )
+    sessions = proposal.get("sessions") or []
+    if sessions:
+        proposal_summary += f" Proposed {len(sessions)} sessions from the minute budget."
 
     return {
         "review_summary": review_summary,
@@ -346,22 +370,22 @@ def build_coaching_brief(
     volume = _volume_assessment(actuals, target)
 
     upcoming_type = (upcoming or {}).get("week_type", "build")
-    planned_target_km = ((upcoming or {}).get("target") or {}).get("distance_km")
-    upcoming_target = planned_target_km
+    planned_target_min = ((upcoming or {}).get("target") or {}).get("target_min")
+    chronic_min = (upcoming or {}).get("chronic_min")
+    outliers = list((upcoming or {}).get("outlier_weeks_dropped") or [])
+    upcoming_target = planned_target_min
+
     if acwr_label == "spike" and upcoming_type == "build":
         upcoming_type = "recovery"
-        # Use explicit None-check so cross-training weeks with 0 run km do not
-        # fall through to the (often large) planned running target.
-        dist_km = actuals.get("distance_km")
-        base_km = float(dist_km) if dist_km is not None else planned_target_km
-        if base_km is not None:
-            deload_km = round(float(base_km) * 0.8)
-            if planned_target_km is not None:
-                deload_km = min(deload_km, int(planned_target_km))
-            upcoming_target = deload_km
+        if chronic_min is not None:
+            upcoming_target = round(float(chronic_min) * 0.80)
+        elif planned_target_min is not None:
+            # Planned was build (C×1.15); recovery equivalent ≈ C×0.80.
+            upcoming_target = round(float(planned_target_min) * 0.80 / 1.15)
 
     focus = _focus_for_week(upcoming_type, intensity.get("flags") or [], acwr_label)
     days = _proposal_days(upcoming)
+    sessions = split_week_sessions(upcoming_target, upcoming_type, days)
 
     coaching_note = focus
     if events and events.get("latest_event"):
@@ -370,9 +394,12 @@ def build_coaching_brief(
 
     proposal = {
         "week_type": upcoming_type,
-        "target_km": upcoming_target,
+        "target_min": upcoming_target,
+        "chronic_min": chronic_min,
+        "outlier_weeks_dropped": outliers,
         "focus": focus,
         "days": days,
+        "sessions": sessions,
         "coaching_note": coaching_note,
     }
 
@@ -389,11 +416,12 @@ def build_coaching_brief(
         assessment,
         proposal,
         personal_records=personal_records,
+        recent_activities=recent_activities,
     )
 
     upcoming_target_block = dict((upcoming or {}).get("target") or {})
     if upcoming_target is not None:
-        upcoming_target_block["distance_km"] = upcoming_target
+        upcoming_target_block["target_min"] = upcoming_target
 
     return {
         "recent_activities": recent_activities or [],
@@ -406,6 +434,8 @@ def build_coaching_brief(
         "upcoming_week": {
             "week_type": upcoming_type,
             "target": upcoming_target_block or None,
+            "chronic_min": chronic_min,
+            "outlier_weeks_dropped": outliers,
         },
         "assessment": assessment,
         "next_week_proposal": proposal,
