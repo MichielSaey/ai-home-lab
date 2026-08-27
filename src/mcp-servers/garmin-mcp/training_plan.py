@@ -434,6 +434,12 @@ def split_week_sessions(
     week = dated[:7]
     easy_pool, z4_pool, z5_pool = _intensity_pools(target_min, week_type)
 
+    # Recovery: no dedicated Z4 session — fold Z4 minutes into the easy pool
+    # so sessions still sum to target_min.
+    if week_type == "recovery":
+        easy_pool += z4_pool
+        z4_pool = 0
+
     # Rest = two hottest days; training = the other five.
     by_heat = sorted(range(7), key=lambda i: (-_day_temp(week[i]), i))
     rest_idxs = set(by_heat[:2])

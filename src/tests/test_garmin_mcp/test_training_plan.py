@@ -255,6 +255,17 @@ def test_split_week_sessions_sum_to_target() -> None:
     assert "sprint" in types
 
 
+def test_split_recovery_sessions_sum_to_target() -> None:
+    days = [
+        {"date": f"2026-06-{d:02d}", "avg_temp_c": 18 + d, "weather": "clear"}
+        for d in range(2, 9)
+    ]
+    sessions = split_week_sessions(240, "recovery", days)
+    assert sessions
+    assert sum(s["duration_minutes"] for s in sessions) == 240
+    assert all(s["session_type"] != "threshold" for s in sessions)
+
+
 def test_build_training_plan_enriches_weather() -> None:
     stat_rows = [
         _stat_row("2026-05-26", "2026-06-01", 40.0, total_zone_min=300),
