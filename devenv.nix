@@ -15,6 +15,7 @@ in
     cudaToolkit
     pkgs.ffmpeg
     pkgs.espeak-ng
+    pkgs.rsync
     pkgs.gh
   ];
 

@@ -49,8 +49,11 @@ torch = { index = "pytorch-cu124" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shared", "src/tools/epub2audiobook/src/epub2audiobook"]
+packages = ["src/shared", "src/tools/text2audiobook/src/text2audiobook"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/shared" = "shared"
-"src/tools/epub2audiobook/src/epub2audiobook" = "epub2audiobook"
+"src/tools/text2audiobook/src/text2audiobook" = "epub2audiobook"
+
+[tool.pytest.ini_options]
+pythonpath = ["src/tools/text2audiobook/src", "src/shared"]
