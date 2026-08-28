@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "ai-home-lab",
+      "path": "."
+    },
+    {
+      "name": "homelab-nix",
+      "path": "/mnt/Storage2/src/homelab-nix"
+    }
+  ],
+  "settings": {
+    "git.autoRepositoryDetection": true,
+    "git.repositoryScanMaxDepth": 1
+  }
+}

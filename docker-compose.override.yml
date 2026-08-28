@@ -1,0 +1,3 @@
+services:
+  garmin-mcp:
+    profiles: [moved-to-homelab-nix]
