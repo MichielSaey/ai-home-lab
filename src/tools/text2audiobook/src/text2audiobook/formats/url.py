@@ -69,9 +69,7 @@ def fetch_url(url: str, *, cache_path: Path, force: bool = False) -> bytes:
     return content
 
 
-def _fallback_title_for_url(url: str, override: str | None) -> str:
-    if override:
-        return override
+def _fallback_title_for_url(url: str) -> str:
     host = urlparse(url).hostname or "web"
     return host.replace("www.", "")
 
@@ -82,16 +80,18 @@ def read_url(
     staging_root: Path,
     output_root: Path,
     title_override: str | None = None,
+    fallback_title: str | None = None,
     force_fetch: bool = False,
 ) -> tuple[BookMetadata, list[Chapter]]:
     cache_path = _cache_path(staging_root, url)
     html = fetch_url(url, cache_path=cache_path, force=force_fetch)
-    fallback = _fallback_title_for_url(url, title_override)
+    fallback = fallback_title or _fallback_title_for_url(url)
     return parse_html_document(
         html,
         staging_root=staging_root,
         output_root=output_root,
         fallback_title=fallback,
+        title_override=title_override,
     )
 
 
@@ -141,5 +141,6 @@ class UrlReader:
             url,
             staging_root=staging_root,
             output_root=output_root,
-            title_override=title_override or title_from_filename(path),
+            title_override=title_override,
+            fallback_title=title_from_filename(path),
         )

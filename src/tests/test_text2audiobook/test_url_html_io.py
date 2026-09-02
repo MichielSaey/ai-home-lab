@@ -119,6 +119,26 @@ def test_url_reader_uses_httpx_and_cache(tmp_path: Path) -> None:
         assert metadata2.slug == metadata.slug
 
 
+def test_url_file_title_override_wins_over_page_title(tmp_path: Path) -> None:
+    url_path = tmp_path / "site.url"
+    url_path.write_text("https://retrochronic.com\nMy Custom Book\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    output = tmp_path / "output"
+
+    mock_response = MagicMock()
+    mock_response.content = _anthology_html().encode("utf-8")
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("text2audiobook.formats.url.httpx.Client") as client_cls:
+        client = client_cls.return_value.__enter__.return_value
+        client.get.return_value = mock_response
+        metadata, _chapters = parse_source(url_path, staging_root=staging, output_root=output)
+
+    assert metadata.title == "My Custom Book"
+    assert metadata.slug == "my_custom_book"
+    assert metadata.m4b_path.name == "my_custom_book.m4b"
+
+
 def test_read_url_direct(tmp_path: Path) -> None:
     staging = tmp_path / "staging"
     output = tmp_path / "output"

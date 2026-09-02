@@ -104,9 +104,10 @@ def metadata_from_html(
     output_root: Path,
     fallback_title: str,
     author: str = "Unknown Author",
+    title_override: str | None = None,
 ) -> BookMetadata:
     soup = prepare_html_soup(html)
-    title = page_title(soup, fallback=fallback_title)
+    title = title_override.strip() if title_override else page_title(soup, fallback=fallback_title)
     return finalize_metadata(
         title=title,
         author=author,
@@ -124,6 +125,7 @@ def parse_html_document(
     output_root: Path,
     fallback_title: str,
     author: str = "Unknown Author",
+    title_override: str | None = None,
 ) -> tuple[BookMetadata, list[Chapter]]:
     metadata = metadata_from_html(
         html,
@@ -131,6 +133,7 @@ def parse_html_document(
         output_root=output_root,
         fallback_title=fallback_title,
         author=author,
+        title_override=title_override,
     )
     chapters = extract_html_chapters(html, preamble_title=fallback_title)
     cache_path = metadata.staging_dir / "source.html"
