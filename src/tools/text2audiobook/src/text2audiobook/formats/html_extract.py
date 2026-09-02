@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -22,6 +23,8 @@ _STRIP_TAGS = (
     "button",
     "iframe",
 )
+# Marks real h1/h2 lines so literal "#" in page text is not treated as ATX.
+_HEADING_MARK = "\ue000"
 
 
 def title_from_filename(path: Path) -> str:
@@ -71,9 +74,14 @@ def html_to_markdownish(html: str | bytes) -> str:
     for heading in list(root.find_all(["h1", "h2"])):
         level = 1 if heading.name == "h1" else 2
         title = _node_text(heading).strip() or "Untitled"
-        heading.replace_with(NavigableString(f"\n\n{'#' * level} {title}\n\n"))
+        heading.replace_with(
+            NavigableString(f"\n\n{_HEADING_MARK}{'#' * level} {title}\n\n")
+        )
 
     text = _node_text(root)
+    # Literal "# …" lines in body/pre/code must not become chapters.
+    text = re.sub(r"(?m)^(#{1,6}\s)", r" \1", text)
+    text = text.replace(_HEADING_MARK, "")
     # Collapse excessive blank lines
     lines = [line.rstrip() for line in text.splitlines()]
     collapsed: list[str] = []

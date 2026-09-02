@@ -59,9 +59,25 @@ def test_extract_html_chapters_orders_essays() -> None:
     chapters = extract_html_chapters(_anthology_html(), preamble_title="Book")
     titles = [chapter.title for chapter in chapters]
     assert titles == ["retrochronic", "Circuitries", "Machinic Desire"]
-    # Subsection text stays inside Circuitries, not its own chapter
     circuitries = next(chapter for chapter in chapters if chapter.title == "Circuitries")
     assert "subsection" in circuitries.text.lower() or "word" in circuitries.text
+
+
+def test_html_literal_hash_lines_are_not_chapters() -> None:
+    html = f"""<!DOCTYPE html>
+<html><body><main>
+  <h1>Book</h1>
+  <p>{_LONG}</p>
+  <pre># Configuration
+x = 1
+</pre>
+  <p># Not a heading either — {_LONG}</p>
+  <h2>Chapter Two</h2>
+  <p>{_LONG}</p>
+</main></body></html>
+"""
+    chapters = extract_html_chapters(html, preamble_title="Book")
+    assert [chapter.title for chapter in chapters] == ["Book", "Chapter Two"]
 
 
 def test_parse_html_source_file(tmp_path: Path) -> None:
