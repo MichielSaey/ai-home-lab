@@ -14,6 +14,27 @@ from text2audiobook.io import (
 )
 
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)(?:\s+#+)?\s*$", re.MULTILINE)
+_FENCE_RE = re.compile(r"^```")
+
+
+def _heading_matches(content: str) -> list[re.Match[str]]:
+    """ATX headings outside fenced code blocks (``` ... ```)."""
+    in_fence = False
+    matches: list[re.Match[str]] = []
+    for line_match in re.finditer(r"^(.*)$", content, re.MULTILINE):
+        line = line_match.group(1)
+        if _FENCE_RE.match(line.strip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        heading = _HEADING_RE.match(line)
+        if heading is not None:
+            # Re-bind match to absolute offsets in content
+            absolute = _HEADING_RE.match(content, line_match.start())
+            if absolute is not None:
+                matches.append(absolute)
+    return matches
 
 
 def markdown_to_text(content: str) -> str:
@@ -36,15 +57,16 @@ def _title_from_filename(path: Path) -> str:
 
 
 def _first_h1_title(content: str) -> str | None:
-    match = re.search(r"^#\s+(.+?)(?:\s+#+)?\s*$", content, re.MULTILINE)
-    if not match:
-        return None
-    return match.group(1).strip()
+    for match in _heading_matches(content):
+        prefix = match.group(0).lstrip()
+        if prefix.startswith("#") and not prefix.startswith("##"):
+            return match.group(1).strip()
+    return None
 
 
 def extract_chapters(content: str, *, preamble_title: str) -> list[Chapter]:
-    """Split on every ATX heading (# through ######)."""
-    matches = list(_HEADING_RE.finditer(content))
+    """Split on every ATX heading (# through ######) outside code fences."""
+    matches = _heading_matches(content)
     sections: list[tuple[str, str]] = []
 
     if matches and matches[0].start() > 0:

@@ -87,6 +87,25 @@ three words only
     assert [chapter.title for chapter in chapters] == ["Long Chapter"]
 
 
+def test_extract_chapters_ignores_headings_inside_fences() -> None:
+    content = f"""# Real Chapter
+
+{_LONG}
+
+```python
+# Configuration
+x = 1
+```
+
+## Also Real
+
+{_LONG}
+"""
+    chapters = extract_chapters(content, preamble_title="Book")
+    assert [chapter.title for chapter in chapters] == ["Real Chapter", "Also Real"]
+    assert "Configuration" not in [chapter.title for chapter in chapters]
+
+
 def test_extract_chapters_raises_when_empty() -> None:
     with pytest.raises(ValueError, match="No readable chapters"):
         extract_chapters("## Too short", preamble_title="Book")
