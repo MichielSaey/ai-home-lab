@@ -1,4 +1,4 @@
-from epub2audiobook.logging_setup import format_progress
+from text2audiobook.logging_setup import format_progress
 
 
 def test_format_progress_with_chunk() -> None:

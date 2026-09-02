@@ -48,12 +48,13 @@ dev = [
     { name = "ipywidgets" },
     { name = "pytest" },
 ]
-epub-audiobook = [
+text-audiobook = [
     { name = "accelerate" },
     { name = "beautifulsoup4" },
     { name = "bitsandbytes" },
     { name = "ebooklib" },
     { name = "en-core-web-sm" },
+    { name = "httpx" },
     { name = "ipywidgets" },
     { name = "kokoro" },
     { name = "lxml" },
@@ -75,12 +76,13 @@ dev = [
     { name = "ipywidgets" },
     { name = "pytest" },
 ]
-epub-audiobook = [
+text-audiobook = [
     { name = "accelerate" },
     { name = "beautifulsoup4" },
     { name = "bitsandbytes" },
     { name = "ebooklib" },
     { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
+    { name = "httpx" },
     { name = "ipywidgets" },
     { name = "kokoro", specifier = ">=0.9.4" },
     { name = "lxml" },

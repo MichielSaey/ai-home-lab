@@ -233,9 +233,9 @@ Chainlit `agent_hub` and LangGraph `garmin_trainer` have been removed. All inter
 
 ## 8. Tools
 
-### epub2audiobook (implemented)
+### text2audiobook (implemented)
 
-Standalone Python tool under `src/tools/epub2audiobook`. Not part of the Docker stack. See [epub2audiobook.md](./epub2audiobook.md).
+Standalone Python tool under `src/tools/text2audiobook`. Not part of the Docker stack. See [text2audiobook.md](./text2audiobook.md).
 
 ### workflows/ (planned)
 

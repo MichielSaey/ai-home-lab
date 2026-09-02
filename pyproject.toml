@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-epub2audiobook = "epub2audiobook.cli:main"
+text2audiobook = "text2audiobook.cli:main"
 
 [dependency-groups]
 dev = [
@@ -22,13 +22,14 @@ dev = [
     "pytest",
     "garminconnect==0.3.6",
 ]
-epub-audiobook = [
+text-audiobook = [
     "en-core-web-sm",
     "ipywidgets",
     "ebooklib",
     "beautifulsoup4",
     "lxml",
     "nltk",
+    "httpx",
     "transformers>=5.0,<5.10", # 5.10+ needs torch.float8_e8m0fnu (torch 2.7+)
     "accelerate",
     "bitsandbytes",
@@ -49,8 +50,8 @@ torch = { index = "pytorch-cu124" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shared", "src/tools/epub2audiobook/src/epub2audiobook"]
+packages = ["src/shared", "src/tools/text2audiobook/src/text2audiobook"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/shared" = "shared"
-"src/tools/epub2audiobook/src/epub2audiobook" = "epub2audiobook"
+"src/tools/text2audiobook/src/text2audiobook" = "text2audiobook"

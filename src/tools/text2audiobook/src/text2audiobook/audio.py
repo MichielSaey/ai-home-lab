@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from epub2audiobook.logging_setup import ProgressContext
+from text2audiobook.logging_setup import ProgressContext
 from shared.ffmpeg_utils import concat_audio_files, run_ffmpeg
 
 logger = logging.getLogger(__name__)

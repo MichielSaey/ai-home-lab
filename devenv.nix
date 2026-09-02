@@ -66,7 +66,7 @@ in
       sync = {
         enable = true;
         # Main [project] deps always sync; add groups here (or set allGroups = true).
-        groups = [ "dev" "epub-audiobook" ];
+        groups = [ "dev" "text-audiobook" ];
       };
     };
     venv.enable = true;

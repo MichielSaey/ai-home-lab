@@ -25,7 +25,7 @@ def _now_iso() -> str:
 
 @dataclass
 class BookRecord:
-    epub_path: str
+    source_path: str
     title: str | None = None
     author: str | None = None
     status: str = "running"  # running | ok | skipped | failed
@@ -89,8 +89,8 @@ class RunTracker:
             self.environment.update(values)
         self.write()
 
-    def start_book(self, epub_path: Path) -> BookRecord:
-        record = BookRecord(epub_path=str(epub_path))
+    def start_book(self, source_path: Path) -> BookRecord:
+        record = BookRecord(source_path=str(source_path))
         with self._lock:
             self.books.append(record)
             self._book_starts[id(record)] = time.perf_counter()
@@ -176,7 +176,7 @@ class RunTracker:
             "run_id": self.run_id,
             "started_at": record.started_at,
             "finished_at": record.finished_at,
-            "epub_path": record.epub_path,
+            "source_path": record.source_path,
             "title": record.title,
             "author": record.author,
             "status": record.status,

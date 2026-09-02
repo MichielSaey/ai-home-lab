@@ -1,6 +1,5 @@
-from epub2audiobook.chunking import chunk_sentences
-from epub2audiobook.epub_io import Chapter
-from epub2audiobook.chunking import build_chunks
+from text2audiobook.chunking import build_chunks, chunk_sentences
+from text2audiobook.io import Chapter
 
 
 def test_chunk_sentences_respects_word_limit() -> None:

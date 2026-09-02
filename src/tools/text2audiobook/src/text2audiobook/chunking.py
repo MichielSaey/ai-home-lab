@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from epub2audiobook.epub_io import Chapter
+from text2audiobook.io import Chapter
 
 _punkt_ready = False
 

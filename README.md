@@ -19,7 +19,7 @@ Homelab containers owned by [homelab-nix](https://github.com/MichielSaey/homelab
 
 - **Odysseus** (`services/odysseus`) — self-hosted agent UI for interactive work (chat, presets, MCP client).
 - **MCP servers** (`src/mcp-servers/`) — domain logic exposed over Streamable HTTP on the internal Docker network.
-- **Shared utilities** (`src/shared/`) — CUDA bootstrap and ffmpeg helpers for epub2audiobook.
+- **Shared utilities** (`src/shared/`) — CUDA bootstrap and ffmpeg helpers for text2audiobook.
 
 ### Network and access model
 
@@ -78,7 +78,7 @@ docker compose -f services/docker-compose.yml up -d --build
 devenv shell
 ```
 
-For epub2audiobook and Jupyter — not the Docker stack. See [docs/epub2audiobook.md](docs/epub2audiobook.md).
+For text2audiobook and Jupyter — not the Docker stack. See [docs/text2audiobook.md](docs/text2audiobook.md).
 
 ## Self-hosted GitHub Actions (CasaOS)
 

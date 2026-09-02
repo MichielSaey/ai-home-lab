@@ -10,10 +10,10 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
-from epub2audiobook.config import TtsConfig
-from epub2audiobook.gpu import resolve_tts_device
-from epub2audiobook.llm import CleanedChunk
-from epub2audiobook.logging_setup import ProgressContext
+from text2audiobook.config import TtsConfig
+from text2audiobook.gpu import resolve_tts_device
+from text2audiobook.llm import CleanedChunk
+from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _ensure_spacy_model() -> None:
     except OSError as exc:
         raise RuntimeError(
             "spaCy model en_core_web_sm is required for Kokoro. "
-            "Install with: uv sync --group epub-audiobook"
+            "Install with: uv sync --group text-audiobook"
         ) from exc
 
 
