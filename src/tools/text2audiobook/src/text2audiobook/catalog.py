@@ -292,6 +292,20 @@ def analyze_chapter_openings_with_llm(
     return sorted(all_analyses, key=lambda a: a.index)
 
 
+def decisions_from_opening_analyses(
+    analyses: list[OpeningAnalysis],
+) -> list[ChapterDecision]:
+    """Use per-section opening verdicts when the full-catalog LLM pass is too large."""
+    return [
+        ChapterDecision(
+            index=analysis.index,
+            keep=analysis.narratively_important,
+            reason=analysis.reason or analysis.section_type,
+        )
+        for analysis in analyses
+    ]
+
+
 def classify_chapters_with_llm(
     model: Any,
     tokenizer: Any,
@@ -513,16 +527,34 @@ def select_chapters(
                 log_step(f"classify opening {flag}: {analysis.section_type}", chapter_title=title)
 
             entries = build_catalog_entries(all_chapters)
-            log_step("classify final catalog")
-            decisions = classify_chapters_with_llm(
-                model,
-                tokenizer,
-                book_title=book_title,
-                entries=entries,
-                opening_analyses=analyses,
-                include_intro=selection.include_intro,
-                include_appendix=selection.include_appendix,
-            )
+            # Full-catalog prompt for 100+ sections OOMs a 10GB GPU after openings.
+            _CATALOG_ENTRY_LIMIT = 60
+            if len(entries) > _CATALOG_ENTRY_LIMIT:
+                log_step(
+                    f"classify final catalog skipped ({len(entries)} sections > "
+                    f"{_CATALOG_ENTRY_LIMIT}); using opening analyses"
+                )
+                decisions = decisions_from_opening_analyses(analyses)
+            else:
+                log_step("classify final catalog")
+                import torch
+
+                try:
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    decisions = classify_chapters_with_llm(
+                        model,
+                        tokenizer,
+                        book_title=book_title,
+                        entries=entries,
+                        opening_analyses=analyses,
+                        include_intro=selection.include_intro,
+                        include_appendix=selection.include_appendix,
+                    )
+                except torch.cuda.OutOfMemoryError:
+                    torch.cuda.empty_cache()
+                    log_step("classify final catalog OOM; falling back to opening analyses")
+                    decisions = decisions_from_opening_analyses(analyses)
             if staging_dir is not None:
                 save_decisions_cache(
                     staging_dir,
