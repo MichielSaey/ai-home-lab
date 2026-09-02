@@ -49,10 +49,36 @@ def test_html_to_markdownish_strips_nav_and_keeps_headings() -> None:
     md = html_to_markdownish(_anthology_html())
     assert "Cover" not in md
     assert "Subscribe Contact" not in md
+    assert "Site chrome should not be narrated" not in md
     assert "# retrochronic" in md
     assert "## Circuitries" in md
     assert "## Machinic Desire" in md
     assert "A subsection" in md
+
+
+def test_keeps_h1_inside_article_header() -> None:
+    """WordPress-style entry-header must not lose the article title."""
+    html = f"""<!DOCTYPE html>
+<html><body>
+  <header class="site-header">Site Nav Branding</header>
+  <article>
+    <header class="entry-header">
+      <h1 class="entry-title">Capitalism is AI</h1>
+    </header>
+    <p>{_LONG}</p>
+    <h2>Section One</h2>
+    <p>{_LONG}</p>
+  </article>
+  <footer class="site-footer">Copyright notice</footer>
+</body></html>
+"""
+    chapters = extract_html_chapters(html, preamble_title="Book")
+    titles = [chapter.title for chapter in chapters]
+    assert "Capitalism is AI" in titles
+    assert "Section One" in titles
+    md = html_to_markdownish(html)
+    assert "Site Nav Branding" not in md
+    assert "Copyright notice" not in md
 
 
 def test_extract_html_chapters_orders_essays() -> None:

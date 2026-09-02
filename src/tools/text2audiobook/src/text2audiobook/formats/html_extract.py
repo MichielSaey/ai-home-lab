@@ -16,13 +16,13 @@ _STRIP_TAGS = (
     "noscript",
     "svg",
     "nav",
-    "header",
-    "footer",
     "aside",
     "form",
     "button",
     "iframe",
 )
+# Site chrome only — keep <header>/<footer> inside article/main (e.g. WP entry-header).
+_CHROME_TAGS = ("header", "footer")
 # Marks real h1/h2 lines so literal "#" in page text is not treated as ATX.
 _HEADING_MARK = "\ue000"
 
@@ -46,9 +46,24 @@ def _pick_content_root(soup: BeautifulSoup) -> Tag:
     return body if body is not None else soup
 
 
+def _inside_content_root(tag: Tag, roots: list[Tag]) -> bool:
+    for root in roots:
+        if tag is root:
+            return True
+        if any(parent is root for parent in tag.parents):
+            return True
+    return False
+
+
 def prepare_html_soup(html: str | bytes) -> BeautifulSoup:
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(_STRIP_TAGS):
+        tag.decompose()
+
+    content_roots = soup.select("article, main, [role='main']")
+    for tag in list(soup.find_all(_CHROME_TAGS)):
+        if content_roots and _inside_content_root(tag, content_roots):
+            continue
         tag.decompose()
     return soup
 
