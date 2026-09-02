@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-PACKAGE_LOGGER = "epub2audiobook"
+PACKAGE_LOGGER = "text2audiobook"
 _CONSOLE_FORMAT = "%(message)s"
 _FILE_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 

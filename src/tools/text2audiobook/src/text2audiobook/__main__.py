@@ -1,8 +1,8 @@
-"""Allow `python -m epub2audiobook`."""
+"""Allow `python -m text2audiobook`."""
 
 import sys
 
-from epub2audiobook.cli import main
+from text2audiobook.cli import main
 
 if __name__ == "__main__":
     sys.exit(main())

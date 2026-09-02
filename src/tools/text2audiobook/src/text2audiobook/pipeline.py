@@ -21,19 +21,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from epub2audiobook.audio import build_m4b, encode_chapter_mp3
-from epub2audiobook.catalog import select_chapters
-from epub2audiobook.chunking import TextChunk, build_chunks
-from epub2audiobook.config import AppConfig
-from epub2audiobook.epub_io import (
-    BookMetadata,
-    extract_all_chapters,
-    find_epubs,
-    get_metadata,
-    read_book,
-)
-from epub2audiobook.gpu import resolve_tts_device
-from epub2audiobook.llm import (
+from text2audiobook import formats  # noqa: F401 — register built-in readers
+from text2audiobook.audio import build_m4b, encode_chapter_mp3
+from text2audiobook.catalog import select_chapters
+from text2audiobook.chunking import TextChunk, build_chunks
+from text2audiobook.config import AppConfig
+from text2audiobook.gpu import resolve_tts_device
+from text2audiobook.io import BookMetadata, find_sources, parse_source
+from text2audiobook.llm import (
     CleanedChunk,
     LoadedLlm,
     iter_clean_chunks_batched,
@@ -41,9 +36,9 @@ from epub2audiobook.llm import (
     text_hash,
     unload_llm,
 )
-from epub2audiobook.logging_setup import ProgressContext, setup_logging
-from epub2audiobook.tracking import BookRecord, RunTracker
-from epub2audiobook.tts import (
+from text2audiobook.logging_setup import ProgressContext, setup_logging
+from text2audiobook.tracking import BookRecord, RunTracker
+from text2audiobook.tts import (
     KOKORO_REPO_ID,
     load_kokoro,
     synthesize_to_wav,
@@ -55,20 +50,40 @@ logger = logging.getLogger(__name__)
 _SENTINEL: Any = object()
 
 
-def run(config: AppConfig) -> int:
-    """Process every EPUB in the configured folder. Returns a process exit code."""
+def run(
+    config: AppConfig,
+    *,
+    source_paths: list[Path] | None = None,
+) -> int:
+    """Process supported sources. Returns a process exit code.
+
+    When ``source_paths`` is provided (e.g. from ``--url``), those paths are
+    used and the input directory is not scanned.
+    """
     tracker = RunTracker(config.paths.runs_dir, config.to_dict())
     setup_logging(tracker.log_path)
     logger.info("Run %s — manifest: %s", tracker.run_id, tracker.run_json_path)
     logger.debug("Config: %s", json.dumps(config.to_dict(), indent=2))
 
     try:
-        epubs = find_epubs(config.paths.epub_dir)
+        sources = (
+            list(source_paths)
+            if source_paths is not None
+            else find_sources(config.paths.input_dir)
+        )
     except FileNotFoundError as exc:
         logger.error("%s", exc)
         tracker.finalize("failed")
         return 1
-    logger.info("Found %d EPUB(s) under %s", len(epubs), config.paths.epub_dir)
+    if not sources:
+        logger.error("No sources to process")
+        tracker.finalize("failed")
+        return 1
+    logger.info(
+        "Found %d source(s)%s",
+        len(sources),
+        "" if source_paths is not None else f" under {config.paths.input_dir}",
+    )
 
     need_llm = config.llm.cleanup or config.selection.keep_chapter_indices is None
     tts_device = resolve_tts_device(config.tts.device)
@@ -93,24 +108,24 @@ def run(config: AppConfig) -> int:
                 llm = load_llm(config.llm)
             kokoro = load_kokoro(config.tts, device=tts_device)
 
-        for position, epub_path in enumerate(epubs, start=1):
-            record = tracker.start_book(epub_path)
+        for position, source_path in enumerate(sources, start=1):
+            record = tracker.start_book(source_path)
             try:
-                process_book(
-                    epub_path,
+                process_source(
+                    source_path,
                     config,
                     tracker=tracker,
                     record=record,
                     llm=llm,
                     kokoro=kokoro,
-                    position=(position, len(epubs)),
+                    position=(position, len(sources)),
                     tts_device=tts_device,
                 )
             except KeyboardInterrupt:
                 tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
                 raise
             except Exception as exc:
-                logger.error("FAILED %s: %s", epub_path.name, exc)
+                logger.error("FAILED %s: %s", source_path.name, exc)
                 logger.debug("Book failure traceback", exc_info=True)
                 tracker.finish_book(
                     record, status="failed", error=f"{type(exc).__name__}: {exc}"
@@ -133,8 +148,8 @@ def run(config: AppConfig) -> int:
     return 0
 
 
-def process_book(
-    epub_path: Path,
+def process_source(
+    source_path: Path,
     config: AppConfig,
     *,
     tracker: RunTracker,
@@ -144,7 +159,7 @@ def process_book(
     position: tuple[int, int] | None = None,
     tts_device: str | None = None,
 ) -> None:
-    """Convert one EPUB to an M4B.
+    """Convert one source file to an M4B.
 
     In concurrent mode the resident llm/kokoro are passed in; otherwise models
     are loaded and unloaded around their stage (notebook-style swap).
@@ -154,9 +169,10 @@ def process_book(
         tts_device = resolve_tts_device(config.tts.device)
 
     with tracker.stage(record, "parse"):
-        book = read_book(epub_path)
-        metadata = get_metadata(
-            book, config.paths.staging_dir, config.paths.output_dir
+        metadata, all_chapters = parse_source(
+            source_path,
+            staging_root=config.paths.staging_dir,
+            output_root=config.paths.output_dir,
         )
     record.title = metadata.title
     record.author = metadata.author
@@ -181,9 +197,7 @@ def process_book(
         tracker.finish_book(record, status="skipped", output_path=m4b_path)
         return
 
-    with tracker.stage(record, "parse"):
-        all_chapters = extract_all_chapters(book)
-    logger.info("EPUB catalog (%d sections):", len(all_chapters))
+    logger.info("Source catalog (%d sections):", len(all_chapters))
     for chapter in all_chapters:
         logger.info("  [%2d] %s (%d words)", chapter.index, chapter.title, len(chapter.text.split()))
 
@@ -535,7 +549,7 @@ def _log_summary(tracker: RunTracker, elapsed: float) -> None:
     logger.info("")
     logger.info("Run summary (%s):", tracker.run_id)
     for record in tracker.books:
-        name = record.title or Path(record.epub_path).name
+        name = record.title or Path(record.source_path).name
         if record.author:
             name = f"{name} — {record.author}"
         duration = f"{record.total_seconds:.1f}s" if record.total_seconds is not None else "-"

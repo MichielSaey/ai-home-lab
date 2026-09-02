@@ -8,9 +8,9 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from epub2audiobook.chunking import TextChunk
-from epub2audiobook.config import LlmConfig
-from epub2audiobook.logging_setup import ProgressContext
+from text2audiobook.chunking import TextChunk
+from text2audiobook.config import LlmConfig
+from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
 

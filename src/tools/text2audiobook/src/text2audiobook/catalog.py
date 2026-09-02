@@ -10,8 +10,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from epub2audiobook.config import SelectionConfig
-from epub2audiobook.logging_setup import ProgressContext
+from text2audiobook.config import SelectionConfig
+from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
 

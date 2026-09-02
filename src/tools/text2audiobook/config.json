@@ -1,6 +1,6 @@
 {
   "paths": {
-    "epub_dir": "data/input",
+    "input_dir": "data/input",
     "staging_dir": "data/staging",
     "output_dir": "data/output",
     "runs_dir": "data/runs"

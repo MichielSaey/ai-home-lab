@@ -21,14 +21,14 @@ DEFAULT_CLEAN_PROMPT = (
 
 @dataclass
 class PathsConfig:
-    epub_dir: Path = Path("data/input")
+    input_dir: Path = Path("data/input")
     staging_dir: Path = Path("data/staging")
     output_dir: Path = Path("data/output")
     runs_dir: Path = Path("data/runs")
 
     def resolve_against(self, base: Path) -> None:
         """Resolve relative paths against the config file's directory."""
-        for name in ("epub_dir", "staging_dir", "output_dir", "runs_dir"):
+        for name in ("input_dir", "staging_dir", "output_dir", "runs_dir"):
             value = Path(getattr(self, name))
             if not value.is_absolute():
                 value = base / value
@@ -146,7 +146,14 @@ def load_config(path: Path | None = None) -> AppConfig:
     for key in sorted(set(data) - set(_SECTIONS)):
         logger.warning("Ignoring unknown config section: %s", key)
 
-    paths = _build_section(PathsConfig, data.get("paths"), "paths")
+    paths_data = data.get("paths")
+    if isinstance(paths_data, dict):
+        paths_data = dict(paths_data)
+        # Backward-compatible alias from the EPUB-only era.
+        if "input_dir" not in paths_data and "epub_dir" in paths_data:
+            paths_data["input_dir"] = paths_data["epub_dir"]
+        paths_data.pop("epub_dir", None)
+    paths = _build_section(PathsConfig, paths_data, "paths")
     paths.resolve_against(config_path.parent)
 
     return AppConfig(
