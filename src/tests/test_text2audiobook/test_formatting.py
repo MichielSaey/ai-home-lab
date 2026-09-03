@@ -87,8 +87,13 @@ def test_inline_bibliographic_citation_is_simplified() -> None:
 
 
 def test_parenthetical_citation_is_simplified() -> None:
-    cleaned = format_for_tts("Acceleration is a political project (Fisher, 2012).")
+    cleaned = format_for_tts("Acceleration is a political project (Fisher, 2012, p. 342).")
     assert cleaned == "Acceleration is a political project, wrote Fisher in twenty twelve."
+
+
+def test_place_year_parenthetical_is_left_alone() -> None:
+    source = "They met in winter (Paris, 2012) and stayed."
+    assert format_for_tts(source) == source
 
 
 def test_page_mention_in_a_later_sentence_is_not_a_citation() -> None:

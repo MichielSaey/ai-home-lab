@@ -133,12 +133,16 @@ _FULL_CITE_PAGES_RE = re.compile(
 )
 
 _PAREN_CITE_RE = re.compile(
-    rf"\s*\((?:"
-    rf"(?P<author>{_AUTHOR}|[A-Z][A-Za-z'.-]+\s+et\s+al\.?),?\s+"
-    rf"|(?P<last>[A-Z][A-Za-z'.-]+),\s+"
+    rf"\s*\("
+    rf"(?:"
+    rf"(?P<author>{_AUTHOR}|[A-Z][A-Za-z'.-]+\s+et\s+al\.?)"
+    rf",?\s+(?P<year>(?:18|19|20)\d{{2}})[a-z]?"
+    rf"(?:,\s*[Pp]p?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?)?"
+    rf"|"
+    rf"(?P<last>[A-Z][A-Za-z'.-]+),\s+(?P<year2>(?:18|19|20)\d{{2}})[a-z]?"
+    rf",\s*[Pp]p?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?"
     rf")"
-    rf"(?P<year>(?:18|19|20)\d{{2}})[a-z]?"
-    rf"(?:,\s*[Pp]p?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?)?\)"
+    rf"\)"
 )
 
 _NUMERIC_REF_RE = re.compile(r"\s*\[\d+(?:\s*[-–,;]\s*\d+)*\]")
@@ -289,7 +293,8 @@ def _replace_full_citation(match: re.Match[str]) -> str:
 
 def _replace_paren_citation(match: re.Match[str]) -> str:
     author = match.group("author") or match.group("last")
-    year = year_to_words(int(match.group("year")))
+    year_raw = match.group("year") or match.group("year2")
+    year = year_to_words(int(year_raw))
     return f", wrote {author} in {year}"
 
 
