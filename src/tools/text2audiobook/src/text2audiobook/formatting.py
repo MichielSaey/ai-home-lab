@@ -107,6 +107,7 @@ _REFERENCES_HEADING_RE = re.compile(
         | sources
     )
     [\*"'_]*
+    \s*[:.]?
     \s*
     $
     """,

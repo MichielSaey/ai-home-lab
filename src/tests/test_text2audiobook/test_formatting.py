@@ -57,6 +57,11 @@ def test_plain_bibliography_heading_is_removed() -> None:
     assert text == "Keep this."
 
 
+def test_references_heading_with_colon_is_removed() -> None:
+    text = format_for_tts("Keep this.\n\nReferences:\nFisher, Mark. 2012.")
+    assert text == "Keep this."
+
+
 def test_plain_appendix_after_references_is_kept() -> None:
     text = format_for_tts(
         "The argument ends here.\n\n"
