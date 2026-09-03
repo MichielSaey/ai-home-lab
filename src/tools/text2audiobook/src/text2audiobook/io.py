@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+PAGE_SUFFIXES = frozenset({".html", ".htm", ".url"})
 MIN_SECTION_WORDS = 30
+
+
+def infer_source_kind(path: Path) -> str:
+    """ebook for EPUB/Markdown; page for HTML and .url sources."""
+    if path.suffix.lower() in PAGE_SUFFIXES:
+        return "page"
+    return "ebook"
 
 
 def slugify(text: str, max_len: int = 80) -> str:

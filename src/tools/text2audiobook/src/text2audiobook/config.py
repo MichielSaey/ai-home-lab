@@ -22,7 +22,9 @@ DEFAULT_CLEAN_PROMPT = (
     "- Delete bibliography, references, works cited, and endnotes sections entirely.\n"
     "- Simplify inline citations. Example: "
     "\"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The Accelerationist "
-    "Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve\".\n"
+    "Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve.\".\n"
+    "- Do not read tables or figures cell by cell. Replace them with a short "
+    "reference to the ebook or the original page.\n"
     "- Improve phonetic readability otherwise.\n\n"
     "Text:\n{text}"
 )
@@ -46,7 +48,9 @@ class PathsConfig:
 
 @dataclass
 class ChunkingConfig:
-    words_per_chunk: int = 250
+    format_words_per_chunk: int = 1000
+    speak_target_phonemes: int = 160
+    speak_max_phonemes: int = 400
     max_chunks_per_chapter: int | None = None
 
 
@@ -65,16 +69,16 @@ class LlmConfig:
     model_id: str = "Qwen/Qwen2.5-7B-Instruct"
     device: str = "cuda"
     cleanup: bool = True
-    cleanup_batch_size: int = 8
-    max_new_tokens: int = 1024
+    cleanup_batch_size: int = 1
+    max_new_tokens: int = 2048
     clean_prompt: str = DEFAULT_CLEAN_PROMPT
 
 
 @dataclass
 class TtsConfig:
-    lang: str = "b"
-    voice: str = "bf_emma"
-    speed: float = 0.92
+    lang: str = "a"
+    voice: str = "af_bella"
+    speed: float = 0.90
     device: str = "auto"
 
 
@@ -82,17 +86,17 @@ class TtsConfig:
 class OutputConfig:
     chapter_mp3: bool = False
     mp3_bitrate: str = "128k"
-    m4b_bitrate: str = "64k"
+    m4b_bitrate: str = "128k"
     keep_wav: bool = False
     skip_existing: bool = True
-    chunk_silence_ms: int = 0
-    chapter_silence_ms: int = 0
-    loudnorm: bool = False
+    chunk_silence_ms: int = 300
+    chapter_silence_ms: int = 1000
+    loudnorm: bool = True
 
 
 @dataclass
 class PipelineConfig:
-    concurrent_models: bool = True
+    concurrent_models: bool = False
     ffmpeg_workers: int = 2
     queue_size: int = 32
 
@@ -165,9 +169,16 @@ def load_config(path: Path | None = None) -> AppConfig:
     paths = _build_section(PathsConfig, paths_data, "paths")
     paths.resolve_against(config_path.parent)
 
+    chunking_data = data.get("chunking")
+    if isinstance(chunking_data, dict):
+        chunking_data = dict(chunking_data)
+        if "format_words_per_chunk" not in chunking_data and "words_per_chunk" in chunking_data:
+            chunking_data["format_words_per_chunk"] = chunking_data["words_per_chunk"]
+        chunking_data.pop("words_per_chunk", None)
+
     return AppConfig(
         paths=paths,
-        chunking=_build_section(ChunkingConfig, data.get("chunking"), "chunking"),
+        chunking=_build_section(ChunkingConfig, chunking_data, "chunking"),
         selection=_build_section(SelectionConfig, data.get("selection"), "selection"),
         llm=_build_section(LlmConfig, data.get("llm"), "llm"),
         tts=_build_section(TtsConfig, data.get("tts"), "tts"),

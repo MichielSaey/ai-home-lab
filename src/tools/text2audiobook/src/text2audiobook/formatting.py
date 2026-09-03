@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import calendar
 import re
 from dataclasses import replace
 
 from text2audiobook.io import Chapter
+
+FORMATTER_VERSION = "2"
 
 _MONTHS = (
     "January",
@@ -257,15 +260,21 @@ def strip_reference_sections(text: str) -> str:
     return "\n".join(kept).strip()
 
 
+def _days_in_month(month: int, year: int) -> int:
+    if month == 2:
+        return 29 if calendar.isleap(year) else 28
+    return _DAYS_IN_MONTH[month - 1]
+
+
 def _replace_date(match: re.Match[str]) -> str:
     day = int(match.group("day"))
     month = int(match.group("month"))
     year = int(match.group("year"))
     if not 1 <= month <= 12:
         return match.group(0)
-    if not 1 <= day <= _DAYS_IN_MONTH[month - 1]:
-        return match.group(0)
     if year < 1000:
+        return match.group(0)
+    if not 1 <= day <= _days_in_month(month, year):
         return match.group(0)
     spoken = (
         f"the {day_to_ordinal_words(day)} of {_MONTHS[month - 1]}, {year_to_words(year)}"
@@ -306,9 +315,117 @@ def _collapse_whitespace(text: str) -> str:
     return text.strip()
 
 
-def format_for_tts(text: str) -> str:
+_HTML_TABLE_RE = re.compile(r"<table\b[^>]*>.*?</table>", re.IGNORECASE | re.DOTALL)
+_HTML_IMG_RE = re.compile(
+    r"<img\b[^>]*\balt\s*=\s*[\"']([^\"']*)[\"'][^>]*>",
+    re.IGNORECASE,
+)
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
+_PIPE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+_PIPE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
+
+
+def visual_reference(
+    kind: str,
+    *,
+    title: str | None,
+    chapter_title: str,
+    source_kind: str,
+) -> str:
+    """Spoken stand-in for a table or figure that should not be read cell-by-cell."""
+    noun = "figure" if kind == "figure" else "table"
+    label = f"the {noun} {title.strip()}" if title and title.strip() else f"the {noun}"
+    where = "on the original page" if source_kind == "page" else "in this chapter of the ebook"
+    return f"See {label} {where}."
+
+
+def _caption_from_pipe_row(line: str) -> str | None:
+    cells = [cell.strip().strip("*_") for cell in line.strip().strip("|").split("|")]
+    cells = [cell for cell in cells if cell]
+    if not cells:
+        return None
+    caption = ", ".join(cells)
+    return caption if caption else None
+
+
+def replace_tables_and_figures(
+    text: str,
+    *,
+    chapter_title: str = "",
+    source_kind: str = "ebook",
+) -> str:
+    """Replace HTML/Markdown tables and images with a short ebook/page reference."""
+
+    def html_table(match: re.Match[str]) -> str:
+        block = match.group(0)
+        header = re.search(r"<th\b[^>]*>(.*?)</th>", block, re.IGNORECASE | re.DOTALL)
+        title = re.sub(r"<[^>]+>", "", header.group(1)).strip() if header else None
+        return visual_reference(
+            "table", title=title, chapter_title=chapter_title, source_kind=source_kind
+        )
+
+    text = _HTML_TABLE_RE.sub(html_table, text)
+
+    def html_img(match: re.Match[str]) -> str:
+        return visual_reference(
+            "figure",
+            title=match.group(1) or None,
+            chapter_title=chapter_title,
+            source_kind=source_kind,
+        )
+
+    text = _HTML_IMG_RE.sub(html_img, text)
+
+    def md_img(match: re.Match[str]) -> str:
+        return visual_reference(
+            "figure",
+            title=match.group(1) or None,
+            chapter_title=chapter_title,
+            source_kind=source_kind,
+        )
+
+    text = _MD_IMAGE_RE.sub(md_img, text)
+
+    lines = text.splitlines()
+    rebuilt: list[str] = []
+    index = 0
+    while index < len(lines):
+        if _PIPE_ROW_RE.match(lines[index]):
+            start = index
+            caption = _caption_from_pipe_row(lines[index])
+            index += 1
+            while index < len(lines) and (
+                _PIPE_ROW_RE.match(lines[index]) or _PIPE_SEP_RE.match(lines[index])
+            ):
+                index += 1
+            if index - start >= 2:
+                rebuilt.append(
+                    visual_reference(
+                        "table",
+                        title=caption,
+                        chapter_title=chapter_title,
+                        source_kind=source_kind,
+                    )
+                )
+                continue
+            rebuilt.extend(lines[start:index])
+            continue
+        rebuilt.append(lines[index])
+        index += 1
+    return "\n".join(rebuilt)
+
+
+def format_for_tts(
+    text: str,
+    *,
+    chapter_title: str = "",
+    source_kind: str = "ebook",
+) -> str:
     """Rewrite a chunk so Kokoro hears spoken forms instead of print conventions."""
     text = strip_reference_sections(text)
+    text = replace_tables_and_figures(
+        text, chapter_title=chapter_title, source_kind=source_kind
+    )
     text = simplify_inline_citations(text)
     text = expand_dates(text)
     text = expand_abbreviations(text)

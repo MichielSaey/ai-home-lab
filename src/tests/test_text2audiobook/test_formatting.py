@@ -25,6 +25,17 @@ def test_invalid_dates_are_left_alone() -> None:
     assert "32/01/2020" in format_for_tts("On 32/01/2020 nothing happened.")
 
 
+def test_non_leap_feb_29_is_left_alone() -> None:
+    source = "On 29/02/2021 nothing happened."
+    assert format_for_tts(source) == source
+
+
+def test_leap_feb_29_is_spoken() -> None:
+    assert format_for_tts("On 29/02/2020 it rained.") == (
+        "On the twenty-ninth of February, twenty twenty it rained."
+    )
+
+
 def test_year_to_words_matches_narration() -> None:
     assert year_to_words(2012) == "twenty twelve"
     assert year_to_words(2026) == "twenty twenty-six"
@@ -210,6 +221,36 @@ def test_passthrough_cleanup_still_formats() -> None:
 def test_default_clean_prompt_covers_new_rules() -> None:
     assert "the third of September, twenty twenty-six" in DEFAULT_CLEAN_PROMPT
     assert "in other words" in DEFAULT_CLEAN_PROMPT
-    assert "Wrote Mark Fisher in twenty twelve" in DEFAULT_CLEAN_PROMPT
+    assert "Wrote Mark Fisher in twenty twelve." in DEFAULT_CLEAN_PROMPT
     cfg = load_config()
     assert "in other words" in cfg.llm.clean_prompt
+    assert cfg.tts.voice == "af_bella"
+    assert cfg.llm.max_new_tokens == 2048
+    assert cfg.chunking.format_words_per_chunk == 1000
+
+
+def test_markdown_table_becomes_ebook_reference() -> None:
+    source = (
+        "Intro stays.\n"
+        "| GDP | Year |\n"
+        "| --- | --- |\n"
+        "| 1 | 2020 |\n"
+        "Outro stays."
+    )
+    cleaned = format_for_tts(source, chapter_title="One")
+    assert "See the table GDP, Year in this chapter of the ebook." in cleaned
+    assert "2020" not in cleaned
+    assert "Intro stays." in cleaned
+    assert "Outro stays." in cleaned
+
+
+def test_untitled_html_table_on_a_page() -> None:
+    source = "Before.<table><tr><td>1</td><td>2</td></tr></table>After."
+    cleaned = format_for_tts(source, source_kind="page")
+    assert cleaned == "Before.See the table on the original page.After."
+
+
+def test_markdown_figure_uses_alt_text() -> None:
+    cleaned = format_for_tts("Look ![Growth chart](chart.png) here.")
+    assert "See the figure Growth chart in this chapter of the ebook." in cleaned
+    assert "chart.png" not in cleaned

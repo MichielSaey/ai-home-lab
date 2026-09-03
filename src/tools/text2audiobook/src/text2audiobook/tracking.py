@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-STAGES = ("parse", "classify", "clean", "tts", "encode", "m4b")
+STAGES = ("parse", "classify", "format", "tts", "encode", "m4b")
 
 
 def _now_iso() -> str:
@@ -165,7 +165,8 @@ class RunTracker:
             "cleanup_batch_size": section("llm").get("cleanup_batch_size"),
             "voice": section("tts").get("voice"),
             "speed": section("tts").get("speed"),
-            "words_per_chunk": section("chunking").get("words_per_chunk"),
+            "format_words_per_chunk": section("chunking").get("format_words_per_chunk"),
+            "speak_target_phonemes": section("chunking").get("speak_target_phonemes"),
             "concurrent_models": section("pipeline").get("concurrent_models"),
             "llm_device": self.environment.get("llm_device"),
             "tts_device": self.environment.get("tts_device"),

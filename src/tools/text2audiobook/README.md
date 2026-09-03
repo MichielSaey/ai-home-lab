@@ -1,6 +1,6 @@
 # text2audiobook
 
-Fire-and-forget CLI for converting text sources (EPUB, Markdown, HTML, URL) to M4B audiobooks.
+v2 fire-and-forget CLI: extract → format → speak, then an M4B audiobook.
 
 ```
 src/tools/text2audiobook/
@@ -9,6 +9,8 @@ src/tools/text2audiobook/
 ├── data/                 # production input / staging / output / runs
 └── __main__.py
 ```
+
+Package version in `pyproject.toml` stays `0.1.0`; this README describes the **tool** v2 pipeline.
 
 ## Usage
 
@@ -26,6 +28,30 @@ text2audiobook --url https://retrochronic.com
 ```
 
 `text2audiobook` loads `config.json` in the tool directory by default. Paths in the config are relative to that folder.
+
+### Stages
+
+A full run is the default. Re-run a layer without repeating the others:
+
+```bash
+text2audiobook --stage extract
+text2audiobook --stage format
+text2audiobook --stage speak
+text2audiobook --stage speak --voice bf_emma
+text2audiobook --force
+```
+
+`--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+
+### Voices
+
+```bash
+text2audiobook --list-voices
+text2audiobook --voice af_bella
+text2audiobook --voice random
+```
+
+Default voice is `af_bella` (American, lang `a`). `--voice random` picks from official grades A / A- / B- without replacement until the pool wraps. Language follows the voice prefix (`bf_emma` → British `b`).
 
 ## Supported inputs
 
@@ -47,26 +73,32 @@ https://retrochronic.com
 
 ## Data layout
 
+Stems live under `data/staging/<book_slug>/`:
+
 | Path | Purpose |
 |------|---------|
-| `data/input/` | Sources the CLI scans (EPUB, Markdown, HTML, `.url`) |
-| `data/staging/<book_slug>/` | Per-book scratch (`wav/`, `decisions.json`, `source.html`) |
+| `extract/` | Selected chapters + extract manifest |
+| `format/` | LLM windows (`chunks.jsonl`), merged chapter scripts, format manifest |
+| `speak/` | Phoneme units, WAVs, speak manifest (voice, speed, bitrate, loudnorm, silences) |
 | `data/staging/_url_cache/` | Fetched HTML cache (keyed by URL hash) |
 | `data/output/<book_slug>.m4b` | Finished audiobooks |
 | `data/runs/` | Run manifests, logs, `ledger.jsonl` |
 
-`data/**` is gitignored; only `.gitkeep` files are tracked.
+`data/**` is gitignored; only `.gitkeep` files are tracked. Ignore leftover v1 `wav/cleaned.jsonl` if it is still on disk.
 
 ## Cleanup / formatting
 
-Before TTS, each chunk is rewritten for spoken English:
+Format windows (~1000 words) are rewritten for spoken English, then merged into a chapter script. Speak packing uses a phoneme budget (target 160, cap 400) so Kokoro does not waterfall-split mid-sentence.
 
-- Dates such as `03/09/2026` become `the third of September, twenty twenty-six`
+Deterministic rules (also in the LLM prompt):
+
+- Dates such as `03/09/2026` become `the third of September, twenty twenty-six` (29 February only in leap years)
 - `i.e.` / `e.i.` become `in other words`; `e.g.` becomes `for example`
 - References / bibliography / works-cited sections are dropped
-- Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve`
+- Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve.`
+- Tables and figures become a short pointer: ebook *See the table Title in this chapter of the ebook.*; HTML/URL *…on the original page.*
 
-The LLM cleanup prompt in `config.json` asks for the same rules; a deterministic pass then enforces them even when cleanup is disabled.
+GPU default is sequential: unload Qwen before Kokoro. `pipeline.concurrent_models` is ignored.
 
 ## Adding a format
 

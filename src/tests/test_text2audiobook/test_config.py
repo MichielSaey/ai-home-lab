@@ -27,6 +27,17 @@ def test_load_config_resolves_new_paths(tmp_path: Path) -> None:
     assert cfg.output.chapter_mp3 is False
 
 
+def test_load_config_maps_legacy_words_per_chunk(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"chunking": {"words_per_chunk": 800}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.chunking.format_words_per_chunk == 800
+    assert cfg.chunking.speak_target_phonemes == 160
+
+
 def test_load_config_accepts_epub_dir_alias(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(

@@ -1,34 +1,27 @@
-"""Fire-and-forget orchestration: multi-book loop and the LLM→TTS→ffmpeg pipeline.
+"""v2 orchestration: extract → format → speak stems, sequential GPU, optional --stage."""
 
-Concurrent mode (pipeline.concurrent_models = true) keeps Qwen and Kokoro
-resident on the GPU for the whole run: an LLM thread produces cleaned chunks
-into a bounded queue, the main thread consumes them into WAVs, and finished
-chapters are encoded by a small ffmpeg thread pool. Sequential mode falls back
-to the original notebook behavior: clean everything, unload the LLM, then
-load Kokoro and synthesize.
-"""
+from __future__ import annotations
 
 import json
 import logging
 import platform
-import queue
 import shutil
-import threading
 import time
 from collections import Counter, defaultdict
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from text2audiobook import formats  # noqa: F401 — register built-in readers
 from text2audiobook.audio import build_m4b, encode_chapter_mp3
 from text2audiobook.catalog import select_chapters
-from text2audiobook.chunking import TextChunk, build_chunks
-from text2audiobook.config import AppConfig
-from text2audiobook.formatting import prepare_chapters_for_tts
+from text2audiobook.chunking import TextChunk, build_chunks, build_speak_units
+from text2audiobook.config import AppConfig, TtsConfig
+from text2audiobook.formatting import FORMATTER_VERSION, prepare_chapters_for_tts
 from text2audiobook.gpu import resolve_tts_device
-from text2audiobook.io import BookMetadata, find_sources, parse_source
+from text2audiobook.io import BookMetadata, find_sources, infer_source_kind, parse_source
 from text2audiobook.llm import (
     CleanedChunk,
     LoadedLlm,
@@ -38,6 +31,21 @@ from text2audiobook.llm import (
     unload_llm,
 )
 from text2audiobook.logging_setup import ProgressContext, setup_logging
+from text2audiobook.stems import (
+    PIPELINE_STAGES,
+    BookStems,
+    append_jsonl,
+    canonical_stages,
+    file_sha256,
+    load_extract_chapters,
+    load_format_scripts,
+    load_jsonl,
+    manifest_matches,
+    save_extract_chapters,
+    save_format_script,
+    stable_hash,
+    write_json,
+)
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
     KOKORO_REPO_ID,
@@ -45,26 +53,35 @@ from text2audiobook.tts import (
     synthesize_to_wav,
     unload_kokoro,
 )
+from text2audiobook.voices import lang_for_voice, resolve_voice
 
 logger = logging.getLogger(__name__)
-
-_SENTINEL: Any = object()
 
 
 def run(
     config: AppConfig,
     *,
     source_paths: list[Path] | None = None,
+    stages: tuple[str, ...] | list[str] | None = None,
+    force: bool = False,
+    voice: str | None = None,
 ) -> int:
     """Process supported sources. Returns a process exit code.
 
     When ``source_paths`` is provided (e.g. from ``--url``), those paths are
     used and the input directory is not scanned.
     """
+    selected = canonical_stages(stages)
     tracker = RunTracker(config.paths.runs_dir, config.to_dict())
     setup_logging(tracker.log_path)
     logger.info("Run %s — manifest: %s", tracker.run_id, tracker.run_json_path)
+    logger.info("Stages: %s%s", ", ".join(selected), " (force)" if force else "")
     logger.debug("Config: %s", json.dumps(config.to_dict(), indent=2))
+    if config.pipeline.concurrent_models:
+        logger.warning(
+            "pipeline.concurrent_models is ignored in v2: format unloads Qwen "
+            "before Kokoro loads."
+        )
 
     try:
         sources = (
@@ -86,29 +103,24 @@ def run(
         "" if source_paths is not None else f" under {config.paths.input_dir}",
     )
 
-    need_llm = config.llm.cleanup or config.selection.keep_chapter_indices is None
+    need_llm = _run_needs_llm(config, selected)
     tts_device = resolve_tts_device(config.tts.device)
     tracker.set_environment(
         python=platform.python_version(),
         llm_model_id=config.llm.model_id if need_llm else None,
         llm_device=config.llm.device if need_llm else None,
-        tts_model_id=KOKORO_REPO_ID,
-        tts_device=tts_device,
-        concurrent_models=config.pipeline.concurrent_models,
+        tts_model_id=KOKORO_REPO_ID if "speak" in selected else None,
+        tts_device=tts_device if "speak" in selected else None,
+        concurrent_models=False,
+        stages=list(selected),
+        force=force,
     )
 
-    llm: LoadedLlm | None = None
-    kokoro: Any = None
     started = time.perf_counter()
     interrupted = False
     fatal = False
 
     try:
-        if config.pipeline.concurrent_models:
-            if need_llm:
-                llm = load_llm(config.llm)
-            kokoro = load_kokoro(config.tts, device=tts_device)
-
         for position, source_path in enumerate(sources, start=1):
             record = tracker.start_book(source_path)
             try:
@@ -117,10 +129,11 @@ def run(
                     config,
                     tracker=tracker,
                     record=record,
-                    llm=llm,
-                    kokoro=kokoro,
                     position=(position, len(sources)),
                     tts_device=tts_device,
+                    stages=selected,
+                    force=force,
+                    voice=voice,
                 )
             except KeyboardInterrupt:
                 tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
@@ -159,13 +172,12 @@ def process_source(
     kokoro: Any = None,
     position: tuple[int, int] | None = None,
     tts_device: str | None = None,
+    stages: tuple[str, ...] = PIPELINE_STAGES,
+    force: bool = False,
+    voice: str | None = None,
 ) -> None:
-    """Convert one source file to an M4B.
-
-    In concurrent mode the resident llm/kokoro are passed in; otherwise models
-    are loaded and unloaded around their stage (notebook-style swap).
-    """
-    concurrent = config.pipeline.concurrent_models
+    """Convert one source through the requested extract / format / speak stages."""
+    selected = canonical_stages(stages)
     if tts_device is None:
         tts_device = resolve_tts_device(config.tts.device)
 
@@ -185,234 +197,506 @@ def process_source(
         book_idx=book_idx,
         total_books=total_books,
     )
-
     if position is not None:
         logger.info("")
         logger.info(
-            "=== [%d/%d] %s — %s ===", position[0], position[1], metadata.title, metadata.author
+            "=== [%d/%d] %s — %s ===",
+            position[0],
+            position[1],
+            metadata.title,
+            metadata.author,
         )
 
-    m4b_path = metadata.m4b_path
-    if config.output.skip_existing and m4b_path.exists():
-        logger.info("Skipping '%s' — audiobook already exists: %s", metadata.title, m4b_path)
-        tracker.finish_book(record, status="skipped", output_path=m4b_path)
+    source_kind = infer_source_kind(source_path)
+    stems = BookStems(metadata.staging_dir)
+    tts_config = _resolve_tts(config, voice=voice, staging_root=config.paths.staging_dir)
+
+    if (
+        "speak" in selected
+        and config.output.skip_existing
+        and not force
+        and metadata.m4b_path.exists()
+        and _speak_current(stems, config, tts_config)
+    ):
+        logger.info(
+            "Skipping '%s' — audiobook already exists: %s",
+            metadata.title,
+            metadata.m4b_path,
+        )
+        tracker.finish_book(record, status="skipped", output_path=metadata.m4b_path)
         return
 
     logger.info("Source catalog (%d sections):", len(all_chapters))
     for chapter in all_chapters:
-        logger.info("  [%2d] %s (%d words)", chapter.index, chapter.title, len(chapter.text.split()))
+        logger.info(
+            "  [%2d] %s (%d words)",
+            chapter.index,
+            chapter.title,
+            len(chapter.text.split()),
+        )
 
-    need_llm = config.llm.cleanup or config.selection.keep_chapter_indices is None
     own_llm: LoadedLlm | None = None
     own_kokoro: Any = None
 
-    try:
-        if not concurrent and need_llm and llm is None:
+    def ensure_llm() -> LoadedLlm | None:
+        nonlocal own_llm
+        if llm is not None:
+            return llm
+        if own_llm is None:
             own_llm = load_llm(config.llm)
-        active_llm = llm if llm is not None else own_llm
+        return own_llm
 
-        with tracker.stage(record, "classify"):
-            chapters, _decisions = select_chapters(
-                active_llm.model if active_llm is not None else None,
-                active_llm.tokenizer if active_llm is not None else None,
-                all_chapters,
-                book_title=metadata.title,
-                selection=config.selection,
-                staging_dir=metadata.staging_dir,
-                progress=progress,
-            )
-
-        chapters = prepare_chapters_for_tts(chapters)
-        if not chapters:
-            raise ValueError("No chapters left after removing references sections")
-
-        chunks = build_chunks(
-            chapters,
-            config.chunking.words_per_chunk,
-            max_chunks_per_chapter=config.chunking.max_chunks_per_chapter,
+    try:
+        chapters = _run_extract(
+            all_chapters,
+            metadata=metadata,
+            source_path=source_path,
+            source_kind=source_kind,
+            config=config,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            progress=progress,
+            selected=selected,
+            force=force,
+            ensure_llm=ensure_llm,
         )
-        record.chapter_count = len(chapters)
-        record.chunk_count = len(chunks)
-        record.word_count = sum(len(chunk.text.split()) for chunk in chunks)
-        tracker.write()
-        logger.info("Created %d chunk(s) @ %d words each", len(chunks), config.chunking.words_per_chunk)
+        scripts = _run_format(
+            chapters,
+            metadata=metadata,
+            source_kind=source_kind,
+            config=config,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            progress=progress,
+            selected=selected,
+            force=force,
+            ensure_llm=ensure_llm,
+        )
+        if own_llm is not None:
+            unload_llm(own_llm)
+            own_llm = None
+            logger.info("Unloaded LLM to free GPU memory for Kokoro")
 
-        cache: dict[tuple[int, int], str] = {}
-        if config.output.skip_existing:
-            cache = _load_cleaned_cache(metadata.staging_dir, chunks)
-            if cache:
-                logger.info("Resuming: %d of %d chunk(s) already cleaned", len(cache), len(chunks))
-
-        with ThreadPoolExecutor(max_workers=max(1, config.pipeline.ffmpeg_workers)) as executor:
-            if concurrent:
-                wavs_by_slug, futures = _run_concurrent(
-                    llm=active_llm,
-                    kokoro=kokoro,
-                    chunks=chunks,
-                    cache=cache,
-                    config=config,
-                    metadata=metadata,
-                    tracker=tracker,
-                    record=record,
-                    executor=executor,
-                    progress=progress,
-                )
-            else:
-                cleaned_list = list(
-                    _timed_persist_iter(
-                        iter_clean_chunks_batched(
-                            active_llm,
-                            chunks,
-                            config.llm,
-                            already_cleaned=cache,
-                            progress=progress,
-                        ),
-                        tracker=tracker,
-                        record=record,
-                        cache=cache,
-                        staging_dir=metadata.staging_dir,
-                    )
-                )
-                if own_llm is not None:
-                    unload_llm(own_llm)
-                    own_llm = None
-                    logger.info("Unloaded LLM to free GPU memory for Kokoro")
-                own_kokoro = load_kokoro(config.tts, device=tts_device)
-                wavs_by_slug, futures = _synthesize_and_encode(
-                    iter(cleaned_list),
-                    kokoro=own_kokoro,
-                    chunks=chunks,
-                    config=config,
-                    metadata=metadata,
-                    tracker=tracker,
-                    record=record,
-                    executor=executor,
-                    progress=progress,
-                )
-            for future in futures:
-                future.result()
-
-        with tracker.stage(record, "m4b"):
-            chapter_wavs = [
-                (chapter.title, wavs_by_slug[chapter.slug])
-                for chapter in chapters
-                if wavs_by_slug.get(chapter.slug)
-            ]
-            build_m4b(
-                m4b_path,
-                chapter_wavs,
-                title=metadata.title,
-                author=metadata.author,
-                language=metadata.language,
-                cover_bytes=metadata.cover_bytes,
-                bitrate=config.output.m4b_bitrate,
-                chapter_silence_ms=config.output.chapter_silence_ms,
-                loudnorm=config.output.loudnorm,
+        if "speak" in selected:
+            if scripts is None:
+                scripts = load_format_scripts(stems)
+            own_kokoro = kokoro
+            loaded_here = False
+            if own_kokoro is None:
+                own_kokoro = load_kokoro(tts_config, device=tts_device)
+                loaded_here = True
+            _run_speak(
+                scripts,
+                metadata=metadata,
+                config=config,
+                tts_config=tts_config,
+                stems=stems,
+                kokoro=own_kokoro,
+                tracker=tracker,
+                record=record,
+                progress=progress,
+                force=force,
             )
-
-        if not config.output.keep_wav:
-            wav_root = metadata.staging_dir / "wav"
-            if wav_root.exists():
-                shutil.rmtree(wav_root)
-                logger.info("Removed WAV directory: %s", wav_root)
-        if not config.output.chapter_mp3 and not config.output.keep_wav:
-            mp3_root = metadata.staging_dir / "mp3"
-            if mp3_root.exists():
-                shutil.rmtree(mp3_root)
-                logger.info("Removed MP3 directory: %s", mp3_root)
-
-        tracker.finish_book(record, status="ok", output_path=m4b_path)
+            if loaded_here:
+                unload_kokoro(own_kokoro)
+                own_kokoro = None
+        elif "format" in selected or "extract" in selected:
+            tracker.finish_book(record, status="ok")
     finally:
         if own_llm is not None:
             unload_llm(own_llm)
-        if own_kokoro is not None:
+        if own_kokoro is not None and kokoro is None:
             unload_kokoro(own_kokoro)
 
 
-def _run_concurrent(
-    *,
-    llm: LoadedLlm | None,
-    kokoro: Any,
-    chunks: list[TextChunk],
-    cache: dict[tuple[int, int], str],
+def _run_needs_llm(config: AppConfig, stages: tuple[str, ...]) -> bool:
+    if "extract" in stages and config.selection.keep_chapter_indices is None:
+        return True
+    return "format" in stages and config.llm.cleanup
+
+
+def _resolve_tts(
     config: AppConfig,
+    *,
+    voice: str | None,
+    staging_root: Path,
+) -> TtsConfig:
+    chosen = resolve_voice(
+        voice,
+        default=config.tts.voice,
+        state_path=staging_root / "_voice_random.json",
+    )
+    lang = lang_for_voice(chosen)
+    if chosen != config.tts.voice or lang != config.tts.lang:
+        logger.info("Voice %s (lang=%s)", chosen, lang)
+    return replace(config.tts, voice=chosen, lang=lang)
+
+
+def _extract_fingerprint(
+    source_path: Path,
+    *,
+    source_kind: str,
+    config: AppConfig,
+) -> dict[str, Any]:
+    selection = config.selection
+    return {
+        "version": 2,
+        "source_hash": file_sha256(source_path),
+        "source_kind": source_kind,
+        "selection": {
+            "keep_chapter_indices": selection.keep_chapter_indices,
+            "max_chapters": selection.max_chapters,
+            "include_intro": selection.include_intro,
+            "include_appendix": selection.include_appendix,
+            "opening_words": selection.opening_words,
+            "opening_batch_size": selection.opening_batch_size,
+        },
+    }
+
+
+def _format_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str) -> dict[str, Any]:
+    return {
+        "version": 2,
+        "extract_hash": extract_hash,
+        "formatter_version": FORMATTER_VERSION,
+        "source_kind": source_kind,
+        "llm_model_id": config.llm.model_id,
+        "cleanup": config.llm.cleanup,
+        "max_new_tokens": config.llm.max_new_tokens,
+        "cleanup_batch_size": config.llm.cleanup_batch_size,
+        "clean_prompt_hash": text_hash(config.llm.clean_prompt),
+        "format_words_per_chunk": config.chunking.format_words_per_chunk,
+        "max_chunks_per_chapter": config.chunking.max_chunks_per_chapter,
+    }
+
+
+def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -> dict[str, Any]:
+    return {
+        "version": 2,
+        "format_hash": format_hash,
+        "voice": tts.voice,
+        "lang": tts.lang,
+        "speed": tts.speed,
+        "m4b_bitrate": config.output.m4b_bitrate,
+        "loudnorm": config.output.loudnorm,
+        "chunk_silence_ms": config.output.chunk_silence_ms,
+        "chapter_silence_ms": config.output.chapter_silence_ms,
+        "speak_target_phonemes": config.chunking.speak_target_phonemes,
+        "speak_max_phonemes": config.chunking.speak_max_phonemes,
+    }
+
+
+def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
+    format_manifest = stems.format_manifest
+    if not format_manifest.exists() or not stems.speak_manifest.exists():
+        return False
+    format_data = json.loads(format_manifest.read_text(encoding="utf-8"))
+    format_hash = stable_hash(format_data)
+    return manifest_matches(stems.speak_manifest, _speak_fingerprint(config, tts, format_hash=format_hash))
+
+
+def _run_extract(
+    all_chapters: list,
+    *,
     metadata: BookMetadata,
+    source_path: Path,
+    source_kind: str,
+    config: AppConfig,
+    stems: BookStems,
     tracker: RunTracker,
     record: BookRecord,
-    executor: ThreadPoolExecutor,
     progress: ProgressContext,
-) -> tuple[dict[str, list[Path]], list[Future]]:
-    """LLM thread feeds a bounded queue; the calling thread synthesizes WAVs."""
-    work_queue: queue.Queue[Any] = queue.Queue(maxsize=max(1, config.pipeline.queue_size))
-    stop = threading.Event()
-    producer_error: list[BaseException] = []
+    selected: tuple[str, ...],
+    force: bool,
+    ensure_llm,
+) -> list:
+    fingerprint = _extract_fingerprint(source_path, source_kind=source_kind, config=config)
+    extract_ok = manifest_matches(stems.extract_manifest, fingerprint) and stems.chapters_json.exists()
 
-    def produce() -> None:
-        try:
-            items = _timed_persist_iter(
-                iter_clean_chunks_batched(
-                    llm,
-                    chunks,
-                    config.llm,
-                    already_cleaned=cache,
-                    stop=stop,
-                    progress=progress,
-                ),
-                tracker=tracker,
-                record=record,
-                cache=cache,
-                staging_dir=metadata.staging_dir,
+    if "extract" not in selected:
+        if not extract_ok:
+            raise FileNotFoundError(
+                f"Extract stem missing for {metadata.title!r}. Run --stage extract first."
             )
-            for item in items:
-                if not _bounded_put(work_queue, item, stop):
-                    return
-        except BaseException as exc:
-            producer_error.append(exc)
-            logger.debug("LLM producer failed", exc_info=True)
-        finally:
-            _bounded_put(work_queue, _SENTINEL, stop)
+        return load_extract_chapters(stems)
 
-    producer = threading.Thread(target=produce, name="llm-cleanup", daemon=True)
-    producer.start()
-    try:
-        result = _synthesize_and_encode(
-            _queue_iter(work_queue),
+    if extract_ok and not force:
+        logger.info("Extract stem current — skipping classify")
+        return load_extract_chapters(stems)
+
+    if force:
+        decisions = metadata.staging_dir / "decisions.json"
+        if decisions.exists():
+            decisions.unlink()
+
+    with tracker.stage(record, "classify"):
+        active = None
+        if config.selection.keep_chapter_indices is None:
+            active = ensure_llm()
+        chapters, _decisions = select_chapters(
+            active.model if active is not None else None,
+            active.tokenizer if active is not None else None,
+            all_chapters,
+            book_title=metadata.title,
+            selection=config.selection,
+            staging_dir=metadata.staging_dir,
+            progress=progress,
+        )
+    save_extract_chapters(stems, chapters)
+    write_json(
+        stems.extract_manifest,
+        {
+            **fingerprint,
+            "title": metadata.title,
+            "author": metadata.author,
+            "language": metadata.language,
+            "chapter_count": len(chapters),
+        },
+    )
+    logger.info("Wrote extract stem (%d chapter(s))", len(chapters))
+    return chapters
+
+
+def _run_format(
+    chapters: list,
+    *,
+    metadata: BookMetadata,
+    source_kind: str,
+    config: AppConfig,
+    stems: BookStems,
+    tracker: RunTracker,
+    record: BookRecord,
+    progress: ProgressContext,
+    selected: tuple[str, ...],
+    force: bool,
+    ensure_llm,
+) -> list | None:
+    extract_data = json.loads(stems.extract_manifest.read_text(encoding="utf-8"))
+    extract_hash = stable_hash(
+        {key: extract_data[key] for key in ("version", "source_hash", "source_kind", "selection")}
+    )
+    fingerprint = _format_fingerprint(config, extract_hash=extract_hash, source_kind=source_kind)
+    format_ok = (
+        manifest_matches(stems.format_manifest, fingerprint)
+        and stems.format_chapters_index.exists()
+    )
+
+    if "format" not in selected:
+        if "speak" in selected and not format_ok:
+            raise FileNotFoundError(
+                f"Format stem missing for {metadata.title!r}. Run --stage format first."
+            )
+        return None
+
+    if format_ok and not force:
+        logger.info("Format stem current — skipping LLM cleanup")
+        scripts = load_format_scripts(stems)
+        record.chapter_count = len(scripts)
+        record.chunk_count = sum(
+            1 for _ in load_jsonl(stems.format_chunks_jsonl)
+        )
+        record.word_count = sum(len(chapter.text.split()) for chapter in scripts)
+        tracker.write()
+        return scripts
+
+    if force and stems.format_dir.exists():
+        shutil.rmtree(stems.format_dir)
+
+    prepared = prepare_chapters_for_tts(chapters)
+    if not prepared:
+        raise ValueError(
+            f"No chapters left after removing reference sections from {metadata.title!r}"
+        )
+
+    chunks = build_chunks(
+        prepared,
+        config.chunking.format_words_per_chunk,
+        max_chunks_per_chapter=config.chunking.max_chunks_per_chapter,
+        source_kind=source_kind,
+    )
+    record.chapter_count = len(prepared)
+    record.chunk_count = len(chunks)
+    record.word_count = sum(len(chunk.text.split()) for chunk in chunks)
+    tracker.write()
+    logger.info(
+        "Created %d format window(s) @ %d words",
+        len(chunks),
+        config.chunking.format_words_per_chunk,
+    )
+
+    cache: dict[tuple[int, int], str] = {}
+    if config.output.skip_existing and not force:
+        cache = _load_format_cache(stems, chunks)
+        if cache:
+            logger.info("Resuming: %d of %d window(s) already formatted", len(cache), len(chunks))
+
+    active_llm = ensure_llm() if config.llm.cleanup else None
+    cleaned_list = list(
+        _timed_persist_iter(
+            iter_clean_chunks_batched(
+                active_llm,
+                chunks,
+                config.llm,
+                already_cleaned=cache,
+                progress=progress,
+            ),
+            tracker=tracker,
+            record=record,
+            cache=cache,
+            stems=stems,
+        )
+    )
+    _write_format_scripts(stems, prepared, cleaned_list)
+    write_json(stems.format_manifest, fingerprint)
+    logger.info("Wrote format stem (%d chapter script(s))", len(prepared))
+    return load_format_scripts(stems)
+
+
+def _write_format_scripts(
+    stems: BookStems,
+    chapters: list,
+    cleaned: list[CleanedChunk],
+) -> None:
+    by_slug: dict[str, list[str]] = defaultdict(list)
+    for item in cleaned:
+        by_slug[item.chapter_slug].append(item.cleaned_text)
+    index = []
+    for chapter in chapters:
+        text = " ".join(by_slug.get(chapter.slug, []))
+        save_format_script(stems, chapter, text)
+        index.append({"index": chapter.index, "title": chapter.title, "slug": chapter.slug})
+    write_json(stems.format_chapters_index, index)
+
+
+def _run_speak(
+    scripts: list,
+    *,
+    metadata: BookMetadata,
+    config: AppConfig,
+    tts_config: TtsConfig,
+    stems: BookStems,
+    kokoro: Any,
+    tracker: RunTracker,
+    record: BookRecord,
+    progress: ProgressContext,
+    force: bool,
+) -> None:
+    format_data = json.loads(stems.format_manifest.read_text(encoding="utf-8"))
+    format_hash = stable_hash(format_data)
+    fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
+    speak_ok = manifest_matches(stems.speak_manifest, fingerprint)
+
+    british = tts_config.lang == "b"
+    units = build_speak_units(
+        scripts,
+        target_phonemes=config.chunking.speak_target_phonemes,
+        max_phonemes=config.chunking.speak_max_phonemes,
+        british=british,
+        source_kind=str(format_data.get("source_kind") or "ebook"),
+    )
+    record.chapter_count = len(scripts)
+    record.chunk_count = len(units)
+    record.word_count = sum(len(chapter.text.split()) for chapter in scripts)
+    tracker.write()
+    logger.info(
+        "Created %d speak unit(s) (target %d phonemes, cap %d)",
+        len(units),
+        config.chunking.speak_target_phonemes,
+        config.chunking.speak_max_phonemes,
+    )
+
+    if force and stems.speak_wav_dir.exists():
+        shutil.rmtree(stems.speak_wav_dir)
+
+    unit_rows = [
+        {
+            "chapter_index": unit.chapter_index,
+            "chapter_slug": unit.chapter_slug,
+            "chapter_title": unit.chapter_title,
+            "chunk_index": unit.chunk_index,
+            "text": unit.text,
+            "text_hash": text_hash(unit.text),
+        }
+        for unit in units
+    ]
+    stems.speak_units_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    stems.speak_units_jsonl.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in unit_rows),
+        encoding="utf-8",
+    )
+
+    with ThreadPoolExecutor(max_workers=max(1, config.pipeline.ffmpeg_workers)) as executor:
+        wavs_by_slug, futures = _synthesize_and_encode(
+            units,
             kokoro=kokoro,
-            chunks=chunks,
             config=config,
+            tts_config=tts_config,
             metadata=metadata,
+            stems=stems,
             tracker=tracker,
             record=record,
             executor=executor,
             progress=progress,
+            skip_wavs=config.output.skip_existing and speak_ok and not force,
         )
-    finally:
-        stop.set()
-        producer.join()
-    if producer_error:
-        raise producer_error[0]
-    return result
+        for future in futures:
+            future.result()
+
+    with tracker.stage(record, "m4b"):
+        chapter_wavs = [
+            (chapter.title, wavs_by_slug[chapter.slug])
+            for chapter in scripts
+            if wavs_by_slug.get(chapter.slug)
+        ]
+        build_m4b(
+            metadata.m4b_path,
+            chapter_wavs,
+            title=metadata.title,
+            author=metadata.author,
+            language=metadata.language,
+            cover_bytes=metadata.cover_bytes,
+            bitrate=config.output.m4b_bitrate,
+            chapter_silence_ms=config.output.chapter_silence_ms,
+            loudnorm=config.output.loudnorm,
+        )
+
+    write_json(stems.speak_manifest, fingerprint)
+
+    if not config.output.keep_wav:
+        if stems.speak_wav_dir.exists():
+            shutil.rmtree(stems.speak_wav_dir)
+            logger.info("Removed WAV directory: %s", stems.speak_wav_dir)
+    if not config.output.chapter_mp3 and not config.output.keep_wav:
+        mp3_root = metadata.staging_dir / "mp3"
+        if mp3_root.exists():
+            shutil.rmtree(mp3_root)
+            logger.info("Removed MP3 directory: %s", mp3_root)
+
+    tracker.finish_book(record, status="ok", output_path=metadata.m4b_path)
 
 
 def _synthesize_and_encode(
-    cleaned_iter: Iterator[CleanedChunk],
+    units: list[TextChunk],
     *,
     kokoro: Any,
-    chunks: list[TextChunk],
     config: AppConfig,
+    tts_config: TtsConfig,
     metadata: BookMetadata,
+    stems: BookStems,
     tracker: RunTracker,
     record: BookRecord,
     executor: ThreadPoolExecutor,
     progress: ProgressContext,
+    skip_wavs: bool,
 ) -> tuple[dict[str, list[Path]], list[Future]]:
-    """Consume cleaned chunks into WAVs; submit each finished chapter to the ffmpeg pool."""
-    expected = Counter(chunk.chapter_slug for chunk in chunks)
+    expected = Counter(unit.chapter_slug for unit in units)
     done: Counter[str] = Counter()
     wavs_by_slug: dict[str, list[Path]] = defaultdict(list)
     futures: list[Future] = []
-    total = len(chunks)
-    slug_titles = {chunk.chapter_slug: chunk.chapter_title for chunk in chunks}
+    total = len(units)
+    slug_titles = {unit.chapter_slug: unit.chapter_title for unit in units}
 
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
         start = time.perf_counter()
@@ -426,18 +710,16 @@ def _synthesize_and_encode(
         )
         tracker.add_duration(record, "encode", time.perf_counter() - start)
 
-    for cleaned in cleaned_iter:
-        wav_path = (
-            metadata.staging_dir / "wav" / cleaned.chapter_slug / f"{cleaned.chunk_index:04d}.wav"
-        )
-        if not (config.output.skip_existing and wav_path.exists()):
+    for unit in units:
+        wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
+        if not (skip_wavs and wav_path.exists()):
             start = time.perf_counter()
             synthesize_to_wav(
                 kokoro,
-                cleaned.cleaned_text,
+                unit.text,
                 wav_path,
-                voice=config.tts.voice,
-                speed=config.tts.speed,
+                voice=tts_config.voice,
+                speed=tts_config.speed,
                 chunk_silence_ms=config.output.chunk_silence_ms,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)
@@ -445,20 +727,19 @@ def _synthesize_and_encode(
             "%s",
             progress.format(
                 "tts",
-                chunk_idx=cleaned.chunk_index,
-                chapter_title=cleaned.chapter_title,
+                chunk_idx=unit.chunk_index,
+                chapter_title=unit.chapter_title,
                 total_chunks=total,
             ),
         )
-
-        wavs_by_slug[cleaned.chapter_slug].append(wav_path)
-        done[cleaned.chapter_slug] += 1
-        if done[cleaned.chapter_slug] == expected[cleaned.chapter_slug] and config.output.chapter_mp3:
-            mp3_path = metadata.staging_dir / "mp3" / f"{cleaned.chapter_slug}.mp3"
-            chapter_title = slug_titles.get(cleaned.chapter_slug, cleaned.chapter_slug)
+        wavs_by_slug[unit.chapter_slug].append(wav_path)
+        done[unit.chapter_slug] += 1
+        if done[unit.chapter_slug] == expected[unit.chapter_slug] and config.output.chapter_mp3:
+            mp3_path = metadata.staging_dir / "mp3" / f"{unit.chapter_slug}.mp3"
+            chapter_title = slug_titles.get(unit.chapter_slug, unit.chapter_slug)
             futures.append(
                 executor.submit(
-                    encode_job, list(wavs_by_slug[cleaned.chapter_slug]), mp3_path, chapter_title
+                    encode_job, list(wavs_by_slug[unit.chapter_slug]), mp3_path, chapter_title
                 )
             )
 
@@ -471,9 +752,8 @@ def _timed_persist_iter(
     tracker: RunTracker,
     record: BookRecord,
     cache: dict[tuple[int, int], str],
-    staging_dir: Path,
+    stems: BookStems,
 ) -> Iterator[CleanedChunk]:
-    """Time the clean stage and persist newly cleaned chunks to cleaned.jsonl."""
     while True:
         start = time.perf_counter()
         try:
@@ -481,72 +761,35 @@ def _timed_persist_iter(
         except StopIteration:
             return
         finally:
-            tracker.add_duration(record, "clean", time.perf_counter() - start)
+            tracker.add_duration(record, "format", time.perf_counter() - start)
         if (item.chapter_index, item.chunk_index) not in cache:
-            _append_cleaned(staging_dir, item)
+            append_jsonl(
+                stems.format_chunks_jsonl,
+                {
+                    "chapter_index": item.chapter_index,
+                    "chunk_index": item.chunk_index,
+                    "raw_hash": text_hash(item.raw_text),
+                    "cleaned_text": item.cleaned_text,
+                },
+            )
         yield item
 
 
-def _cleaned_jsonl_path(staging_dir: Path, chapter_slug: str) -> Path:
-    return staging_dir / "wav" / chapter_slug / "cleaned.jsonl"
-
-
-def _append_cleaned(staging_dir: Path, cleaned: CleanedChunk) -> None:
-    path = _cleaned_jsonl_path(staging_dir, cleaned.chapter_slug)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "chapter_index": cleaned.chapter_index,
-        "chunk_index": cleaned.chunk_index,
-        "raw_hash": text_hash(cleaned.raw_text),
-        "cleaned_text": cleaned.cleaned_text,
+def _load_format_cache(
+    stems: BookStems, chunks: list[TextChunk]
+) -> dict[tuple[int, int], str]:
+    expected_hashes = {
+        (chunk.chapter_index, chunk.chunk_index): text_hash(chunk.text) for chunk in chunks
     }
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-
-def _load_cleaned_cache(staging_dir: Path, chunks: list[TextChunk]) -> dict[tuple[int, int], str]:
-    """Cleaned text from previous runs, keyed by (chapter_index, chunk_index).
-
-    Entries only count when their raw-text hash still matches the current
-    chunk, so changed chunking or source text invalidates the cache.
-    """
-    expected_hashes = {(chunk.chapter_index, chunk.chunk_index): text_hash(chunk.text) for chunk in chunks}
     cache: dict[tuple[int, int], str] = {}
-    for slug in {chunk.chapter_slug for chunk in chunks}:
-        path = _cleaned_jsonl_path(staging_dir, slug)
-        if not path.exists():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                key = (int(entry["chapter_index"]), int(entry["chunk_index"]))
-                if expected_hashes.get(key) == entry["raw_hash"]:
-                    cache[key] = str(entry["cleaned_text"])
-            except (ValueError, KeyError, TypeError):
-                logger.debug("Skipping malformed cleaned.jsonl line in %s", path)
-    return cache
-
-
-def _bounded_put(work_queue: queue.Queue, item: Any, stop: threading.Event) -> bool:
-    """Put with backpressure that still notices a dead consumer."""
-    while not stop.is_set():
+    for entry in load_jsonl(stems.format_chunks_jsonl):
         try:
-            work_queue.put(item, timeout=0.5)
-            return True
-        except queue.Full:
-            continue
-    return False
-
-
-def _queue_iter(work_queue: queue.Queue) -> Iterator[CleanedChunk]:
-    while True:
-        item = work_queue.get()
-        if item is _SENTINEL:
-            return
-        yield item
+            key = (int(entry["chapter_index"]), int(entry["chunk_index"]))
+            if expected_hashes.get(key) == entry["raw_hash"]:
+                cache[key] = str(entry["cleaned_text"])
+        except (ValueError, KeyError, TypeError):
+            logger.debug("Skipping malformed format cache entry")
+    return cache
 
 
 def _log_summary(tracker: RunTracker, elapsed: float) -> None:

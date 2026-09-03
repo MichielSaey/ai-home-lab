@@ -6,7 +6,9 @@
     "runs_dir": "data/runs"
   },
   "chunking": {
-    "words_per_chunk": 250,
+    "format_words_per_chunk": 1000,
+    "speak_target_phonemes": 160,
+    "speak_max_phonemes": 400,
     "max_chunks_per_chapter": null
   },
   "selection": {
@@ -21,28 +23,28 @@
     "model_id": "Qwen/Qwen2.5-7B-Instruct",
     "device": "cuda",
     "cleanup": true,
-    "cleanup_batch_size": 4,
-    "max_new_tokens": 1024,
-    "clean_prompt": "Clean this text for text-to-speech narration. Return only the cleaned text, no commentary.\n\nRules:\n- Remove URLs.\n- Spell dates like 03/09/2026 as \"the third of September, twenty twenty-six\".\n- Expand i.e. and e.i. to \"in other words\", and e.g. to \"for example\".\n- Delete bibliography, references, works cited, and endnotes sections entirely.\n- Simplify inline citations. Example: \"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The Accelerationist Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve\".\n- Improve phonetic readability otherwise.\n\nText:\n{text}"
+    "cleanup_batch_size": 1,
+    "max_new_tokens": 2048,
+    "clean_prompt": "Clean this text for text-to-speech narration. Return only the cleaned text, no commentary.\n\nRules:\n- Remove URLs.\n- Spell dates like 03/09/2026 as \"the third of September, twenty twenty-six\".\n- Expand i.e. and e.i. to \"in other words\", and e.g. to \"for example\".\n- Delete bibliography, references, works cited, and endnotes sections entirely.\n- Simplify inline citations. Example: \"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The Accelerationist Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve.\".\n- Do not read tables or figures cell by cell. Replace them with a short reference to the ebook or the original page.\n- Improve phonetic readability otherwise.\n\nText:\n{text}"
   },
   "tts": {
-    "lang": "b",
-    "voice": "bf_emma",
-    "speed": 0.92,
+    "lang": "a",
+    "voice": "af_bella",
+    "speed": 0.9,
     "device": "auto"
   },
   "output": {
     "chapter_mp3": false,
     "mp3_bitrate": "128k",
-    "m4b_bitrate": "64k",
+    "m4b_bitrate": "128k",
     "keep_wav": false,
     "skip_existing": true,
-    "chunk_silence_ms": 0,
-    "chapter_silence_ms": 0,
-    "loudnorm": false
+    "chunk_silence_ms": 300,
+    "chapter_silence_ms": 1000,
+    "loudnorm": true
   },
   "pipeline": {
-    "concurrent_models": true,
+    "concurrent_models": false,
     "ffmpeg_workers": 2,
     "queue_size": 32
   }
