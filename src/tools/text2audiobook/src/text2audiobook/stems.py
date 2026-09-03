@@ -173,6 +173,25 @@ def load_format_scripts(stems: BookStems) -> list[Chapter]:
     return chapters
 
 
+def format_scripts_hash(stems: BookStems) -> str:
+    """Hash merged chapter scripts so speak invalidates when format output changes."""
+    index = read_json(stems.format_chapters_index)
+    if not isinstance(index, list):
+        return ""
+    parts = []
+    for item in index:
+        slug = str(item["slug"])
+        path = stems.format_chapter_dir / f"{slug}.txt"
+        parts.append(
+            {
+                "index": int(item["index"]),
+                "slug": slug,
+                "sha256": file_sha256(path) if path.exists() else "",
+            }
+        )
+    return stable_hash(parts)
+
+
 def append_jsonl(path: Path, entry: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:

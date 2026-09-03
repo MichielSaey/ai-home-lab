@@ -37,6 +37,7 @@ from text2audiobook.stems import (
     append_jsonl,
     canonical_stages,
     file_sha256,
+    format_scripts_hash,
     load_extract_chapters,
     load_format_scripts,
     load_jsonl,
@@ -549,7 +550,10 @@ def _run_format(
         )
     )
     _write_format_scripts(stems, prepared, cleaned_list)
-    write_json(stems.format_manifest, fingerprint)
+    write_json(
+        stems.format_manifest,
+        {**fingerprint, "scripts_hash": format_scripts_hash(stems)},
+    )
     logger.info("Wrote format stem (%d chapter script(s))", len(prepared))
     return load_format_scripts(stems)
 

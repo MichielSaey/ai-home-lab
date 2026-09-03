@@ -208,3 +208,86 @@ def test_stale_format_cache_is_dropped_when_prompt_changes(
     )
     script = next(stems.format_chapter_dir.glob("*.txt")).read_text(encoding="utf-8")
     assert "POISON" not in script
+
+
+def test_force_format_with_new_script_invalidates_speak_wavs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from text2audiobook.llm import CleanedChunk
+
+    source, config = _write_book(tmp_path, skip_existing=True)
+    texts = iter(["first pass script", "second pass script"])
+
+    def fake_clean(llm, chunks, llm_config, **_kwargs):
+        text = next(texts)
+        for chunk in chunks:
+            yield CleanedChunk(
+                chapter_index=chunk.chapter_index,
+                chapter_title=chunk.chapter_title,
+                chapter_slug=chunk.chapter_slug,
+                chunk_index=chunk.chunk_index,
+                raw_text=chunk.text,
+                cleaned_text=text,
+            )
+
+    synth_calls: list[str] = []
+
+    def fake_synth(_kokoro, text, wav_path, **_kwargs) -> None:
+        synth_calls.append(text)
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    monkeypatch.setattr("text2audiobook.pipeline.iter_clean_chunks_batched", fake_clean)
+    monkeypatch.setattr("text2audiobook.pipeline.load_kokoro", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_kokoro", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_speak_units",
+        lambda chapters, **_kwargs: [
+            TextChunk(
+                chapter_index=chapters[0].index,
+                chapter_title=chapters[0].title,
+                chapter_slug=chapters[0].slug,
+                chunk_index=0,
+                text=chapters[0].text,
+            )
+        ],
+    )
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "format", "speak"),
+        tts_device="cpu",
+    )
+    assert synth_calls == ["first pass script"]
+
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("format",),
+        force=True,
+        tts_device="cpu",
+    )
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("speak",),
+        tts_device="cpu",
+    )
+    assert synth_calls == ["first pass script", "second pass script"]
