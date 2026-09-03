@@ -148,6 +148,25 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\be\.g\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "for example"),
 )
 
+_RESUME_AFTER_REFERENCES_RE = re.compile(
+    r"""
+    ^
+    (?:\#{1,6}\s+)?
+    (
+        appendi(?:x|ces)(?:\s+[A-Z0-9]+)?
+        | acknowledgements?
+        | about\s+the\s+author
+        | conclusion
+        | afterword
+        | epilogue
+        | glossary
+        | index
+    )
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _WHITESPACE_RE = re.compile(r"[ \t]{2,}")
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
 
@@ -200,21 +219,34 @@ def is_references_heading(title: str) -> bool:
     return bool(_REFERENCES_HEADING_RE.match(cleaned))
 
 
+def _heading_text(line: str) -> str:
+    cleaned = re.sub(r"^#{1,6}\s+", "", line.strip())
+    return cleaned.strip("*_\"'")
+
+
+def _is_resume_heading(line: str) -> bool:
+    """True for a later section heading after a references block (markdown or plain)."""
+    stripped = line.strip()
+    heading = _heading_text(stripped)
+    if not heading or is_references_heading(heading):
+        return False
+    if stripped.startswith("#") and not is_references_heading(heading):
+        return True
+    return bool(_RESUME_AFTER_REFERENCES_RE.match(heading))
+
+
 def strip_reference_sections(text: str) -> str:
     """Drop bibliography / works-cited blocks, typically trailing sections."""
     lines = text.splitlines()
     kept: list[str] = []
     skipping = False
     for line in lines:
-        stripped = line.strip()
-        heading = re.sub(r"^#{1,6}\s+", "", stripped)
-        heading = heading.strip("*_\"'")
+        heading = _heading_text(line)
         if is_references_heading(heading):
             skipping = True
             continue
         if skipping:
-            # Resume if a later markdown heading is not itself a references block.
-            if stripped.startswith("#") and not is_references_heading(heading):
+            if _is_resume_heading(line):
                 skipping = False
                 kept.append(line)
             continue
