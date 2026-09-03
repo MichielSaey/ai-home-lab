@@ -112,7 +112,7 @@ def synthesize_to_wav(
     wav_path.parent.mkdir(parents=True, exist_ok=True)
 
     audio_parts: list[np.ndarray] = []
-    for _, _, audio in kokoro(text, voice=voice, speed=speed):
+    for _, _, audio in kokoro(text, voice=voice, speed=speed, split_pattern=None):
         if audio is None:
             continue
         if hasattr(audio, "detach"):

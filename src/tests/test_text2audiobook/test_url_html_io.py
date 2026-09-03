@@ -160,6 +160,11 @@ def test_url_reader_uses_httpx_and_cache(tmp_path: Path) -> None:
         assert [c.title for c in chapters2] == [c.title for c in chapters]
         assert metadata2.slug == metadata.slug
 
+        parse_source(
+            url_path, staging_root=staging, output_root=output, force_fetch=True
+        )
+        assert client.get.call_count == 2
+
 
 def test_url_file_title_override_wins_over_page_title(tmp_path: Path) -> None:
     url_path = tmp_path / "site.url"

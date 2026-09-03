@@ -117,9 +117,10 @@ class HtmlReader:
         return frozenset({".html", ".htm"})
 
     def read(
-        self, path: Path, *, staging_root: Path, output_root: Path
+        self, path: Path, *, staging_root: Path, output_root: Path, force_fetch: bool = False
     ) -> tuple[BookMetadata, list[Chapter]]:
         html = path.read_bytes()
+        del force_fetch
         return parse_html_document(
             html,
             staging_root=staging_root,
@@ -134,7 +135,7 @@ class UrlReader:
         return frozenset({".url"})
 
     def read(
-        self, path: Path, *, staging_root: Path, output_root: Path
+        self, path: Path, *, staging_root: Path, output_root: Path, force_fetch: bool = False
     ) -> tuple[BookMetadata, list[Chapter]]:
         url, title_override = parse_url_file(path)
         return read_url(
@@ -143,4 +144,5 @@ class UrlReader:
             output_root=output_root,
             title_override=title_override,
             fallback_title=title_from_filename(path),
+            force_fetch=force_fetch,
         )

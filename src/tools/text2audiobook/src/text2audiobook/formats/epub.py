@@ -143,8 +143,9 @@ class EpubReader:
         return frozenset({".epub"})
 
     def read(
-        self, path: Path, *, staging_root: Path, output_root: Path
+        self, path: Path, *, staging_root: Path, output_root: Path, force_fetch: bool = False
     ) -> tuple[BookMetadata, list[Chapter]]:
+        del force_fetch
         book = epub.read_epub(str(path))
         metadata = metadata_from_epub(book, staging_root, output_root)
         chapters = extract_chapters(book)

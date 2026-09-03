@@ -10,6 +10,7 @@ from typing import Any
 
 from text2audiobook.chunking import TextChunk
 from text2audiobook.config import LlmConfig
+from text2audiobook.formatting import format_for_tts
 from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ def iter_clean_chunks_batched(
     """Yield cleaned chunks in input order.
 
     Chunks present in already_cleaned (keyed by (chapter_index, chunk_index),
-    e.g. from a previous run's cleaned.jsonl) are emitted without touching the
+    e.g. from a previous run's format/chunks.jsonl) are emitted without touching the
     LLM; the rest are cleaned in batches of config.cleanup_batch_size. With no
     LLM or cleanup disabled, raw text passes through.
     """
@@ -160,7 +161,7 @@ def iter_clean_chunks_batched(
             logger.info(
                 "%s",
                 progress.format(
-                    "clean",
+                    "format",
                     chunk_idx=chunk.chunk_index,
                     chapter_title=chunk.chapter_title,
                     total_chunks=total,
@@ -180,7 +181,11 @@ def iter_clean_chunks_batched(
             chapter_slug=chunk.chapter_slug,
             chunk_index=chunk.chunk_index,
             raw_text=chunk.text,
-            cleaned_text=cleaned_text,
+            cleaned_text=format_for_tts(
+                cleaned_text,
+                chapter_title=chunk.chapter_title,
+                source_kind=chunk.source_kind,
+            ),
         )
 
     def flush() -> Iterator[CleanedChunk]:

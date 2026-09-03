@@ -115,8 +115,9 @@ class MarkdownReader:
         return frozenset({".md", ".markdown"})
 
     def read(
-        self, path: Path, *, staging_root: Path, output_root: Path
+        self, path: Path, *, staging_root: Path, output_root: Path, force_fetch: bool = False
     ) -> tuple[BookMetadata, list[Chapter]]:
+        del force_fetch
         content = path.read_text(encoding="utf-8")
         metadata = metadata_from_markdown(path, content, staging_root, output_root)
         chapters = extract_chapters(content, preamble_title=_title_from_filename(path))
