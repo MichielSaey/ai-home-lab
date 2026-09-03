@@ -172,6 +172,10 @@ _RESUME_AFTER_REFERENCES_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+_CITE_SUBJECT_PRONOUNS = frozenset(
+    {"he", "she", "they", "it", "we", "i", "this", "that", "his", "her", "their"}
+)
+
 _WHITESPACE_RE = re.compile(r"[ \t]{2,}")
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
 
@@ -231,12 +235,9 @@ def _heading_text(line: str) -> str:
 
 def _is_resume_heading(line: str) -> bool:
     """True for a later section heading after a references block (markdown or plain)."""
-    stripped = line.strip()
-    heading = _heading_text(stripped)
+    heading = _heading_text(line)
     if not heading or is_references_heading(heading):
         return False
-    if stripped.startswith("#") and not is_references_heading(heading):
-        return True
     return bool(_RESUME_AFTER_REFERENCES_RE.match(heading))
 
 
@@ -286,6 +287,10 @@ def expand_abbreviations(text: str) -> str:
 
 
 def _replace_full_citation(match: re.Match[str]) -> str:
+    body = match.group("body").strip()
+    first = body.split()[0].lower().rstrip(",;:") if body.split() else ""
+    if first in _CITE_SUBJECT_PRONOUNS or "," not in body:
+        return match.group(0)
     author = match.group("author")
     year = year_to_words(int(match.group("year")))
     return f"Wrote {author} in {year}."

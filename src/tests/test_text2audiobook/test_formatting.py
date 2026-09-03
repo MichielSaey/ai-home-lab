@@ -96,6 +96,22 @@ def test_place_year_parenthetical_is_left_alone() -> None:
     assert format_for_tts(source) == source
 
 
+def test_markdown_subheading_inside_references_is_still_dropped() -> None:
+    text = format_for_tts(
+        "Keep this.\n\n## References\n\n### Primary sources\n\n"
+        "Mark Fisher (2012). Terminator vs Avatar, Urbanomic, p. 342."
+    )
+    assert text == "Keep this."
+    assert "Primary sources" not in text
+
+
+def test_same_sentence_page_mention_is_not_a_citation() -> None:
+    source = (
+        "Mark Fisher (2012). He later appeared in The Guardian and cited p. 12 for the chart."
+    )
+    assert format_for_tts(source) == source
+
+
 def test_page_mention_in_a_later_sentence_is_not_a_citation() -> None:
     source = (
         "Mark Fisher (2012). He later appeared in The Guardian. See p. 12 for the chart."
