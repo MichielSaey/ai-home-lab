@@ -449,6 +449,7 @@ def _run_extract(
         stems.extract_manifest,
         {
             **fingerprint,
+            "chapters_hash": file_sha256(stems.chapters_json),
             "title": metadata.title,
             "author": metadata.author,
             "language": metadata.language,
@@ -473,10 +474,7 @@ def _run_format(
     force: bool,
     ensure_llm,
 ) -> list | None:
-    extract_data = json.loads(stems.extract_manifest.read_text(encoding="utf-8"))
-    extract_hash = stable_hash(
-        {key: extract_data[key] for key in ("version", "source_hash", "source_kind", "selection")}
-    )
+    extract_hash = file_sha256(stems.chapters_json)
     fingerprint = _format_fingerprint(config, extract_hash=extract_hash, source_kind=source_kind)
     format_ok = (
         manifest_matches(stems.format_manifest, fingerprint)
@@ -503,6 +501,8 @@ def _run_format(
 
     if force and stems.format_dir.exists():
         shutil.rmtree(stems.format_dir)
+    else:
+        _drop_stale_format_cache(stems, fingerprint)
 
     prepared = prepare_chapters_for_tts(chapters)
     if not prepared:
@@ -773,6 +773,19 @@ def _timed_persist_iter(
                 },
             )
         yield item
+
+
+def _format_in_progress_path(stems: BookStems) -> Path:
+    return stems.format_dir / "in_progress.json"
+
+
+def _drop_stale_format_cache(stems: BookStems, fingerprint: dict[str, Any]) -> None:
+    """Keep chunks.jsonl only when it was written under the current format fingerprint."""
+    in_progress = _format_in_progress_path(stems)
+    if not manifest_matches(in_progress, fingerprint) and stems.format_chunks_jsonl.exists():
+        stems.format_chunks_jsonl.unlink()
+        logger.info("Dropped stale format cache at %s", stems.format_chunks_jsonl)
+    write_json(in_progress, fingerprint)
 
 
 def _load_format_cache(

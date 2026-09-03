@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from text2audiobook import formats  # noqa: F401
@@ -6,13 +7,13 @@ from text2audiobook.chunking import TextChunk
 from text2audiobook.cli import main
 from text2audiobook.config import load_config
 from text2audiobook.pipeline import process_source
-from text2audiobook.stems import BookStems, canonical_stages
+from text2audiobook.stems import BookStems, canonical_stages, load_jsonl
 from text2audiobook.tracking import RunTracker
 
 _BODY = " ".join(f"word{i}" for i in range(40))
 
 
-def _write_book(tmp_path: Path) -> tuple[Path, object]:
+def _write_book(tmp_path: Path, *, skip_existing: bool = False) -> tuple[Path, object]:
     source = tmp_path / "input" / "sample.md"
     source.parent.mkdir(parents=True)
     source.write_text(f"# Chapter One\n\n{_BODY}\n", encoding="utf-8")
@@ -28,12 +29,36 @@ def _write_book(tmp_path: Path) -> tuple[Path, object]:
                 },
                 "selection": {"keep_chapter_indices": [0]},
                 "llm": {"cleanup": False},
-                "output": {"skip_existing": False, "keep_wav": True, "loudnorm": False},
+                "output": {
+                    "skip_existing": skip_existing,
+                    "keep_wav": True,
+                    "loudnorm": False,
+                },
             }
         ),
         encoding="utf-8",
     )
     return source, load_config(config_path)
+
+
+def _forbid_llm(*_a, **_k):
+    raise AssertionError("llm")
+
+
+def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "format"),
+        tts_device="cpu",
+    )
+    staging = next(p for p in config.paths.staging_dir.iterdir() if p.is_dir())
+    return BookStems(staging)
 
 
 def test_canonical_stages_orders_and_rejects() -> None:
@@ -133,3 +158,53 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     assert speak["voice"] == "bf_emma"
     assert speak["lang"] == "b"
     assert (config.paths.output_dir / f"{staging.name}.m4b").exists()
+
+
+def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeypatch) -> None:
+    source, config = _write_book(tmp_path)
+    stems = _stems_after_extract_format(source, config, monkeypatch)
+    payload = json.loads(stems.chapters_json.read_text(encoding="utf-8"))
+    payload[0]["text"] = "Meet on 03/09/2026. " + _BODY
+    stems.chapters_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("format",),
+        tts_device="cpu",
+    )
+    script = next(stems.format_chapter_dir.glob("*.txt")).read_text(encoding="utf-8")
+    assert "the third of September, twenty twenty-six" in script
+
+
+def test_stale_format_cache_is_dropped_when_prompt_changes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source, config = _write_book(tmp_path, skip_existing=True)
+    stems = _stems_after_extract_format(source, config, monkeypatch)
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    assert rows
+    rows[0]["cleaned_text"] = "POISON"
+    stems.format_chunks_jsonl.write_text(
+        json.dumps(rows[0], ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    config = replace(
+        config, llm=replace(config.llm, clean_prompt="Different prompt.\n\nText:\n{text}")
+    )
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("format",),
+        tts_device="cpu",
+    )
+    script = next(stems.format_chapter_dir.glob("*.txt")).read_text(encoding="utf-8")
+    assert "POISON" not in script
