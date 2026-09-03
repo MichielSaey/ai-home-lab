@@ -57,6 +57,17 @@ https://retrochronic.com
 
 `data/**` is gitignored; only `.gitkeep` files are tracked.
 
+## Cleanup / formatting
+
+Before TTS, each chunk is rewritten for spoken English:
+
+- Dates such as `03/09/2026` become `the third of September, twenty twenty-six`
+- `i.e.` / `e.i.` become `in other words`; `e.g.` becomes `for example`
+- References / bibliography / works-cited sections are dropped
+- Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve`
+
+The LLM cleanup prompt in `config.json` asks for the same rules; a deterministic pass then enforces them even when cleanup is disabled.
+
 ## Adding a format
 
 1. Implement `SourceReader` in `src/text2audiobook/formats/your_format.py` (see `io.py` for the protocol).

@@ -26,6 +26,7 @@ from text2audiobook.audio import build_m4b, encode_chapter_mp3
 from text2audiobook.catalog import select_chapters
 from text2audiobook.chunking import TextChunk, build_chunks
 from text2audiobook.config import AppConfig
+from text2audiobook.formatting import prepare_chapters_for_tts
 from text2audiobook.gpu import resolve_tts_device
 from text2audiobook.io import BookMetadata, find_sources, parse_source
 from text2audiobook.llm import (
@@ -220,6 +221,10 @@ def process_source(
                 staging_dir=metadata.staging_dir,
                 progress=progress,
             )
+
+        chapters = prepare_chapters_for_tts(chapters)
+        if not chapters:
+            raise ValueError("No chapters left after removing references sections")
 
         chunks = build_chunks(
             chapters,

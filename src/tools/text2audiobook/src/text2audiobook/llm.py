@@ -10,6 +10,7 @@ from typing import Any
 
 from text2audiobook.chunking import TextChunk
 from text2audiobook.config import LlmConfig
+from text2audiobook.formatting import format_for_tts
 from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ def iter_clean_chunks_batched(
             chapter_slug=chunk.chapter_slug,
             chunk_index=chunk.chunk_index,
             raw_text=chunk.text,
-            cleaned_text=cleaned_text,
+            cleaned_text=format_for_tts(cleaned_text),
         )
 
     def flush() -> Iterator[CleanedChunk]:

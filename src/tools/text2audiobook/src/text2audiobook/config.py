@@ -13,8 +13,17 @@ DEFAULT_CONFIG_PATH = _TOOL_ROOT / "config.json"
 EXPERIMENT_CONFIG_PATH = _TOOL_ROOT.parent / "epub-to-audiobook/config.json"
 
 DEFAULT_CLEAN_PROMPT = (
-    "Clean this text for text-to-speech. Remove URLs, expand abbreviations, "
-    "and improve phonetic readability. Return only the cleaned text, no commentary.\n\n"
+    "Clean this text for text-to-speech narration. Return only the cleaned text, "
+    "no commentary.\n\n"
+    "Rules:\n"
+    "- Remove URLs.\n"
+    "- Spell dates like 03/09/2026 as \"the third of September, twenty twenty-six\".\n"
+    "- Expand i.e. and e.i. to \"in other words\", and e.g. to \"for example\".\n"
+    "- Delete bibliography, references, works cited, and endnotes sections entirely.\n"
+    "- Simplify inline citations. Example: "
+    "\"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The Accelerationist "
+    "Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve\".\n"
+    "- Improve phonetic readability otherwise.\n\n"
     "Text:\n{text}"
 )
 
