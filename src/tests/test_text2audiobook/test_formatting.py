@@ -75,6 +75,18 @@ def test_plain_appendix_after_references_is_kept() -> None:
     assert "This extra note should still be narrated." in text
 
 
+def test_american_acknowledgments_after_references_is_kept() -> None:
+    text = format_for_tts(
+        "The argument ends here.\n\n"
+        "References\n"
+        "Mark Fisher (2012). Terminator vs Avatar, Urbanomic, p. 342.\n\n"
+        "Acknowledgments\n"
+        "Thanks to the editors."
+    )
+    assert "Thanks to the editors." in text
+    assert "Terminator vs Avatar" not in text
+
+
 def test_inline_bibliographic_citation_is_simplified() -> None:
     source = (
         "Acceleration is already here. Mark Fisher (2012). Terminator vs Avatar in "

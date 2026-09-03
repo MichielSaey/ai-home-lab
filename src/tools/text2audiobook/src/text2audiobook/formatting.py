@@ -154,7 +154,7 @@ _RESUME_AFTER_REFERENCES_RE = re.compile(
     (?:\#{1,6}\s+)?
     (
         appendi(?:x|ces)(?:\s+[A-Z0-9]+)?
-        | acknowledgements?
+        | acknowledge?ments?
         | about\s+the\s+author
         | conclusion
         | afterword
