@@ -96,6 +96,17 @@ def test_place_year_parenthetical_is_left_alone() -> None:
     assert format_for_tts(source) == source
 
 
+def test_citation_starting_with_index_is_not_a_resume_heading() -> None:
+    text = format_for_tts(
+        "Keep this.\n\nReferences\n"
+        "Index of Capital, Volume One. London, 1976, p. 12.\n"
+        "Mark Fisher (2012). Terminator vs Avatar, Urbanomic, p. 342."
+    )
+    assert text == "Keep this."
+    assert "Index of Capital" not in text
+    assert "Terminator vs Avatar" not in text
+
+
 def test_markdown_subheading_inside_references_is_still_dropped() -> None:
     text = format_for_tts(
         "Keep this.\n\n## References\n\n### Primary sources\n\n"

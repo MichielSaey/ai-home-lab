@@ -167,7 +167,9 @@ _RESUME_AFTER_REFERENCES_RE = re.compile(
         | glossary
         | index
     )
-    \b
+    \s*[:.]?
+    \s*
+    $
     """,
     re.IGNORECASE | re.VERBOSE,
 )
