@@ -36,6 +36,7 @@ from text2audiobook.stems import (
     BookStems,
     append_jsonl,
     canonical_stages,
+    chapters_to_payload,
     file_sha256,
     format_scripts_hash,
     load_extract_chapters,
@@ -187,6 +188,7 @@ def process_source(
             source_path,
             staging_root=config.paths.staging_dir,
             output_root=config.paths.output_dir,
+            force_fetch=force and "extract" in selected,
         )
     record.title = metadata.title
     record.author = metadata.author
@@ -340,11 +342,13 @@ def _extract_fingerprint(
     *,
     source_kind: str,
     config: AppConfig,
+    chapters: list,
 ) -> dict[str, Any]:
     selection = config.selection
     return {
         "version": 2,
         "source_hash": file_sha256(source_path),
+        "parsed_hash": stable_hash(chapters_to_payload(chapters)),
         "source_kind": source_kind,
         "selection": {
             "keep_chapter_indices": selection.keep_chapter_indices,
@@ -389,12 +393,21 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
     }
 
 
+def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
+    """Hash formatter inputs plus on-disk chapter scripts (not only the manifest)."""
+    source_kind = "ebook"
+    data = json.loads(stems.format_manifest.read_text(encoding="utf-8")) if stems.format_manifest.exists() else {}
+    if isinstance(data, dict) and data.get("source_kind"):
+        source_kind = str(data["source_kind"])
+    extract_hash = file_sha256(stems.chapters_json) if stems.chapters_json.exists() else ""
+    fingerprint = _format_fingerprint(config, extract_hash=extract_hash, source_kind=source_kind)
+    return stable_hash({**fingerprint, "scripts_hash": format_scripts_hash(stems)})
+
+
 def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
-    format_manifest = stems.format_manifest
-    if not format_manifest.exists() or not stems.speak_manifest.exists():
+    if not stems.format_manifest.exists() or not stems.speak_manifest.exists():
         return False
-    format_data = json.loads(format_manifest.read_text(encoding="utf-8"))
-    format_hash = stable_hash(format_data)
+    format_hash = _live_format_hash(stems, config)
     return manifest_matches(stems.speak_manifest, _speak_fingerprint(config, tts, format_hash=format_hash))
 
 
@@ -413,7 +426,9 @@ def _run_extract(
     force: bool,
     ensure_llm,
 ) -> list:
-    fingerprint = _extract_fingerprint(source_path, source_kind=source_kind, config=config)
+    fingerprint = _extract_fingerprint(
+        source_path, source_kind=source_kind, config=config, chapters=all_chapters
+    )
     extract_ok = manifest_matches(stems.extract_manifest, fingerprint) and stems.chapters_json.exists()
 
     if "extract" not in selected:
@@ -588,7 +603,7 @@ def _run_speak(
     force: bool,
 ) -> None:
     format_data = json.loads(stems.format_manifest.read_text(encoding="utf-8"))
-    format_hash = stable_hash(format_data)
+    format_hash = _live_format_hash(stems, config)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_ok = manifest_matches(stems.speak_manifest, fingerprint)
 
@@ -613,6 +628,15 @@ def _run_speak(
 
     if force and stems.speak_wav_dir.exists():
         shutil.rmtree(stems.speak_wav_dir)
+
+    previous_hashes: dict[tuple[str, int], str] = {}
+    for row in load_jsonl(stems.speak_units_jsonl):
+        try:
+            previous_hashes[(str(row["chapter_slug"]), int(row["chunk_index"]))] = str(
+                row["text_hash"]
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
 
     unit_rows = [
         {
@@ -644,6 +668,7 @@ def _run_speak(
             executor=executor,
             progress=progress,
             skip_wavs=config.output.skip_existing and speak_ok and not force,
+            previous_text_hashes=previous_hashes,
         )
         for future in futures:
             future.result()
@@ -694,6 +719,7 @@ def _synthesize_and_encode(
     executor: ThreadPoolExecutor,
     progress: ProgressContext,
     skip_wavs: bool,
+    previous_text_hashes: dict[tuple[str, int], str] | None = None,
 ) -> tuple[dict[str, list[Path]], list[Future]]:
     expected = Counter(unit.chapter_slug for unit in units)
     done: Counter[str] = Counter()
@@ -716,7 +742,9 @@ def _synthesize_and_encode(
 
     for unit in units:
         wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
-        if not (skip_wavs and wav_path.exists()):
+        prior = (previous_text_hashes or {}).get((unit.chapter_slug, unit.chunk_index))
+        hash_ok = prior == text_hash(unit.text)
+        if not (skip_wavs and wav_path.exists() and hash_ok):
             start = time.perf_counter()
             synthesize_to_wav(
                 kokoro,

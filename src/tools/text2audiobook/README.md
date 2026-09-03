@@ -41,7 +41,7 @@ text2audiobook --stage speak --voice bf_emma
 text2audiobook --force
 ```
 
-`--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+`--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
 
 ### Voices
 

@@ -120,6 +120,8 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     staging = next(p for p in config.paths.staging_dir.iterdir() if p.is_dir())
     stems = BookStems(staging)
     assert stems.chapters_json.exists()
+    extract_manifest = json.loads(stems.extract_manifest.read_text(encoding="utf-8"))
+    assert extract_manifest.get("parsed_hash")
     assert not stems.format_manifest.exists()
 
     record = tracker.start_book(source)
@@ -291,3 +293,60 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
         tts_device="cpu",
     )
     assert synth_calls == ["first pass script", "second pass script"]
+
+
+def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> None:
+    source, config = _write_book(tmp_path, skip_existing=True)
+    synth_calls: list[str] = []
+
+    def fake_synth(_kokoro, text, wav_path, **_kwargs) -> None:
+        synth_calls.append(text)
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    monkeypatch.setattr("text2audiobook.pipeline.load_kokoro", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_kokoro", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_speak_units",
+        lambda chapters, **_kwargs: [
+            TextChunk(
+                chapter_index=chapters[0].index,
+                chapter_title=chapters[0].title,
+                chapter_slug=chapters[0].slug,
+                chunk_index=0,
+                text=chapters[0].text,
+            )
+        ],
+    )
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "format", "speak"),
+        tts_device="cpu",
+    )
+    assert synth_calls
+    stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
+    script_path = next(stems.format_chapter_dir.glob("*.txt"))
+    script_path.write_text("manually edited script", encoding="utf-8")
+
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("speak",),
+        tts_device="cpu",
+    )
+    assert synth_calls[-1] == "manually edited script"

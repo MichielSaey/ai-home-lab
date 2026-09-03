@@ -90,7 +90,7 @@ class SourceReader(Protocol):
     def suffixes(self) -> frozenset[str]: ...
 
     def read(
-        self, path: Path, *, staging_root: Path, output_root: Path
+        self, path: Path, *, staging_root: Path, output_root: Path, force_fetch: bool = False
     ) -> tuple[BookMetadata, list[Chapter]]: ...
 
 
@@ -131,10 +131,19 @@ def find_sources(input_dir: Path) -> list[Path]:
 
 
 def parse_source(
-    path: Path, *, staging_root: Path, output_root: Path
+    path: Path,
+    *,
+    staging_root: Path,
+    output_root: Path,
+    force_fetch: bool = False,
 ) -> tuple[BookMetadata, list[Chapter]]:
     reader = _READERS.get(path.suffix.lower())
     if reader is None:
         supported = ", ".join(sorted(supported_suffixes()))
         raise ValueError(f"Unsupported source type {path.suffix!r} (supported: {supported})")
-    return reader.read(path, staging_root=staging_root, output_root=output_root)
+    return reader.read(
+        path,
+        staging_root=staging_root,
+        output_root=output_root,
+        force_fetch=force_fetch,
+    )
