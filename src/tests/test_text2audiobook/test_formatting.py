@@ -73,6 +73,20 @@ def test_parenthetical_citation_is_simplified() -> None:
     assert cleaned == "Acceleration is a political project, wrote Fisher in twenty twelve."
 
 
+def test_page_mention_in_a_later_sentence_is_not_a_citation() -> None:
+    source = (
+        "Mark Fisher (2012). He later appeared in The Guardian. See p. 12 for the chart."
+    )
+    assert format_for_tts(source) == source
+
+
+def test_narrative_in_the_is_not_treated_as_a_citation() -> None:
+    source = (
+        "Mark Fisher (2012). He later appeared in The Guardian after the book came out."
+    )
+    assert format_for_tts(source) == source
+
+
 def test_running_text_author_year_is_not_a_bibliography_line() -> None:
     source = "John Smith (2012) went to the store after the talk."
     assert format_for_tts(source) == source

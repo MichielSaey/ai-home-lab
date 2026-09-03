@@ -123,16 +123,12 @@ _AUTHOR = (
 )
 
 # Bibliographic inline cite: Author (Year). Title…, p. 342.
+# Body cannot cross a sentence period, so narrative like
+# "Name (2012). He later appeared in The Guardian." is left alone.
 _FULL_CITE_PAGES_RE = re.compile(
     rf"(?P<author>{_AUTHOR})\s+\((?P<year>(?:18|19|20)\d{{2}})\)\.\s+"
-    rf"(?P<body>.{{8,240}}?)"
-    rf"[Pp]p?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?\.?",
-    re.DOTALL,
-)
-# Chapter-in-book cite without a page number.
-_FULL_CITE_IN_RE = re.compile(
-    rf"(?P<author>{_AUTHOR})\s+\((?P<year>(?:18|19|20)\d{{2}})\)\.\s+"
-    rf"(?P<body>[^.\n]{{4,160}}?\sin\s[#A-Z][^.\n]{{3,160}})\.",
+    rf"(?P<body>[^.\n]{{8,240}}?)"
+    rf"[Pp]p?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?\.?"
 )
 
 _PAREN_CITE_RE = re.compile(
@@ -266,7 +262,6 @@ def _replace_paren_citation(match: re.Match[str]) -> str:
 
 def simplify_inline_citations(text: str) -> str:
     text = _FULL_CITE_PAGES_RE.sub(_replace_full_citation, text)
-    text = _FULL_CITE_IN_RE.sub(_replace_full_citation, text)
     text = _PAREN_CITE_RE.sub(_replace_paren_citation, text)
     text = _NUMERIC_REF_RE.sub("", text)
     return text
