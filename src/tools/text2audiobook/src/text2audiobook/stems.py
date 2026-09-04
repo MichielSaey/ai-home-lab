@@ -144,10 +144,27 @@ def save_extract_chapters(stems: BookStems, chapters: list[Chapter]) -> None:
     write_json(stems.chapters_json, chapters_to_payload(chapters))
 
 
+def format_script_filename(chapter_index: int, slug: str) -> str:
+    """Zero-padded index prefix so directory listing matches narration order."""
+    return f"{int(chapter_index):04d}_{slug}.txt"
+
+
+def format_script_path(stems: BookStems, chapter_index: int, slug: str) -> Path:
+    """Resolve a chapter script path; fall back to legacy unprefixed slug.txt."""
+    preferred = stems.format_chapter_dir / format_script_filename(chapter_index, slug)
+    if preferred.exists():
+        return preferred
+    legacy = stems.format_chapter_dir / f"{slug}.txt"
+    return preferred if not legacy.exists() else legacy
+
+
 def save_format_script(stems: BookStems, chapter: Chapter, text: str) -> None:
-    path = stems.format_chapter_dir / f"{chapter.slug}.txt"
+    path = stems.format_chapter_dir / format_script_filename(chapter.index, chapter.slug)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    legacy = stems.format_chapter_dir / f"{chapter.slug}.txt"
+    if legacy != path and legacy.exists():
+        legacy.unlink()
 
 
 def load_format_scripts(stems: BookStems) -> list[Chapter]:
@@ -159,12 +176,13 @@ def load_format_scripts(stems: BookStems) -> list[Chapter]:
     chapters: list[Chapter] = []
     for item in index:
         slug = str(item["slug"])
-        path = stems.format_chapter_dir / f"{slug}.txt"
+        chapter_index = int(item["index"])
+        path = format_script_path(stems, chapter_index, slug)
         if not path.exists():
             raise FileNotFoundError(f"Format stem missing script {path}")
         chapters.append(
             Chapter(
-                index=int(item["index"]),
+                index=chapter_index,
                 title=str(item["title"]),
                 text=path.read_text(encoding="utf-8"),
                 slug=slug,
@@ -181,10 +199,11 @@ def format_scripts_hash(stems: BookStems) -> str:
     parts = []
     for item in index:
         slug = str(item["slug"])
-        path = stems.format_chapter_dir / f"{slug}.txt"
+        chapter_index = int(item["index"])
+        path = format_script_path(stems, chapter_index, slug)
         parts.append(
             {
-                "index": int(item["index"]),
+                "index": chapter_index,
                 "slug": slug,
                 "sha256": file_sha256(path) if path.exists() else "",
             }

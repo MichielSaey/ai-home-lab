@@ -25,6 +25,11 @@ DEFAULT_CLEAN_PROMPT = (
     "Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve.\".\n"
     "- Do not read tables or figures cell by cell. Replace them with a short "
     "reference to the ebook or the original page.\n"
+    "- Speak section marks: §0.21 becomes \"section 0.21\".\n"
+    "- Title lists in parentheses such as (Cyberpunk, Elysium) become "
+    "\"for example Cyberpunk, Elysium\".\n"
+    "- Drop leading # from tags (#Accelerate → Accelerate); expand & to and "
+    "and % to percent.\n"
     "- Improve phonetic readability otherwise.\n\n"
     "Text:\n{text}"
 )

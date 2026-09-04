@@ -727,6 +727,10 @@ def _synthesize_and_encode(
     futures: list[Future] = []
     total = len(units)
     slug_titles = {unit.chapter_slug: unit.chapter_title for unit in units}
+    chapter_order = {
+        slug: idx for idx, slug in enumerate(dict.fromkeys(unit.chapter_slug for unit in units))
+    }
+    total_chapters = len(chapter_order)
 
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
         start = time.perf_counter()
@@ -740,7 +744,7 @@ def _synthesize_and_encode(
         )
         tracker.add_duration(record, "encode", time.perf_counter() - start)
 
-    for unit in units:
+    for unit_number, unit in enumerate(units, start=1):
         wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
         prior = (previous_text_hashes or {}).get((unit.chapter_slug, unit.chunk_index))
         hash_ok = prior == text_hash(unit.text)
@@ -759,9 +763,13 @@ def _synthesize_and_encode(
             "%s",
             progress.format(
                 "tts",
-                chunk_idx=unit.chunk_index,
-                chapter_title=unit.chapter_title,
+                unit_done=unit_number,
                 total_chunks=total,
+                chapter_idx=chapter_order[unit.chapter_slug],
+                total_chapters=total_chapters,
+                chapter_title=unit.chapter_title,
+                chapter_unit=unit.chunk_index + 1,
+                chapter_units=expected[unit.chapter_slug],
             ),
         )
         wavs_by_slug[unit.chapter_slug].append(wav_path)
