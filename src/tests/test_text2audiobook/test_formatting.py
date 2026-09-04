@@ -232,6 +232,12 @@ def test_example_parenthetical_title_list() -> None:
     assert "for example Cyberpunk, Elysium" in cleaned
 
 
+def test_eg_before_title_list_does_not_duplicate_for_example() -> None:
+    cleaned = format_for_tts("See media, e.g. (Cyberpunk, Elysium), later.")
+    assert cleaned.count("for example") == 1
+    assert "for example Cyberpunk, Elysium" in cleaned
+
+
 def test_narrative_parenthetical_is_left_alone() -> None:
     source = "Still early (And we've scarcely started with DAOs yet.)"
     assert format_for_tts(source) == source

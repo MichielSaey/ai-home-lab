@@ -155,8 +155,10 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
 _SECTION_MARK_RE = re.compile(r"§\s*(?P<label>[0-9]+(?:\.[0-9]+)*)")
 
 # Title-like media lists: (Cyberpunk, Elysium) → for example Cyberpunk, Elysium
+# Optional leading "for example " (after e.g. expansion) is consumed to avoid duplication.
 _TITLE_TOKEN = r"[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*)*"
 _EXAMPLE_PAREN_LIST_RE = re.compile(
+    rf"(?:for example\s+)?"
     rf"\(\s*(?P<body>{_TITLE_TOKEN}(?:\s*,\s*{_TITLE_TOKEN})+)\s*\)"
 )
 
@@ -468,9 +470,9 @@ def format_for_tts(
     )
     text = simplify_inline_citations(text)
     text = expand_section_marks(text)
-    text = expand_example_parentheticals(text)
     text = expand_dates(text)
     text = expand_abbreviations(text)
+    text = expand_example_parentheticals(text)
     text = expand_symbols(text)
     return _collapse_whitespace(text)
 
