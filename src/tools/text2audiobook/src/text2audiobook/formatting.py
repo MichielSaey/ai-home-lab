@@ -161,11 +161,11 @@ _EXAMPLE_PAREN_LIST_RE = re.compile(
     rf"\(\s*(?P<body>{_TITLE_TOKEN}(?:\s*,\s*{_TITLE_TOKEN})+)\s*\)"
 )
 _EXAMPLE_LEAD_RE = re.compile(
-    r"(?:for example|such as|including|like|viz\.?|cf\.?)\s+$",
+    r"(?:for example|such as)\s+$",
     re.IGNORECASE,
 )
 _EXAMPLE_SOFT_CUE_RE = re.compile(
-    r"\b(?:tandem|films?|movies?|novels?|series|games?|shows?|media)\b",
+    r"\btandem\s+$",
     re.IGNORECASE,
 )
 
@@ -322,21 +322,21 @@ def expand_section_marks(text: str) -> str:
 def expand_example_parentheticals(text: str) -> str:
     """Rewrite cued title lists in parentheses as spoken examples.
 
-    Only matches comma-separated Title Case tokens. Requires a lead cue
-    (``for example`` / ``such as`` / …) or a soft cue nearby (``tandem``,
-    ``films``, …) so author lists like ``(Marx, Engels)`` stay intact.
+    Only matches comma-separated Title Case tokens. Requires an immediate
+    lead cue (``for example`` / ``such as``) or ``tandem`` right before the
+    parenthesis, so author lists like ``(Marx, Engels)`` stay intact.
     """
     pieces: list[str] = []
     cursor = 0
     for match in _EXAMPLE_PAREN_LIST_RE.finditer(text):
         start, end = match.span()
-        prefix = text[max(0, start - 48) : start]
+        prefix = text[max(0, start - 24) : start]
         lead = _EXAMPLE_LEAD_RE.search(prefix)
         soft = _EXAMPLE_SOFT_CUE_RE.search(prefix)
         if not lead and not soft:
             continue
         body = match.group("body").strip()
-        consume_from = lead.start() + max(0, start - 48) if lead else start
+        consume_from = lead.start() + max(0, start - 24) if lead else start
         pieces.append(text[cursor:consume_from])
         pieces.append(f"for example {body}")
         cursor = end

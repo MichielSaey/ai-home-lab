@@ -241,6 +241,8 @@ def test_eg_before_title_list_does_not_duplicate_for_example() -> None:
 def test_author_list_parenthetical_is_left_alone() -> None:
     source = "As argued elsewhere (Marx, Engels) the point stands."
     assert format_for_tts(source) == source
+    near_media = "Discussed in social media (Marx, Engels) often."
+    assert format_for_tts(near_media) == near_media
 
 
 def test_narrative_parenthetical_is_left_alone() -> None:
