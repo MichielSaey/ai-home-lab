@@ -162,14 +162,16 @@ def iter_clean_chunks_batched(
                 "%s",
                 progress.format(
                     "format",
-                    chunk_idx=chunk.chunk_index,
-                    chapter_title=chunk.chapter_title,
+                    unit_done=emitted,
                     total_chunks=total,
+                    chapter_idx=chunk.chapter_index,
+                    chapter_title=chunk.chapter_title,
+                    chapter_unit=chunk.chunk_index + 1,
                 ),
             )
         else:
             logger.info(
-                "[%d/%d] cleaned chunk %d of '%s'",
+                "[%d/%d] format window %d of '%s'",
                 emitted,
                 total,
                 chunk.chunk_index,

@@ -97,6 +97,10 @@ Deterministic rules (also in the LLM prompt):
 - References / bibliography / works-cited sections are dropped
 - Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve.`
 - Tables and figures become a short pointer: ebook *See the table Title in this chapter of the ebook.*; HTML/URL *…on the original page.*
+- Section marks `§0.21` become `section 0.21`; title lists like `(Cyberpunk, Elysium)` become `for example Cyberpunk, Elysium`
+- `#Accelerate` drops the hash; `&` → `and`; `35%` → `35 percent`
+
+Format chapter scripts are written as `format/chapters/NNNN_<slug>.txt` so directory order matches narration order.
 
 GPU default is sequential: unload Qwen before Kokoro. `pipeline.concurrent_models` is ignored.
 

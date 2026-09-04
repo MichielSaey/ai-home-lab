@@ -218,6 +218,31 @@ def test_passthrough_cleanup_still_formats() -> None:
     )
 
 
+def test_section_mark_becomes_section() -> None:
+    cleaned = format_for_tts("Wrote Nick Land in twenty eighteen. §0.21 in Crypto-Current.")
+    assert "§" not in cleaned
+    assert "section 0.21" in cleaned
+
+
+def test_example_parenthetical_title_list() -> None:
+    cleaned = format_for_tts(
+        "ruin and runaway accelerate in tandem (Cyberpunk, Elysium). Ask first."
+    )
+    assert "(Cyberpunk, Elysium)" not in cleaned
+    assert "for example Cyberpunk, Elysium" in cleaned
+
+
+def test_narrative_parenthetical_is_left_alone() -> None:
+    source = "Still early (And we've scarcely started with DAOs yet.)"
+    assert format_for_tts(source) == source
+
+
+def test_hashtag_ampersand_percent_spoken() -> None:
+    cleaned = format_for_tts("See #Accelerate & friends at 35%.")
+    assert "#" not in cleaned
+    assert "Accelerate and friends at 35 percent." in cleaned
+
+
 def test_default_clean_prompt_covers_new_rules() -> None:
     assert "the third of September, twenty twenty-six" in DEFAULT_CLEAN_PROMPT
     assert "in other words" in DEFAULT_CLEAN_PROMPT

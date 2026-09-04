@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "2"
+FORMATTER_VERSION = "3"
 
 _MONTHS = (
     "January",
@@ -151,6 +151,19 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\be\.g\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "for example"),
 )
 
+# §0.21 / §3.741 → "section 0.21" so Kokoro does not say "section sign".
+_SECTION_MARK_RE = re.compile(r"§\s*(?P<label>[0-9]+(?:\.[0-9]+)*)")
+
+# Title-like media lists: (Cyberpunk, Elysium) → for example Cyberpunk, Elysium
+_TITLE_TOKEN = r"[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*)*"
+_EXAMPLE_PAREN_LIST_RE = re.compile(
+    rf"\(\s*(?P<body>{_TITLE_TOKEN}(?:\s*,\s*{_TITLE_TOKEN})+)\s*\)"
+)
+
+_HASHTAG_RE = re.compile(r"#(?P<tag>[A-Za-z][\w-]*)")
+_AMPERSAND_RE = re.compile(r"\s&\s")
+_PERCENT_RE = re.compile(r"(?P<num>\d+)\s*%")
+
 _RESUME_AFTER_REFERENCES_RE = re.compile(
     r"""
     ^
@@ -292,6 +305,33 @@ def expand_abbreviations(text: str) -> str:
     return text
 
 
+def expand_section_marks(text: str) -> str:
+    """Speak section marks: §0.21 → section 0.21."""
+    return _SECTION_MARK_RE.sub(lambda match: f"section {match.group('label')}", text)
+
+
+def expand_example_parentheticals(text: str) -> str:
+    """Rewrite title lists in parentheses as spoken examples.
+
+    Only matches comma-separated Title Case tokens, so narrative asides like
+    ``(And we've still…)`` or formulas like ``(M → C → M')`` are left alone.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        body = match.group("body").strip()
+        return f"for example {body}"
+
+    return _EXAMPLE_PAREN_LIST_RE.sub(replace, text)
+
+
+def expand_symbols(text: str) -> str:
+    """Strip hashtags and speak & / % in running text."""
+    text = _HASHTAG_RE.sub(lambda match: match.group("tag"), text)
+    text = _AMPERSAND_RE.sub(" and ", text)
+    text = _PERCENT_RE.sub(lambda match: f"{match.group('num')} percent", text)
+    return text
+
+
 def _replace_full_citation(match: re.Match[str]) -> str:
     body = match.group("body").strip()
     first = body.split()[0].lower().rstrip(",;:") if body.split() else ""
@@ -427,8 +467,11 @@ def format_for_tts(
         text, chapter_title=chapter_title, source_kind=source_kind
     )
     text = simplify_inline_citations(text)
+    text = expand_section_marks(text)
+    text = expand_example_parentheticals(text)
     text = expand_dates(text)
     text = expand_abbreviations(text)
+    text = expand_symbols(text)
     return _collapse_whitespace(text)
 
 
