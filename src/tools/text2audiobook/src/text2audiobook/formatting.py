@@ -154,12 +154,19 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
 # §0.21 / §3.741 → "section 0.21" so Kokoro does not say "section sign".
 _SECTION_MARK_RE = re.compile(r"§\s*(?P<label>[0-9]+(?:\.[0-9]+)*)")
 
-# Title-like media lists: (Cyberpunk, Elysium) → for example Cyberpunk, Elysium
-# Optional leading "for example " (after e.g. expansion) is consumed to avoid duplication.
+# Title-like media lists in parentheses, rewritten only with a nearby cue
+# (e.g. / for example / tandem / films) so (Marx, Engels) stays intact.
 _TITLE_TOKEN = r"[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*)*"
 _EXAMPLE_PAREN_LIST_RE = re.compile(
-    rf"(?:for example\s+)?"
     rf"\(\s*(?P<body>{_TITLE_TOKEN}(?:\s*,\s*{_TITLE_TOKEN})+)\s*\)"
+)
+_EXAMPLE_LEAD_RE = re.compile(
+    r"(?:for example|such as|including|like|viz\.?|cf\.?)\s+$",
+    re.IGNORECASE,
+)
+_EXAMPLE_SOFT_CUE_RE = re.compile(
+    r"\b(?:tandem|films?|movies?|novels?|series|games?|shows?|media)\b",
+    re.IGNORECASE,
 )
 
 _HASHTAG_RE = re.compile(r"#(?P<tag>[A-Za-z][\w-]*)")
@@ -313,17 +320,28 @@ def expand_section_marks(text: str) -> str:
 
 
 def expand_example_parentheticals(text: str) -> str:
-    """Rewrite title lists in parentheses as spoken examples.
+    """Rewrite cued title lists in parentheses as spoken examples.
 
-    Only matches comma-separated Title Case tokens, so narrative asides like
-    ``(And we've still…)`` or formulas like ``(M → C → M')`` are left alone.
+    Only matches comma-separated Title Case tokens. Requires a lead cue
+    (``for example`` / ``such as`` / …) or a soft cue nearby (``tandem``,
+    ``films``, …) so author lists like ``(Marx, Engels)`` stay intact.
     """
-
-    def replace(match: re.Match[str]) -> str:
+    pieces: list[str] = []
+    cursor = 0
+    for match in _EXAMPLE_PAREN_LIST_RE.finditer(text):
+        start, end = match.span()
+        prefix = text[max(0, start - 48) : start]
+        lead = _EXAMPLE_LEAD_RE.search(prefix)
+        soft = _EXAMPLE_SOFT_CUE_RE.search(prefix)
+        if not lead and not soft:
+            continue
         body = match.group("body").strip()
-        return f"for example {body}"
-
-    return _EXAMPLE_PAREN_LIST_RE.sub(replace, text)
+        consume_from = lead.start() + max(0, start - 48) if lead else start
+        pieces.append(text[cursor:consume_from])
+        pieces.append(f"for example {body}")
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)
 
 
 def expand_symbols(text: str) -> str:

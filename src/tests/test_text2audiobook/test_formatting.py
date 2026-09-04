@@ -238,6 +238,11 @@ def test_eg_before_title_list_does_not_duplicate_for_example() -> None:
     assert "for example Cyberpunk, Elysium" in cleaned
 
 
+def test_author_list_parenthetical_is_left_alone() -> None:
+    source = "As argued elsewhere (Marx, Engels) the point stands."
+    assert format_for_tts(source) == source
+
+
 def test_narrative_parenthetical_is_left_alone() -> None:
     source = "Still early (And we've scarcely started with DAOs yet.)"
     assert format_for_tts(source) == source
