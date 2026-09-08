@@ -1397,20 +1397,21 @@ def _validate_combine_segments(
     segments: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Require named template segments; reject freeform step lists."""
+    named_template_error = {
+        "error": (
+            "combine_workout_templates only accepts named template "
+            'segments like {"template": "base", "params": '
+            '{"duration_minutes": 20}}. Use create_*_workout for a '
+            "single session."
+        )
+    }
     if not segments:
         return {"error": "Provide at least one template segment to combine."}
     for segment in segments:
         if not isinstance(segment, dict):
             return {"error": "Each segment must be an object with a template key."}
-        if not segment.get("template"):
-            return {
-                "error": (
-                    "combine_workout_templates only accepts named template "
-                    'segments like {"template": "base", "params": '
-                    '{"duration_minutes": 20}}. Use create_*_workout for a '
-                    "single session."
-                )
-            }
+        if "steps" in segment or not segment.get("template"):
+            return named_template_error
     return None
 
 

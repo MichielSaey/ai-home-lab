@@ -118,6 +118,36 @@ def test_generic_workout_tool_is_not_exported() -> None:
     assert hasattr(server, "create_threshold_workout")
 
 
+def test_combine_workout_templates_rejects_steps_even_with_template() -> None:
+    mock_client = MagicMock()
+
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(mock_client, None)),
+        patch.object(server, "_upload_running_workout") as mock_upload,
+    ):
+        result = server.combine_workout_templates(
+            name="Bypass",
+            segments=[
+                {
+                    "template": "base",
+                    "steps": [
+                        {
+                            "type": "interval",
+                            "duration_minutes": 8,
+                            "target": "speed",
+                            "speed_mps_min": 3.12,
+                            "speed_mps_max": 3.23,
+                        }
+                    ],
+                }
+            ],
+        )
+
+    assert "error" in result
+    assert "named template" in result["error"]
+    mock_upload.assert_not_called()
+
+
 def test_combine_workout_templates_rejects_freeform_steps() -> None:
     mock_client = MagicMock()
 
