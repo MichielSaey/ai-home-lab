@@ -2,7 +2,7 @@
 
 Computed server-side for past-week analysis and next-week context including
 session prescriptions (minutes). The agent narrates the brief and may upload
-workouts via create_*_workout using sessions[].
+workouts via create_*_workout using sessions[] and session_targets.
 """
 
 from __future__ import annotations
@@ -10,6 +10,24 @@ from __future__ import annotations
 from typing import Any
 
 from training_plan import split_week_sessions
+
+# Maps next_week_proposal.sessions[].session_type to the MCP upload tool.
+# Threshold stays on the HR-zone template; sprints are the pace+distance exception.
+SESSION_TARGETS: dict[str, dict[str, str]] = {
+    "easy": {"tool": "create_base_workout", "target": "HR zone 2"},
+    "long": {"tool": "create_long_run_workout", "target": "HR zone 2"},
+    "recovery": {"tool": "create_recovery_workout", "target": "HR zone 1"},
+    "threshold": {"tool": "create_threshold_workout", "target": "HR zone 4"},
+    "sprint": {"tool": "create_sprint_workout", "target": "pace + distance"},
+    "hill_repeats": {
+        "tool": "create_hill_repeats_workout",
+        "target": "pace + distance",
+    },
+    "weighted_pack": {
+        "tool": "create_weighted_pack_workout",
+        "target": "HR zone 2",
+    },
+}
 
 
 def _week_by_description(plan_weeks: list[dict[str, Any]], desc: str) -> dict[str, Any] | None:
@@ -400,6 +418,7 @@ def build_coaching_brief(
         "focus": focus,
         "days": days,
         "sessions": sessions,
+        "session_targets": SESSION_TARGETS,
         "coaching_note": coaching_note,
     }
 
