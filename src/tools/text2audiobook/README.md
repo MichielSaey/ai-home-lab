@@ -35,13 +35,15 @@ A full run is the default. Re-run a layer without repeating the others:
 
 ```bash
 text2audiobook --stage extract
+text2audiobook --clean
+text2audiobook --stage clean
 text2audiobook --stage format
 text2audiobook --stage speak
 text2audiobook --stage speak --voice bf_emma
 text2audiobook --force
 ```
 
-`--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+`--clean` is an alias for `--stage clean` (clean-only). `--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
 
 ### Voices
 
@@ -78,6 +80,7 @@ Stems live under `data/staging/<book_slug>/`:
 | Path | Purpose |
 |------|---------|
 | `extract/` | Selected chapters + extract manifest |
+| `clean/` | Deterministic sections (`sections.jsonl`: body/footnote in reading order) + clean manifest |
 | `format/` | LLM windows (`chunks.jsonl`), merged chapter scripts, format manifest |
 | `speak/` | Phoneme units, WAVs, speak manifest (voice, speed, bitrate, loudnorm, silences) |
 | `data/staging/_url_cache/` | Fetched HTML cache (keyed by URL hash) |
@@ -88,18 +91,25 @@ Stems live under `data/staging/<book_slug>/`:
 
 ## Cleanup / formatting
 
-Format windows (~1000 words) are rewritten for spoken English, then merged into a chapter script. Speak packing uses a phoneme budget (target 160, cap 400) so Kokoro does not waterfall-split mid-sentence.
+**Clean** (after extract) splits each chapter into ordered sections and applies deterministic scrubbing—no LLM. Inspect `clean/sections.jsonl` before formatting:
+
+1. Split on footnote callouts at sentence boundaries
+2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections marked `Footnote.` … `End of footnote.`
+3. Scrub URLs, inline citations, dates, abbreviations, tables/figures, and other print conventions
+
+**Format** windows (~1000 words) over the cleaned chapter text are rewritten for spoken English by the LLM, then merged into a chapter script. Speak packing uses a phoneme budget (target 160, cap 400) so Kokoro does not waterfall-split mid-sentence.
 
 Deterministic rules (also in the LLM prompt):
 
 - Dates such as `03/09/2026` become `the third of September, twenty twenty-six` (29 February only in leap years)
 - `i.e.` / `e.i.` become `in other words`; `e.g.` becomes `for example`
 - References / bibliography / works-cited sections are dropped
-- Citation-only endnotes are dropped; discursive footnotes are moved after their callout with a spoken `Footnote.` cue (so format chunks follow reading order)
+- Citation-only endnotes are dropped; discursive footnotes are sections after their callout sentence
 - Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve.`
 - Tables and figures become a short pointer: ebook *See the table Title in this chapter of the ebook.*; HTML/URL *…on the original page.*
 - Section marks `§0.21` become `section 0.21`; title lists like `(Cyberpunk, Elysium)` become `for example Cyberpunk, Elysium`
 - `#Accelerate` drops the hash; `&` → `and`; `35%` → `35 percent`
+- URLs are removed
 
 Format chapter scripts are written as `format/chapters/NNNN_<slug>.txt` so directory order matches narration order.
 

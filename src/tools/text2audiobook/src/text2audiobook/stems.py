@@ -14,7 +14,7 @@ from text2audiobook.io import Chapter
 logger = logging.getLogger(__name__)
 
 STEM_VERSION = 2
-PIPELINE_STAGES = ("extract", "format", "speak")
+PIPELINE_STAGES = ("extract", "clean", "format", "speak")
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,10 @@ class BookStems:
     @property
     def extract_dir(self) -> Path:
         return self.root / "extract"
+
+    @property
+    def clean_dir(self) -> Path:
+        return self.root / "clean"
 
     @property
     def format_dir(self) -> Path:
@@ -38,6 +42,10 @@ class BookStems:
         return self.extract_dir / "manifest.json"
 
     @property
+    def clean_manifest(self) -> Path:
+        return self.clean_dir / "manifest.json"
+
+    @property
     def format_manifest(self) -> Path:
         return self.format_dir / "manifest.json"
 
@@ -48,6 +56,14 @@ class BookStems:
     @property
     def chapters_json(self) -> Path:
         return self.extract_dir / "chapters.json"
+
+    @property
+    def clean_sections_jsonl(self) -> Path:
+        return self.clean_dir / "sections.jsonl"
+
+    @property
+    def clean_chapters_index(self) -> Path:
+        return self.clean_dir / "chapters.json"
 
     @property
     def format_chunks_jsonl(self) -> Path:
@@ -142,6 +158,76 @@ def load_extract_chapters(stems: BookStems) -> list[Chapter]:
 
 def save_extract_chapters(stems: BookStems, chapters: list[Chapter]) -> None:
     write_json(stems.chapters_json, chapters_to_payload(chapters))
+
+
+def save_clean_sections(stems: BookStems, sections: list[Any]) -> None:
+    """Write clean/sections.jsonl and a chapter index for inspection."""
+    from text2audiobook.cleanup import CleanSection
+
+    stems.clean_dir.mkdir(parents=True, exist_ok=True)
+    path = stems.clean_sections_jsonl
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        for section in sections:
+            assert isinstance(section, CleanSection)
+            handle.write(json.dumps(section.to_json(), ensure_ascii=False) + "\n")
+    tmp.replace(path)
+
+    index: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for section in sections:
+        if section.chapter_index in seen:
+            continue
+        seen.add(section.chapter_index)
+        index.append(
+            {
+                "index": section.chapter_index,
+                "title": section.chapter_title,
+                "slug": section.chapter_slug,
+            }
+        )
+    write_json(stems.clean_chapters_index, index)
+
+
+def load_clean_sections(stems: BookStems) -> list[Any]:
+    from text2audiobook.cleanup import CleanSection
+
+    rows = load_jsonl(stems.clean_sections_jsonl)
+    if not rows:
+        raise FileNotFoundError(
+            f"Clean stem missing sections at {stems.clean_sections_jsonl}"
+        )
+    return [
+        CleanSection(
+            chapter_index=int(row["chapter_index"]),
+            chapter_title=str(row["chapter_title"]),
+            chapter_slug=str(row["chapter_slug"]),
+            section_index=int(row["section_index"]),
+            kind=str(row["kind"]),
+            text=str(row["text"]),
+            note_number=(
+                None if row.get("note_number") is None else str(row["note_number"])
+            ),
+        )
+        for row in rows
+    ]
+
+
+def clean_sections_hash(stems: BookStems) -> str:
+    rows = load_jsonl(stems.clean_sections_jsonl)
+    return stable_hash(
+        [
+            {
+                "chapter_index": row.get("chapter_index"),
+                "section_index": row.get("section_index"),
+                "kind": row.get("kind"),
+                "note_number": row.get("note_number"),
+                "text_hash": row.get("text_hash")
+                or hashlib.sha256(str(row.get("text", "")).encode()).hexdigest(),
+            }
+            for row in rows
+        ]
+    )
 
 
 def format_script_filename(chapter_index: int, slug: str) -> str:

@@ -54,7 +54,7 @@ def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "format"),
+        stages=("extract", "clean", "format"),
         tts_device="cpu",
     )
     staging = next(p for p in config.paths.staging_dir.iterdir() if p.is_dir())
@@ -63,10 +63,11 @@ def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
 
 def test_canonical_stages_orders_and_rejects() -> None:
     assert canonical_stages(["speak", "extract"]) == ("extract", "speak")
+    assert canonical_stages(["format", "clean"]) == ("clean", "format")
     try:
-        canonical_stages(["clean"])
+        canonical_stages(["nope"])
     except ValueError as exc:
-        assert "clean" in str(exc)
+        assert "nope" in str(exc)
     else:
         raise AssertionError("expected unknown stage to fail")
 
@@ -130,6 +131,18 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
         config,
         tracker=tracker,
         record=record,
+        stages=("clean",),
+        tts_device="cpu",
+    )
+    assert stems.clean_sections_jsonl.exists()
+    assert stems.clean_manifest.exists()
+
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
         stages=("format",),
         tts_device="cpu",
     )
@@ -176,7 +189,8 @@ def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeyp
         config,
         tracker=tracker,
         record=record,
-        stages=("format",),
+        stages=("clean", "format"),
+        force=True,
         tts_device="cpu",
     )
     script = next(stems.format_chapter_dir.glob("*.txt")).read_text(encoding="utf-8")
@@ -268,7 +282,7 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "format", "speak"),
+        stages=("extract", "clean", "format", "speak"),
         tts_device="cpu",
     )
     assert synth_calls == ["first pass script"]
@@ -332,7 +346,7 @@ def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> Non
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "format", "speak"),
+        stages=("extract", "clean", "format", "speak"),
         tts_device="cpu",
     )
     assert synth_calls
