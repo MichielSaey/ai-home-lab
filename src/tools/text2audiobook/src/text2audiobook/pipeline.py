@@ -40,7 +40,9 @@ from text2audiobook.io import (
 )
 from text2audiobook.llm import (
     CleanedChunk,
+    FormatCacheEntry,
     LoadedLlm,
+    apply_direction_pass,
     iter_clean_chunks_batched,
     load_llm,
     text_hash,
@@ -438,7 +440,7 @@ def process_source(
 def _run_needs_llm(config: AppConfig, stages: tuple[str, ...]) -> bool:
     if "extract" in stages and config.selection.keep_chapter_indices is None:
         return True
-    return "format" in stages and config.llm.cleanup
+    return "format" in stages and (config.llm.cleanup or config.llm.direction)
 
 
 def _resolve_tts(
@@ -505,9 +507,12 @@ def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str)
         "source_kind": source_kind,
         "llm_model_id": config.llm.model_id,
         "cleanup": config.llm.cleanup,
+        "direction": config.llm.direction,
         "max_new_tokens": config.llm.max_new_tokens,
+        "direction_max_new_tokens": config.llm.direction_max_new_tokens,
         "cleanup_batch_size": config.llm.cleanup_batch_size,
         "clean_prompt_hash": text_hash(config.llm.clean_prompt),
+        "direction_prompt_hash": text_hash(config.llm.direction_prompt),
         "format_words_per_chunk": config.chunking.format_words_per_chunk,
         "max_chunks_per_chapter": config.chunking.max_chunks_per_chapter,
     }
@@ -541,6 +546,7 @@ def _format_units_hash(stems: BookStems) -> str:
                 "chapter_index": row.get("chapter_index"),
                 "chunk_index": row.get("chunk_index"),
                 "cleaned_text": row.get("cleaned_text"),
+                "instruct": row.get("instruct"),
             }
             for row in rows
         ]
@@ -742,6 +748,7 @@ def _format_units_from_cleaned(
             chunk_index=item.chunk_index,
             text=item.cleaned_text,
             source_kind=source_kind,
+            instruct=item.instruct,
         )
         for item in cleaned
     ]
@@ -817,13 +824,14 @@ def _run_format(
         config.chunking.format_words_per_chunk,
     )
 
-    cache: dict[tuple[int, int], str] = {}
+    cache: dict[tuple[int, int], FormatCacheEntry] = {}
     if config.output.skip_existing and not force:
         cache = _load_format_cache(stems, chunks)
         if cache:
             logger.info("Resuming: %d of %d window(s) already formatted", len(cache), len(chunks))
 
-    active_llm = ensure_llm() if config.llm.cleanup else None
+    need_llm = config.llm.cleanup or config.llm.direction
+    active_llm = ensure_llm() if need_llm else None
     cleaned_list = list(
         _timed_persist_iter(
             iter_clean_chunks_batched(
@@ -840,6 +848,14 @@ def _run_format(
             source_kind=source_kind,
         )
     )
+    if config.llm.direction:
+        cleaned_list = apply_direction_pass(
+            active_llm,
+            cleaned_list,
+            config.llm,
+            progress=progress,
+        )
+        _rewrite_format_chunks_jsonl(stems, cleaned_list, source_kind=source_kind)
     _write_format_scripts(stems, chapter_stubs, cleaned_list)
     write_json(
         stems.format_manifest,
@@ -921,6 +937,7 @@ def _run_speak(
             "chunk_index": unit.chunk_index,
             "text": unit.text,
             "text_hash": text_hash(unit.text),
+            "instruct": unit.instruct,
         }
         for unit in units
     ]
@@ -1031,7 +1048,7 @@ def _synthesize_and_encode(
                 wav_path,
                 voice=tts_config.voice,
                 language=tts_config.lang,
-                instruct=tts_config.instruct,
+                instruct=unit.instruct or tts_config.instruct,
                 chunk_silence_ms=config.output.chunk_silence_ms,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)
@@ -1067,7 +1084,7 @@ def _timed_persist_iter(
     *,
     tracker: RunTracker,
     record: BookRecord,
-    cache: dict[tuple[int, int], str],
+    cache: dict[tuple[int, int], FormatCacheEntry | str],
     stems: BookStems,
     source_kind: str,
 ) -> Iterator[CleanedChunk]:
@@ -1090,9 +1107,37 @@ def _timed_persist_iter(
                     "source_kind": source_kind,
                     "raw_hash": text_hash(item.raw_text),
                     "cleaned_text": item.cleaned_text,
+                    "instruct": item.instruct,
                 },
             )
         yield item
+
+
+def _rewrite_format_chunks_jsonl(
+    stems: BookStems,
+    cleaned: list[CleanedChunk],
+    *,
+    source_kind: str,
+) -> None:
+    """Rewrite format/chunks.jsonl so resume cache includes per-chunk instruct."""
+    rows = [
+        {
+            "chapter_index": item.chapter_index,
+            "chunk_index": item.chunk_index,
+            "chapter_title": item.chapter_title,
+            "chapter_slug": item.chapter_slug,
+            "source_kind": source_kind,
+            "raw_hash": text_hash(item.raw_text),
+            "cleaned_text": item.cleaned_text,
+            "instruct": item.instruct,
+        }
+        for item in cleaned
+    ]
+    stems.format_chunks_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    stems.format_chunks_jsonl.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
 
 def _format_in_progress_path(stems: BookStems) -> Path:
@@ -1110,16 +1155,25 @@ def _drop_stale_format_cache(stems: BookStems, fingerprint: dict[str, Any]) -> N
 
 def _load_format_cache(
     stems: BookStems, chunks: list[TextChunk]
-) -> dict[tuple[int, int], str]:
+) -> dict[tuple[int, int], FormatCacheEntry]:
     expected_hashes = {
         (chunk.chapter_index, chunk.chunk_index): text_hash(chunk.text) for chunk in chunks
     }
-    cache: dict[tuple[int, int], str] = {}
+    cache: dict[tuple[int, int], FormatCacheEntry] = {}
     for entry in load_jsonl(stems.format_chunks_jsonl):
         try:
             key = (int(entry["chapter_index"]), int(entry["chunk_index"]))
             if expected_hashes.get(key) == entry["raw_hash"]:
-                cache[key] = str(entry["cleaned_text"])
+                instruct_raw = entry.get("instruct")
+                instruct = (
+                    None
+                    if instruct_raw is None
+                    else str(instruct_raw).strip() or None
+                )
+                cache[key] = FormatCacheEntry(
+                    cleaned_text=str(entry["cleaned_text"]),
+                    instruct=instruct,
+                )
         except (ValueError, KeyError, TypeError):
             logger.debug("Skipping malformed format cache entry")
     return cache

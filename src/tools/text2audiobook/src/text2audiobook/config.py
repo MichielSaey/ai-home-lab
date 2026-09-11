@@ -45,6 +45,25 @@ DEFAULT_CLEAN_PROMPT = (
     "Text:\n{text}"
 )
 
+DEFAULT_DIRECTION_PROMPT = (
+    "Write a short delivery instruction (1–2 sentences, English) for Qwen3-TTS "
+    "CustomVoice instruct for the narration chunk below. Return only the "
+    "instruction — no spoken narration text, no commentary, and no bracket tags "
+    "like [excited].\n\n"
+    "Rules:\n"
+    "- Describe pace, emotion, and emphasis suitable for this passage.\n"
+    "- Stay restrained for audiobook narration; avoid theatrical overacting.\n"
+    "- If the passage is neutral exposition, say so briefly (calm steady pace).\n\n"
+    "Narration:\n{text}"
+)
+
+DEFAULT_TTS_INSTRUCT = (
+    "Young adult woman with a warm, gentle mid pitch and clear diction. "
+    "Use a slow, steady pace with restrained emotion for long-form nonfiction "
+    "audiobook narration. Keep delivery calm, precise, and easy to follow for "
+    "dense theory text."
+)
+
 
 @dataclass
 class PathsConfig:
@@ -85,18 +104,21 @@ class LlmConfig:
     model_id: str = "Qwen/Qwen2.5-7B-Instruct"
     device: str = "cuda"
     cleanup: bool = True
+    direction: bool = True
     cleanup_batch_size: int = 1
     max_new_tokens: int = 2048
+    direction_max_new_tokens: int = 128
     clean_prompt: str = DEFAULT_CLEAN_PROMPT
+    direction_prompt: str = DEFAULT_DIRECTION_PROMPT
 
 
 @dataclass
 class TtsConfig:
     model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
     lang: str = "English"
-    voice: str = "Ryan"
+    voice: str = "Serena"
     device: str = "auto"
-    instruct: str | None = None
+    instruct: str | None = DEFAULT_TTS_INSTRUCT
 
 
 @dataclass

@@ -28,7 +28,7 @@ def _write_book(tmp_path: Path, *, skip_existing: bool = False) -> tuple[Path, o
                     "runs_dir": "runs",
                 },
                 "selection": {"keep_chapter_indices": [0]},
-                "llm": {"cleanup": False},
+                "llm": {"cleanup": False, "direction": False},
                 "output": {
                     "skip_existing": skip_existing,
                     "keep_wav": True,
@@ -369,3 +369,139 @@ def test_edited_format_unit_resynthesizes(tmp_path: Path, monkeypatch) -> None:
         tts_device="cpu",
     )
     assert synth_calls[-1] == "manually edited format unit"
+
+
+def test_direction_pass_writes_instruct_and_speak_uses_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from text2audiobook.llm import CleanedChunk
+
+    source, config = _write_book(tmp_path)
+    config = replace(
+        config,
+        llm=replace(config.llm, cleanup=False, direction=True),
+        tts=replace(config.tts, instruct="GLOBAL BASELINE INSTRUCT"),
+    )
+
+    def fake_clean(llm, chunks, llm_config, **_kwargs):
+        for chunk in chunks:
+            yield CleanedChunk(
+                chapter_index=chunk.chapter_index,
+                chapter_title=chunk.chapter_title,
+                chapter_slug=chunk.chapter_slug,
+                chunk_index=chunk.chunk_index,
+                raw_text=chunk.text,
+                cleaned_text=chunk.text,
+                instruct=None,
+            )
+
+    def fake_direction(llm, chunks, llm_config, **_kwargs):
+        return [
+            replace(chunk, instruct="CHUNK LOCAL: calm steady exposition")
+            for chunk in chunks
+        ]
+
+    synth_instructs: list[str | None] = []
+
+    def fake_synth(_model, text, wav_path, **kwargs) -> None:
+        synth_instructs.append(kwargs.get("instruct"))
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_llm", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.iter_clean_chunks_batched", fake_clean)
+    monkeypatch.setattr("text2audiobook.pipeline.apply_direction_pass", fake_direction)
+    monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_speak_units_from_chunks",
+        lambda format_units, **_kwargs: [
+            TextChunk(
+                chapter_index=format_units[0].chapter_index,
+                chapter_title=format_units[0].chapter_title,
+                chapter_slug=format_units[0].chapter_slug,
+                chunk_index=0,
+                text=format_units[0].text,
+                instruct=format_units[0].instruct,
+            )
+        ],
+    )
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "clean", "format", "speak"),
+        tts_device="cpu",
+    )
+    stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    assert rows
+    assert rows[0]["instruct"] == "CHUNK LOCAL: calm steady exposition"
+    speak_rows = load_jsonl(stems.speak_units_jsonl)
+    assert speak_rows[0]["instruct"] == "CHUNK LOCAL: calm steady exposition"
+    assert synth_instructs == ["CHUNK LOCAL: calm steady exposition"]
+
+
+def test_direction_disabled_speak_falls_back_to_global_instruct(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source, config = _write_book(tmp_path)
+    config = replace(
+        config,
+        llm=replace(config.llm, cleanup=False, direction=False),
+        tts=replace(config.tts, instruct="GLOBAL BASELINE INSTRUCT"),
+    )
+
+    synth_instructs: list[str | None] = []
+
+    def fake_synth(_model, text, wav_path, **kwargs) -> None:
+        synth_instructs.append(kwargs.get("instruct"))
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_speak_units_from_chunks",
+        lambda format_units, **_kwargs: [
+            TextChunk(
+                chapter_index=format_units[0].chapter_index,
+                chapter_title=format_units[0].chapter_title,
+                chapter_slug=format_units[0].chapter_slug,
+                chunk_index=0,
+                text=format_units[0].text,
+                instruct=format_units[0].instruct,
+            )
+        ],
+    )
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "clean", "format", "speak"),
+        tts_device="cpu",
+    )
+    stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    assert rows[0].get("instruct") is None
+    assert synth_instructs == ["GLOBAL BASELINE INSTRUCT"]

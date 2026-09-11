@@ -23,15 +23,17 @@
     "model_id": "Qwen/Qwen2.5-7B-Instruct",
     "device": "cuda",
     "cleanup": true,
+    "direction": true,
     "cleanup_batch_size": 1,
-    "max_new_tokens": 2048
+    "max_new_tokens": 2048,
+    "direction_max_new_tokens": 128
   },
   "tts": {
     "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "lang": "English",
-    "voice": "Ryan",
+    "voice": "Serena",
     "device": "auto",
-    "instruct": null
+    "instruct": "Young adult woman with a warm, gentle mid pitch and clear diction. Use a slow, steady pace with restrained emotion for long-form nonfiction audiobook narration. Keep delivery calm, precise, and easy to follow for dense theory text."
   },
   "output": {
     "chapter_mp3": false,

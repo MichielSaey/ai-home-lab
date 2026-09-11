@@ -57,9 +57,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--voice",
         default=None,
         help=(
-            "Qwen3-TTS CustomVoice speaker (e.g. Ryan, Aiden), or 'random' "
+            "Qwen3-TTS CustomVoice speaker (e.g. Serena, Ryan, Aiden), or 'random' "
             "to pick without replacement until the pool wraps. "
-            "Language defaults from the speaker's native language."
+            "Content language stays from config tts.lang (not the speaker's native)."
         ),
     )
     parser.add_argument(

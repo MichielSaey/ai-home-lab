@@ -69,6 +69,26 @@ def test_speak_further_split_from_format_units() -> None:
     assert all(len(unit.text) <= 12 for unit in spoken)
 
 
+def test_further_split_inherits_instruct() -> None:
+    units = [
+        TextChunk(
+            0,
+            "A",
+            "a",
+            0,
+            " ".join(f"word{i}." for i in range(30)),
+            instruct="Calm steady pace.",
+        ),
+    ]
+    out = further_split(
+        units,
+        over_budget=lambda text: len(text.split()) > 10,
+        split_text=lambda text: chunk_sentences(text, 10),
+    )
+    assert len(out) > 1
+    assert all(unit.instruct == "Calm steady pace." for unit in out)
+
+
 def test_char_packer_stays_under_cap() -> None:
     text = "Short one. Another short sentence. Third sentence here."
     units = chunk_sentences_by_chars(

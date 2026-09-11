@@ -164,7 +164,7 @@ def synthesize_chunks(
             wav_path,
             voice=config.voice,
             language=config.lang,
-            instruct=config.instruct,
+            instruct=chunk.instruct or config.instruct,
             chunk_silence_ms=chunk_silence_ms,
         )
         audio_chunks.append(

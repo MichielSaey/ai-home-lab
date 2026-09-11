@@ -25,6 +25,7 @@ class TextChunk:
     chunk_index: int
     text: str
     source_kind: str = "ebook"
+    instruct: str | None = None
 
 
 def _ensure_punkt() -> None:
@@ -185,7 +186,10 @@ def further_split(
     over_budget: Callable[[str], bool],
     split_text: Callable[[str], list[str]],
 ) -> list[TextChunk]:
-    """Keep units under budget; only subdivide oversized ones. Never merge."""
+    """Keep units under budget; only subdivide oversized ones. Never merge.
+
+    Child units inherit ``instruct`` from their parent format window.
+    """
     out: list[TextChunk] = []
     for unit in units:
         if not over_budget(unit.text):
@@ -197,6 +201,7 @@ def further_split(
                     chunk_index=len(out),
                     text=unit.text,
                     source_kind=unit.source_kind,
+                    instruct=unit.instruct,
                 )
             )
             continue
@@ -211,6 +216,7 @@ def further_split(
                     chunk_index=len(out),
                     text=piece,
                     source_kind=unit.source_kind,
+                    instruct=unit.instruct,
                 )
             )
     # Re-number chunk_index per chapter for stable speak/format resumes.
@@ -227,6 +233,7 @@ def further_split(
                 chunk_index=index,
                 text=unit.text,
                 source_kind=unit.source_kind,
+                instruct=unit.instruct,
             )
         )
     return renumbered
