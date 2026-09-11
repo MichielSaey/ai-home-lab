@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "3"
+FORMATTER_VERSION = "4"
 
 _MONTHS = (
     "January",
