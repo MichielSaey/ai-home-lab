@@ -582,7 +582,10 @@ def relocate_footnotes(text: str) -> str:
         # Already relocated, or no Notes apparatus. Clear orphan see-note
         # pointers only — never strip lone digit lines (format windows may
         # split a footnote body away from its Footnote. cue).
-        return _SEE_NOTE_NUM_RE.sub("", body)
+        unused: set[str] = set()
+        return "\n".join(
+            _replace_see_note_pointers(line, {}, unused) for line in body.splitlines()
+        )
 
     used: set[str] = set()
     out_lines: list[str] = []
