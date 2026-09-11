@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "7"
+FORMATTER_VERSION = "8"
 
 _MONTHS = (
     "January",
@@ -144,6 +144,38 @@ _PAREN_CITE_RE = re.compile(
 )
 
 _NUMERIC_REF_RE = re.compile(r"\s*\[\d+(?:\s*[-–,;]\s*\d+)*\]")
+
+# Editorial ellipses inserted by scholars: [...] or […]
+_EDITORIAL_ELLIPSIS_RE = re.compile(r"\[\s*(?:\.{3}|…)\s*\]")
+
+# Long parenthetical bibliographic dumps (Urbanomic / academic note style).
+_BIBLIO_PAREN_RE = re.compile(r"\(([^)]{12,900})\)")
+_BIBLIO_SIGNAL_RE = re.compile(
+    r"""
+    (?:
+        \b(?:Press|University|Verlag|Macmillan|Urbanomic|Publisher|Editionen|Madra|Tuttle|Bloomsbury|Columbia|Athlone|Semiotext|Harper|Princeton|Cambridge|Oxford)\b
+        | \btr\.\s+[A-Z]
+        | \bpp?\.\s*\d
+        | \[[^\]]{0,80}(?:18|19|20)\d{2}[^\]]*\]
+        | ,\s*\d{1,3}[a-z]?(?:\s*[-–—]\s*\d{1,4}[a-z]?)?\s*(?:;|$)
+        | \bsee\s+also\b
+        | \bsee\s+especially\b
+        | \bed(?:s)?\.\s*[\[(]
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_BIBLIO_TAIL_SPLIT_RE = re.compile(
+    r";\s*(?:on the|see also|see especially|and|cf\.|compare)\b",
+    re.IGNORECASE,
+)
+_TRANSLATOR_CHUNK_RE = re.compile(r",?\s*tr\.\s+[A-Z][^,]{1,60}")
+_PLACE_PUB_YEAR_RE = re.compile(r"\[[^\]]{3,160}\]")
+# Page tails like ", 53–58" or "p. 342" — not four-digit years (Paris, 2012).
+_TRAILING_PAGES_RE = re.compile(
+    r"(?:,\s*)?(?:pp?\.\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?|\d{1,3}[a-z]?(?:\s*[-–—]\s*\d{1,4}[a-z]?)?)\s*$",
+    re.IGNORECASE,
+)
 
 # Mid-body footnote callouts broken onto their own line (Urbanomic EPUB style).
 _FOOTNOTE_CALLOUT_LINE_RE = re.compile(r"(?m)^\d{1,3}\s*$")
@@ -406,10 +438,74 @@ def _replace_full_citation(match: re.Match[str]) -> str:
     return f"Wrote {author} in {year}."
 
 
+def _looks_bibliographic_paren(body: str) -> bool:
+    return _BIBLIO_SIGNAL_RE.search(body) is not None
+
+
+def _shorten_bibliographic_paren(body: str) -> str:
+    """Reduce a citation dump to author + work, or empty when nothing useful remains."""
+    primary = _BIBLIO_TAIL_SPLIT_RE.split(body, maxsplit=1)[0]
+    primary = primary.split(";", 1)[0]
+    primary = _PLACE_PUB_YEAR_RE.sub("", primary)
+    primary = _TRANSLATOR_CHUNK_RE.sub("", primary)
+    primary = _TRAILING_PAGES_RE.sub("", primary.strip().rstrip(",.;"))
+    primary = re.sub(r"\s{2,}", " ", primary).strip(" ,;")
+    if not primary:
+        return ""
+
+    # "see especially Deleuze, Difference and Repetition" / "especially Deleuze, …"
+    primary = re.sub(
+        r"^(?:see\s+)?(?:especially|also|cf\.?)\s+",
+        "",
+        primary,
+        flags=re.IGNORECASE,
+    ).strip(" ,;")
+
+    # Strip leading "in " when the paren was already "in Author, Title"
+    primary = re.sub(r"^in\s+", "", primary, flags=re.IGNORECASE)
+
+    if "," in primary:
+        author, work = primary.split(",", 1)
+        author = author.strip()
+        work = work.strip()
+        quoted = re.match(r"^[\"'“‘](?P<title>.+?)[\"'”’]", work)
+        if quoted:
+            work = quoted.group("title").strip()
+        else:
+            work = work.strip("\"'“”‘’")
+            # Drop leftover ed. volume / journal noise after the title
+            work = re.split(r",\s*(?:in|vol\.|eds?\.)\b", work, maxsplit=1, flags=re.I)[0]
+            work = work.strip(" ,;")
+        if author and work and len(work.split()) <= 20:
+            return f"{author} in {work}"
+        if author and work:
+            # Very long titles: keep a short head clause.
+            head = re.split(r"[:;]", work, maxsplit=1)[0].strip()
+            if head and len(head.split()) <= 12:
+                return f"{author} in {head}"
+        if author:
+            return author
+    return primary if len(primary.split()) <= 12 else ""
+
+
+def _replace_bibliographic_paren(match: re.Match[str]) -> str:
+    body = match.group(1)
+    if not _looks_bibliographic_paren(body):
+        return match.group(0)
+    short = _shorten_bibliographic_paren(body)
+    if not short:
+        return ""
+    return f"({short})"
+
+
 def simplify_inline_citations(text: str) -> str:
+    text = _EDITORIAL_ELLIPSIS_RE.sub("", text)
     text = _FULL_CITE_PAGES_RE.sub(_replace_full_citation, text)
     text = _PAREN_CITE_RE.sub("", text)
+    text = _BIBLIO_PAREN_RE.sub(_replace_bibliographic_paren, text)
     text = _NUMERIC_REF_RE.sub("", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
     return text
 
 

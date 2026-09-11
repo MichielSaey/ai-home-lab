@@ -319,6 +319,35 @@ def test_parenthetical_citation_is_simplified() -> None:
     assert cleaned == "Acceleration is a political project in this reading."
 
 
+def test_editorial_ellipsis_brackets_are_removed() -> None:
+    cleaned = format_for_tts("The model is ‘probably […] the twofold birth’ of birds.")
+    assert "[...]" not in cleaned
+    assert "probably the twofold birth" in cleaned
+
+
+def test_urbanomic_bibliographic_paren_is_shortened() -> None:
+    cleaned = format_for_tts(
+        "its model ‘probably […] the “twofold birth” of birds’ (M. Eliade, "
+        "Rites and Symbols of Initiation, tr. W.R. Trask [New York: Harper Colophon, 1958], "
+        "53–58; on the ‘second birth’, see also C. Kerslake, Deleuze and the Unconscious "
+        "[London: Bloomsbury, 2007], 81–82)."
+    )
+    assert "Harper" not in cleaned
+    assert "53" not in cleaned
+    assert "Kerslake" not in cleaned
+    assert "[...]" not in cleaned
+    assert "Eliade in Rites and Symbols of Initiation" in cleaned
+
+
+def test_see_especially_biblio_paren_is_shortened() -> None:
+    cleaned = format_for_tts(
+        "Dalcq belongs to a sensitive moment (see especially Deleuze, "
+        "Difference and Repetition, 250–52) in embryology."
+    )
+    assert "250" not in cleaned
+    assert "Deleuze in Difference and Repetition" in cleaned
+
+
 def test_place_year_parenthetical_is_left_alone() -> None:
     source = "They met in winter (Paris, 2012) and stayed in (New York, 2012) later."
     assert format_for_tts(source) == source
@@ -463,6 +492,8 @@ def test_default_clean_prompt_covers_new_rules() -> None:
     assert "the third of September, twenty twenty-six" in DEFAULT_CLEAN_PROMPT
     assert "in other words" in DEFAULT_CLEAN_PROMPT
     assert "Wrote Mark Fisher in twenty twelve." in DEFAULT_CLEAN_PROMPT
+    assert "page numbers" in DEFAULT_CLEAN_PROMPT
+    assert "[...]" in DEFAULT_CLEAN_PROMPT
     cfg = load_config()
     assert "in other words" in cfg.llm.clean_prompt
     assert cfg.tts.voice == "af_bella"

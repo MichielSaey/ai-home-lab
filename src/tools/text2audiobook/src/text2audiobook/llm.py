@@ -19,7 +19,7 @@ SYSTEM_PROMPT = "You prepare book text for text-to-speech narration."
 
 # Cleanup output guard: outside these bounds the LLM response is rejected
 # (commentary, truncation, or runaway generation) and the raw chunk is used.
-MIN_CLEANED_RATIO = 0.4
+MIN_CLEANED_RATIO = 0.25
 MAX_CLEANED_RATIO = 2.5
 
 
