@@ -74,32 +74,127 @@ def test_plain_bibliography_heading_is_removed() -> None:
 def test_citation_only_endnote_is_dropped_but_notes_prose_kept() -> None:
     text = format_for_tts(
         "Cute remains cryptic.\n"
-        "38\n"
+        "36\n"
         "and empty of sapience.\n\n"
         "Notes\n"
         "35\n. Harris,\nCute, Quaint, Hungry and Romantic\n, 20.\n"
         "36\n. Humpty Dumpty is a can(n)onical eggman and arche-grammatologist of "
         "language after the crack.\n"
     )
-    assert "Cute remains cryptic." in text
-    assert "and empty of sapience." in text
-    assert "38" not in text
     assert "Harris" not in text
-    assert "Humpty Dumpty is a can(n)onical eggman" in text
+    assert "Footnote." in text
+    assert text.index("Cute remains cryptic.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Humpty Dumpty")
+    assert text.index("Humpty Dumpty") < text.index("and empty of sapience.")
 
 
 def test_footnote_callout_and_see_note_are_stripped() -> None:
     text = format_for_tts(
         "Burikko is closer to aegyo [see note 55] and sajiao.\n"
         "34\n"
-        "Cute diffuses across surfaces."
+        "Cute diffuses across surfaces.\n\n"
+        "Notes\n"
+        "34\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+        "55\n. Ngai, Our Aesthetic Categories, 4."
     )
     assert "see note" not in text.lower()
-    assert "34" not in text
-    assert "Burikko is closer to aegyo  and sajiao." in text or (
-        "Burikko is closer to aegyo and sajiao." in text
-    )
+    assert re.search(r"(?m)^34\s*$", text) is None
+    assert "Harris" not in text
+    assert "Ngai" not in text
+    assert "Footnote." not in text
+    assert "Burikko is closer to aegyo" in text
+    assert "and sajiao." in text
     assert "Cute diffuses across surfaces." in text
+
+
+def test_see_note_inserts_discursive_footnote() -> None:
+    text = format_for_tts(
+        "Burikko is closer to aegyo [see note 55] and sajiao.\n\n"
+        "Notes\n"
+        "55\n. Aegyo is a performative mode of sweetness with its own grammar of voice."
+    )
+    assert "see note" not in text.lower()
+    assert "Footnote." in text
+    assert text.index("closer to aegyo") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Aegyo is a performative")
+    assert text.index("Aegyo is a performative") < text.index("and sajiao.")
+
+
+def test_duplicate_note_number_prefers_discursive_body() -> None:
+    text = format_for_tts(
+        "Claim stands.\n"
+        "7\n"
+        "Next sentence.\n\n"
+        "Notes\n"
+        "7\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+        "7\n. Discursive expansion about cuteness as an inhuman dynamic of surfaces."
+    )
+    assert "Harris" not in text
+    assert "Discursive expansion about cuteness" in text
+    assert text.index("Claim stands.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Next sentence.")
+
+
+def test_second_format_pass_keeps_digits_inside_footnotes() -> None:
+    source = (
+        "Claim stands.\n"
+        "8\n"
+        "Next sentence.\n\n"
+        "Notes\n"
+        "8\n. The count was\n42\nand then the argument continued about cuteness."
+    )
+    chapters = [
+        Chapter(index=0, title="One", text=source, slug="one"),
+    ]
+    prepared = prepare_chapters_for_tts(chapters)[0].text
+    assert "42" in prepared
+    again = format_for_tts(prepared)
+    assert "42" in again
+    assert again.count("Footnote.") == prepared.count("Footnote.")
+
+
+def test_see_notes_range_inserts_each_discursive_note() -> None:
+    text = format_for_tts(
+        "See the twin asides [see notes 1-3] in order.\n\n"
+        "Notes\n"
+        "1\n. First discursive aside about surfaces.\n"
+        "2\n. Middle discursive aside about curves.\n"
+        "3\n. Third discursive aside about bobbles."
+    )
+    assert text.index("twin asides") < text.index("First discursive")
+    assert text.index("First discursive") < text.index("Middle discursive")
+    assert text.index("Middle discursive") < text.index("Third discursive")
+    assert text.index("Third discursive") < text.index("in order.")
+    assert text.count("Footnote.") == 3
+
+
+def test_chunked_format_pass_keeps_digits_without_footnote_cue() -> None:
+    # Simulate a format window that split away from the Footnote. cue.
+    window = "The count was\n42\nand then the argument continued about cuteness."
+    assert format_for_tts(window) == (
+        "The count was\n42\nand then the argument continued about cuteness."
+    )
+
+
+def test_see_note_consumes_below_and_trailing_punct() -> None:
+    text = format_for_tts(
+        "Read on (see note 9 below). Next claim.\n\n"
+        "Notes\n"
+        "9\n. Discursive clarification about the prior claim."
+    )
+    assert "below" not in text.lower()
+    assert "Footnote." in text
+    assert "Discursive clarification" in text
+    assert "Read on." in text
+    assert text.index("Read on.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Next claim.")
+
+
+def test_orphan_see_note_without_notes_section_is_stripped() -> None:
+    text = format_for_tts("Burikko is closer to aegyo [see note 55] and sajiao.")
+    assert "see note" not in text.lower()
+    assert "Burikko is closer to aegyo" in text
+    assert "and sajiao." in text
 
 
 def test_short_discursive_note_is_kept() -> None:
@@ -108,6 +203,7 @@ def test_short_discursive_note_is_kept() -> None:
         "15\n. Even the norm daddies can’t help yielding to the pleasure of telling you what to do."
     )
     assert "norm daddies" in text
+    assert "Footnote." in text
     assert "Main claim." in text
 
 
@@ -119,14 +215,14 @@ def test_see_opener_without_biblio_signals_is_kept() -> None:
     assert "hyperplastic supernormal stimuli" in text
 
 
-def test_prepare_chapters_scrubs_citations_before_chunking() -> None:
+def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     chapters = [
         Chapter(
             index=4,
             title="Topology of Bobbles",
             text=(
                 "Cuddles have no interiority.\n"
-                "35\n"
+                "36\n"
                 "Cute stays cryptic.\n\n"
                 "Notes\n"
                 "35\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
@@ -137,11 +233,13 @@ def test_prepare_chapters_scrubs_citations_before_chunking() -> None:
     ]
     prepared = prepare_chapters_for_tts(chapters)
     assert len(prepared) == 1
-    assert "Cuddles have no interiority." in prepared[0].text
-    assert "Cute stays cryptic." in prepared[0].text
-    assert "Harris" not in prepared[0].text
-    assert "Discursive note about eggmen" in prepared[0].text
-    assert re.search(r"(?m)^35\s*$", prepared[0].text) is None
+    text = prepared[0].text
+    assert "Harris" not in text
+    assert "Footnote." in text
+    assert text.index("Cuddles have no interiority.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Discursive note about eggmen")
+    assert text.index("Discursive note about eggmen") < text.index("Cute stays cryptic.")
+    assert re.search(r"(?m)^36\s*$", text) is None
 
 
 def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
