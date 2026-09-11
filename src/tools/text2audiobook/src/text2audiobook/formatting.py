@@ -441,6 +441,17 @@ def is_citation_only_note(text: str) -> bool:
     return False
 
 
+def _prefer_note_body(existing: str, incoming: str) -> str:
+    """On duplicate note numbers, keep discursive text over a citation stub."""
+    existing_cite = is_citation_only_note(existing)
+    incoming_cite = is_citation_only_note(incoming)
+    if existing_cite and not incoming_cite:
+        return incoming
+    if incoming_cite and not existing_cite:
+        return existing
+    return incoming if len(incoming) > len(existing) else existing
+
+
 def _iter_endnote_entries(notes_body: str) -> tuple[str, dict[str, str]]:
     """Split a Notes section into leading preamble plus numbered entry bodies."""
     matches = list(_ENDNOTE_ENTRY_START_RE.finditer(notes_body))
@@ -451,7 +462,12 @@ def _iter_endnote_entries(notes_body: str) -> tuple[str, dict[str, str]]:
     for index, match in enumerate(matches):
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(notes_body)
-        entries[match.group("num")] = notes_body[start:end].strip()
+        num = match.group("num")
+        body = notes_body[start:end].strip()
+        if num in entries:
+            entries[num] = _prefer_note_body(entries[num], body)
+        else:
+            entries[num] = body
     return preamble, entries
 
 
@@ -484,7 +500,11 @@ def _extract_notes_apparatus(text: str) -> tuple[str, str, dict[str, str]]:
         preamble, block_entries = _iter_endnote_entries("\n".join(block_lines))
         if preamble:
             preambles.append(preamble)
-        entries.update(block_entries)
+        for num, body in block_entries.items():
+            if num in entries:
+                entries[num] = _prefer_note_body(entries[num], body)
+            else:
+                entries[num] = body
     return "\n".join(rebuilt), "\n\n".join(preambles), entries
 
 

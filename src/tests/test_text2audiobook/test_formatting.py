@@ -114,6 +114,21 @@ def test_see_note_inserts_discursive_footnote() -> None:
     assert text.index("Aegyo is a performative") < text.index("and sajiao.")
 
 
+def test_duplicate_note_number_prefers_discursive_body() -> None:
+    text = format_for_tts(
+        "Claim stands.\n"
+        "7\n"
+        "Next sentence.\n\n"
+        "Notes\n"
+        "7\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+        "7\n. Discursive expansion about cuteness as an inhuman dynamic of surfaces."
+    )
+    assert "Harris" not in text
+    assert "Discursive expansion about cuteness" in text
+    assert text.index("Claim stands.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Next sentence.")
+
+
 def test_short_discursive_note_is_kept() -> None:
     text = format_for_tts(
         "Main claim.\n\nNotes\n"
