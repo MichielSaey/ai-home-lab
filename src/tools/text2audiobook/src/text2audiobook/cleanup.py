@@ -32,7 +32,7 @@ from text2audiobook.formatting import (
 )
 from text2audiobook.io import Chapter
 
-CLEANER_VERSION = "1"
+CLEANER_VERSION = "2"
 FOOTNOTE_END_MARKER = "End of footnote."
 
 _FN_TOKEN_RE = re.compile(r"⟦FN:(\d+[a-z]?)⟧\.?")
@@ -112,17 +112,34 @@ def apply_deterministic_cleanup(
 
 
 def _attach_callout_tokens(body: str) -> str:
-    """Place footnote callouts as tokens; keep them after finished sentences."""
+    """Place footnote callouts as tokens at unit boundaries.
+
+    A callout on its own line ends the previous unit when that line already
+    finishes a sentence (``.!?``) **or** when the following line starts a new
+    unit (capital letter / non-lowercase continuation). Only glue the token
+    into the previous line when the next line clearly continues mid-sentence
+    (lowercase), e.g. ``superflatness,\\n38\\nand for…``.
+    """
+    lines = body.splitlines()
     lines_out: list[str] = []
     sentence_end = re.compile(r'[.!?…]["\'\)\]]*\s*$')
-    for line in body.splitlines():
+
+    def _next_content(index: int) -> str:
+        for later in lines[index + 1 :]:
+            if later.strip() and not _FOOTNOTE_CALLOUT_LINE_RE.match(later):
+                return later.strip()
+        return ""
+
+    for index, line in enumerate(lines):
         if _FOOTNOTE_CALLOUT_LINE_RE.match(line):
             token = f"⟦FN:{line.strip()}⟧"
-            if lines_out and sentence_end.search(lines_out[-1]):
-                lines_out.append(token)
-            elif lines_out:
-                lines_out[-1] = f"{lines_out[-1].rstrip()} {token}"
+            prev = lines_out[-1] if lines_out else ""
+            nxt = _next_content(index)
+            continues = bool(nxt) and nxt[:1].islower()
+            if lines_out and continues and not sentence_end.search(prev):
+                lines_out[-1] = f"{prev.rstrip()} {token}"
             else:
+                # Newline before a new unit (or after .!?) counts as sentence end.
                 lines_out.append(token)
             continue
         lines_out.append(_SEE_NOTE_NUM_RE.sub(_see_note_to_tokens, line))
