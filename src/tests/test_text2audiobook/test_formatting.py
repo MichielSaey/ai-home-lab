@@ -178,13 +178,21 @@ def test_chunked_format_pass_keeps_digits_without_footnote_cue() -> None:
 
 def test_see_note_consumes_below_and_trailing_punct() -> None:
     text = format_for_tts(
-        "Read on (see note 9 below).\n\n"
+        "Read on (see note 9 below). Next claim.\n\n"
         "Notes\n"
         "9\n. Discursive clarification about the prior claim."
     )
     assert "below" not in text.lower()
     assert "Footnote." in text
     assert "Discursive clarification" in text
+    assert "Next claim." in text
+
+
+def test_orphan_see_note_without_notes_section_is_stripped() -> None:
+    text = format_for_tts("Burikko is closer to aegyo [see note 55] and sajiao.")
+    assert "see note" not in text.lower()
+    assert "Burikko is closer to aegyo" in text
+    assert "and sajiao." in text
 
 
 def test_short_discursive_note_is_kept() -> None:

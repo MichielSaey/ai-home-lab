@@ -185,7 +185,7 @@ _AUTHOR_START_RE = re.compile(
 FOOTNOTE_SPOKEN_MARKER = "Footnote."
 _SEE_NOTE_NUM_RE = re.compile(
     r"\[?\(?\s*see\s+notes?\s+(?P<nums>\d+[a-z]?(?:\s*[-–,;—]\s*\d+[a-z]?)*)"
-    r"(?:\s+below)?\s*\)?\]?\.?",
+    r"(?:\s+below)?\s*\)?\]?",
     re.IGNORECASE,
 )
 
@@ -569,9 +569,10 @@ def relocate_footnotes(text: str) -> str:
     """
     body, preamble, entries = _extract_notes_apparatus(text)
     if not entries and not preamble:
-        # Already relocated, or no Notes apparatus. Do not strip lone digits —
-        # format windows may split a footnote body away from its Footnote. cue.
-        return body
+        # Already relocated, or no Notes apparatus. Clear orphan see-note
+        # pointers only — never strip lone digit lines (format windows may
+        # split a footnote body away from its Footnote. cue).
+        return _SEE_NOTE_NUM_RE.sub("", body)
 
     used: set[str] = set()
     out_lines: list[str] = []
