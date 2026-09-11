@@ -236,6 +236,7 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     text = prepared[0].text
     assert "Harris" not in text
     assert "Footnote." in text
+    assert "End of footnote." in text
     assert text.index("Cuddles have no interiority.") < text.index("Footnote.")
     assert text.index("Footnote.") < text.index("Discursive note about eggmen")
     assert text.index("Discursive note about eggmen") < text.index("Cute stays cryptic.")

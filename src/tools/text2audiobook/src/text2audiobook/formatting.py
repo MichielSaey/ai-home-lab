@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from dataclasses import replace
+from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
 
@@ -748,15 +748,12 @@ def format_for_tts(
     return _collapse_whitespace(text)
 
 
-def prepare_chapters_for_tts(chapters: list[Chapter]) -> list[Chapter]:
-    """Drop reference-only chapters and relocate footnotes before chunking."""
-    prepared: list[Chapter] = []
-    for chapter in chapters:
-        if is_references_heading(chapter.title):
-            continue
-        text = strip_reference_sections(chapter.text)
-        text = scrub_citations_for_tts(text)
-        if not text.strip():
-            continue
-        prepared.append(replace(chapter, text=text))
-    return prepared
+def prepare_chapters_for_tts(
+    chapters: list[Chapter],
+    *,
+    source_kind: str = "ebook",
+) -> list[Chapter]:
+    """Compatibility wrapper around the clean-stage split/scrub."""
+    from text2audiobook.cleanup import prepare_chapters_for_tts as prepare
+
+    return prepare(chapters, source_kind=source_kind)

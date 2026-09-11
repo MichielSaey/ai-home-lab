@@ -1,4 +1,4 @@
-"""v2 orchestration: extract → format → speak stems, sequential GPU, optional --stage."""
+"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional --stage."""
 
 from __future__ import annotations
 
@@ -17,9 +17,14 @@ from typing import Any
 from text2audiobook import formats  # noqa: F401 — register built-in readers
 from text2audiobook.audio import build_m4b, encode_chapter_mp3
 from text2audiobook.catalog import select_chapters
+from text2audiobook.cleanup import (
+    CLEANER_VERSION,
+    chapters_from_clean_sections,
+    clean_chapters,
+)
 from text2audiobook.chunking import TextChunk, build_chunks, build_speak_units
 from text2audiobook.config import AppConfig, TtsConfig
-from text2audiobook.formatting import FORMATTER_VERSION, prepare_chapters_for_tts
+from text2audiobook.formatting import FORMATTER_VERSION
 from text2audiobook.gpu import resolve_tts_device
 from text2audiobook.io import BookMetadata, find_sources, infer_source_kind, parse_source
 from text2audiobook.llm import (
@@ -37,12 +42,15 @@ from text2audiobook.stems import (
     append_jsonl,
     canonical_stages,
     chapters_to_payload,
+    clean_sections_hash,
     file_sha256,
     format_scripts_hash,
+    load_clean_sections,
     load_extract_chapters,
     load_format_scripts,
     load_jsonl,
     manifest_matches,
+    save_clean_sections,
     save_extract_chapters,
     save_format_script,
     stable_hash,
@@ -264,8 +272,19 @@ def process_source(
             force=force,
             ensure_llm=ensure_llm,
         )
-        scripts = _run_format(
+        cleaned_chapters = _run_clean(
             chapters,
+            metadata=metadata,
+            source_kind=source_kind,
+            config=config,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            selected=selected,
+            force=force,
+        )
+        scripts = _run_format(
+            cleaned_chapters,
             metadata=metadata,
             source_kind=source_kind,
             config=config,
@@ -305,7 +324,7 @@ def process_source(
             if loaded_here:
                 unload_kokoro(own_kokoro)
                 own_kokoro = None
-        elif "format" in selected or "extract" in selected:
+        elif "format" in selected or "clean" in selected or "extract" in selected:
             tracker.finish_book(record, status="ok")
     finally:
         if own_llm is not None:
@@ -361,10 +380,19 @@ def _extract_fingerprint(
     }
 
 
-def _format_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str) -> dict[str, Any]:
+def _clean_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str) -> dict[str, Any]:
     return {
         "version": 2,
         "extract_hash": extract_hash,
+        "cleaner_version": CLEANER_VERSION,
+        "source_kind": source_kind,
+    }
+
+
+def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str) -> dict[str, Any]:
+    return {
+        "version": 2,
+        "clean_hash": clean_hash,
         "formatter_version": FORMATTER_VERSION,
         "source_kind": source_kind,
         "llm_model_id": config.llm.model_id,
@@ -399,8 +427,8 @@ def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
     data = json.loads(stems.format_manifest.read_text(encoding="utf-8")) if stems.format_manifest.exists() else {}
     if isinstance(data, dict) and data.get("source_kind"):
         source_kind = str(data["source_kind"])
-    extract_hash = file_sha256(stems.chapters_json) if stems.chapters_json.exists() else ""
-    fingerprint = _format_fingerprint(config, extract_hash=extract_hash, source_kind=source_kind)
+    clean_hash = clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
+    fingerprint = _format_fingerprint(config, clean_hash=clean_hash, source_kind=source_kind)
     return stable_hash({**fingerprint, "scripts_hash": format_scripts_hash(stems)})
 
 
@@ -476,6 +504,79 @@ def _run_extract(
     return chapters
 
 
+def _run_clean(
+    chapters: list,
+    *,
+    metadata: BookMetadata,
+    source_kind: str,
+    config: AppConfig,
+    stems: BookStems,
+    tracker: RunTracker,
+    record: BookRecord,
+    selected: tuple[str, ...],
+    force: bool,
+) -> list:
+    extract_hash = file_sha256(stems.chapters_json)
+    fingerprint = _clean_fingerprint(
+        config, extract_hash=extract_hash, source_kind=source_kind
+    )
+    clean_ok = (
+        manifest_matches(stems.clean_manifest, fingerprint)
+        and stems.clean_sections_jsonl.exists()
+        and stems.clean_chapters_index.exists()
+    )
+
+    if "clean" not in selected:
+        if ("format" in selected or "speak" in selected) and not clean_ok:
+            raise FileNotFoundError(
+                f"Clean stem missing for {metadata.title!r}. Run --clean or --stage clean first."
+            )
+        if not clean_ok:
+            return chapters
+        sections = load_clean_sections(stems)
+        return chapters_from_clean_sections(sections)
+
+    if clean_ok and not force:
+        logger.info("Clean stem current — skipping deterministic cleanup")
+        sections = load_clean_sections(stems)
+        record.chapter_count = len({section.chapter_index for section in sections})
+        record.chunk_count = len(sections)
+        record.word_count = sum(len(section.text.split()) for section in sections)
+        tracker.write()
+        return chapters_from_clean_sections(sections)
+
+    if force and stems.clean_dir.exists():
+        shutil.rmtree(stems.clean_dir)
+
+    with tracker.stage(record, "clean"):
+        sections = clean_chapters(chapters, source_kind=source_kind)
+    if not sections:
+        raise ValueError(
+            f"No sections left after clean stage for {metadata.title!r}"
+        )
+
+    save_clean_sections(stems, sections)
+    write_json(
+        stems.clean_manifest,
+        {
+            **fingerprint,
+            "sections_hash": clean_sections_hash(stems),
+            "section_count": len(sections),
+            "chapter_count": len({section.chapter_index for section in sections}),
+        },
+    )
+    record.chapter_count = len({section.chapter_index for section in sections})
+    record.chunk_count = len(sections)
+    record.word_count = sum(len(section.text.split()) for section in sections)
+    tracker.write()
+    logger.info(
+        "Wrote clean stem (%d section(s) across %d chapter(s))",
+        len(sections),
+        record.chapter_count,
+    )
+    return chapters_from_clean_sections(sections)
+
+
 def _run_format(
     chapters: list,
     *,
@@ -490,8 +591,12 @@ def _run_format(
     force: bool,
     ensure_llm,
 ) -> list | None:
-    extract_hash = file_sha256(stems.chapters_json)
-    fingerprint = _format_fingerprint(config, extract_hash=extract_hash, source_kind=source_kind)
+    clean_hash = (
+        clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
+    )
+    fingerprint = _format_fingerprint(
+        config, clean_hash=clean_hash, source_kind=source_kind
+    )
     format_ok = (
         manifest_matches(stems.format_manifest, fingerprint)
         and stems.format_chapters_index.exists()
@@ -520,10 +625,11 @@ def _run_format(
     else:
         _drop_stale_format_cache(stems, fingerprint)
 
-    prepared = prepare_chapters_for_tts(chapters)
+    # Chapters are already clean-stage output (split + deterministic scrub).
+    prepared = chapters
     if not prepared:
         raise ValueError(
-            f"No chapters left after removing reference sections from {metadata.title!r}"
+            f"No chapters left after clean stage for {metadata.title!r}"
         )
 
     chunks = build_chunks(

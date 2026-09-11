@@ -39,9 +39,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=PIPELINE_STAGES,
         dest="stages",
         help=(
-            "Run only this stage (repeatable). Default: extract, format, and speak. "
+            "Run only this stage (repeatable). Default: extract, clean, format, and speak. "
             "Speak-only does not load the LLM."
         ),
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Run only the clean stage (alias for --stage clean). Requires extract stem.",
     )
     parser.add_argument(
         "--force",
@@ -81,6 +86,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     setup_logging()
     config = load_config(args.config)
 
+    stages = list(args.stages or [])
+    if args.clean and not args.stages:
+        stages = ["clean"]
+    elif args.clean:
+        stages.append("clean")
+
     source_paths: list[Path] | None = None
     if args.url:
         url_dir = config.paths.staging_dir / "_cli_urls"
@@ -92,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run(
         config,
         source_paths=source_paths,
-        stages=args.stages,
+        stages=stages or None,
         force=args.force,
         voice=args.voice,
     )
