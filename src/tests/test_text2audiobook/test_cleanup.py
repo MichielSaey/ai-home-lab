@@ -43,6 +43,50 @@ def test_split_places_discursive_footnote_after_sentence() -> None:
     assert sections.index(foot) == sections.index(body0) + 1
 
 
+def test_newline_before_capital_ends_unit_for_footnote() -> None:
+    """Attribution lines without '.' still end the unit when the next line is a new sentence."""
+    chapter = Chapter(
+        index=2,
+        title="Kawaiizome",
+        slug="kawaiizome",
+        text=(
+            "Love, honor, and serve degeneracy wherever it surfaces.\n"
+            "William Burroughs\n"
+            "1\n"
+            "The two of us rode cute/acc together.\n\n"
+            "Notes\n"
+            "1\n. Discursive note about the Burroughs attribution and Massumi."
+        ),
+    )
+    sections = split_chapter_sections(chapter)
+    assert [s.kind for s in sections[:3]] == ["body", "footnote", "body"]
+    assert "William Burroughs" in sections[0].text
+    assert "cute/acc together" not in sections[0].text
+    assert sections[1].note_number == "1"
+    assert "cute/acc together" in sections[2].text
+
+
+def test_mid_sentence_callout_waits_for_sentence_end() -> None:
+    chapter = Chapter(
+        index=4,
+        title="Topology",
+        slug="topology",
+        text=(
+            "everything flowers on a swollen superflatness,\n"
+            "38\n"
+            "and for the superficionado, there’s nothing underneath.\n\n"
+            "Notes\n"
+            "38\n. Discursive note about Murakami superflat aesthetics in detail here."
+        ),
+    )
+    sections = split_chapter_sections(chapter)
+    body = next(s for s in sections if s.kind == "body")
+    foot = next(s for s in sections if s.kind == "footnote")
+    assert "superflatness" in body.text
+    assert "superficionado" in body.text
+    assert sections.index(foot) == sections.index(body) + 1
+
+
 def test_clean_chapters_drops_reference_only_chapter() -> None:
     chapters = [
         Chapter(index=0, title="One", text="Narrative stays here.", slug="one"),
