@@ -428,7 +428,8 @@ def is_citation_only_note(text: str) -> bool:
     score = sum((has_page, has_pub, has_url, has_see, has_author))
     if score >= 2:
         return True
-    if score >= 1 and len(words) <= 25 and (has_page or has_pub or has_url or has_see):
+    # A lone "See …" opener is not enough — short discursive asides use it too.
+    if len(words) <= 25 and (has_page or has_pub or has_url):
         return True
     return False
 

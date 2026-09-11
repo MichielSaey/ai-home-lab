@@ -111,6 +111,14 @@ def test_short_discursive_note_is_kept() -> None:
     assert "Main claim." in text
 
 
+def test_see_opener_without_biblio_signals_is_kept() -> None:
+    text = format_for_tts(
+        "Main claim.\n\nNotes\n"
+        "41\n. See Mackay for the fuller account of hyperplastic supernormal stimuli in practice."
+    )
+    assert "hyperplastic supernormal stimuli" in text
+
+
 def test_prepare_chapters_scrubs_citations_before_chunking() -> None:
     chapters = [
         Chapter(
