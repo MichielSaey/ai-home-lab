@@ -17,9 +17,8 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = "You prepare book text for text-to-speech narration."
 
-# Cleanup output guard: outside these bounds the LLM response is rejected
-# (commentary, truncation, or runaway generation) and the raw chunk is used.
-MIN_CLEANED_RATIO = 0.25
+# Cleanup output guard: reject empty replies or runaway generation (too long).
+# There is no minimum length floor — citation-heavy chunks may shrink a lot.
 MAX_CLEANED_RATIO = 2.5
 
 
@@ -103,7 +102,7 @@ def _guard_cleaned(
     if raw_words == 0:
         return cleaned
     ratio = cleaned_words / raw_words
-    if not cleaned or ratio < MIN_CLEANED_RATIO or ratio > MAX_CLEANED_RATIO:
+    if not cleaned.strip() or ratio > MAX_CLEANED_RATIO:
         where = ""
         if chapter_index is not None and chunk_index is not None:
             title = f" ({chapter_title})" if chapter_title else ""
