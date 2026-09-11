@@ -129,6 +129,37 @@ def test_duplicate_note_number_prefers_discursive_body() -> None:
     assert text.index("Footnote.") < text.index("Next sentence.")
 
 
+def test_second_format_pass_keeps_digits_inside_footnotes() -> None:
+    source = (
+        "Claim stands.\n"
+        "8\n"
+        "Next sentence.\n\n"
+        "Notes\n"
+        "8\n. The count was\n42\nand then the argument continued about cuteness."
+    )
+    chapters = [
+        Chapter(index=0, title="One", text=source, slug="one"),
+    ]
+    prepared = prepare_chapters_for_tts(chapters)[0].text
+    assert "42" in prepared
+    again = format_for_tts(prepared)
+    assert "42" in again
+    assert again.count("Footnote.") == prepared.count("Footnote.")
+
+
+def test_see_notes_range_inserts_each_discursive_note() -> None:
+    text = format_for_tts(
+        "See the twin asides [see notes 1-2] in order.\n\n"
+        "Notes\n"
+        "1\n. First discursive aside about surfaces.\n"
+        "2\n. Second discursive aside about bobbles."
+    )
+    assert text.index("twin asides") < text.index("First discursive")
+    assert text.index("First discursive") < text.index("Second discursive")
+    assert text.index("Second discursive") < text.index("in order.")
+    assert text.count("Footnote.") == 2
+
+
 def test_short_discursive_note_is_kept() -> None:
     text = format_for_tts(
         "Main claim.\n\nNotes\n"

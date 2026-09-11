@@ -184,7 +184,7 @@ _AUTHOR_START_RE = re.compile(
 # Spoken cue when a discursive endnote is inlined after its callout.
 FOOTNOTE_SPOKEN_MARKER = "Footnote."
 _SEE_NOTE_NUM_RE = re.compile(
-    r"\[?\s*see\s+notes?\s+(?P<num>\d+[a-z]?)(?:\s*[-–,]\s*\d+[a-z]?)?\s*\]?",
+    r"\[?\s*see\s+notes?\s+(?P<nums>\d+[a-z]?(?:\s*[-–,;]\s*\d+[a-z]?)*)\s*\]?",
     re.IGNORECASE,
 )
 
@@ -534,8 +534,12 @@ def _replace_see_note_pointers(
     cursor = 0
     for match in _SEE_NOTE_NUM_RE.finditer(line):
         pieces.append(line[cursor : match.start()])
-        block = _consume_footnote(match.group("num"), entries, used)
-        pieces.append(f"\n\n{block}\n\n" if block else "")
+        blocks = [
+            block
+            for num in re.findall(r"\d+[a-z]?", match.group("nums"))
+            if (block := _consume_footnote(num, entries, used))
+        ]
+        pieces.append(("\n\n" + "\n\n".join(blocks) + "\n\n") if blocks else "")
         cursor = match.end()
     pieces.append(line[cursor:])
     return "".join(pieces)
@@ -552,6 +556,10 @@ def relocate_footnotes(text: str) -> str:
     """
     body, preamble, entries = _extract_notes_apparatus(text)
     if not entries and not preamble:
+        # Already relocated (or never had Notes). Do not strip lone digits inside
+        # inlined footnote prose on a second format_for_tts pass.
+        if FOOTNOTE_SPOKEN_MARKER in body:
+            return body
         return strip_footnote_callouts(body)
 
     used: set[str] = set()
