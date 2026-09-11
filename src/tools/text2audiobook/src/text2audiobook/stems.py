@@ -222,8 +222,7 @@ def clean_sections_hash(stems: BookStems) -> str:
                 "section_index": row.get("section_index"),
                 "kind": row.get("kind"),
                 "note_number": row.get("note_number"),
-                "text_hash": row.get("text_hash")
-                or hashlib.sha256(str(row.get("text", "")).encode()).hexdigest(),
+                "text_hash": hashlib.sha256(str(row.get("text", "")).encode()).hexdigest(),
             }
             for row in rows
         ]

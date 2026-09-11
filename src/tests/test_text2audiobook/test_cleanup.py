@@ -1,5 +1,7 @@
 """Tests for the deterministic clean stage (split + scrub)."""
 
+import re
+
 from text2audiobook.cleanup import (
     FOOTNOTE_END_MARKER,
     clean_chapters,
@@ -31,6 +33,7 @@ def test_split_places_discursive_footnote_after_sentence() -> None:
     body0 = next(section for section in sections if section.kind == "body")
     foot = next(section for section in sections if section.kind == "footnote")
     assert "Cuddles have no interiority." in body0.text
+    assert re.search(r"(?m)^\s*\.\s*$", body0.text) is None
     assert foot.note_number == "36"
     assert FOOTNOTE_SPOKEN_MARKER in foot.text
     assert FOOTNOTE_END_MARKER in foot.text

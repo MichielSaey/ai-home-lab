@@ -35,7 +35,7 @@ from text2audiobook.io import Chapter
 CLEANER_VERSION = "1"
 FOOTNOTE_END_MARKER = "End of footnote."
 
-_FN_TOKEN_RE = re.compile(r"⟦FN:(\d+[a-z]?)⟧")
+_FN_TOKEN_RE = re.compile(r"⟦FN:(\d+[a-z]?)⟧\.?")
 _URL_RE = re.compile(
     r"""
     <\s*https?://[^>\s]+>
@@ -142,7 +142,9 @@ def _sentence_note_numbers(sentence: str) -> list[str]:
 
 def _strip_fn_tokens(sentence: str) -> str:
     text = _FN_TOKEN_RE.sub("", sentence)
-    return re.sub(r"[ \t]{2,}", " ", text).strip()
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"(?m)^\s*\.\s*$", "", text)
+    return text.strip()
 
 
 def split_chapter_sections(

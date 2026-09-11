@@ -324,7 +324,7 @@ def process_source(
             if loaded_here:
                 unload_kokoro(own_kokoro)
                 own_kokoro = None
-        elif "format" in selected or "extract" in selected:
+        elif "format" in selected or "clean" in selected or "extract" in selected:
             tracker.finish_book(record, status="ok")
     finally:
         if own_llm is not None:
