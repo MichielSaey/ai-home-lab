@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "4"
+FORMATTER_VERSION = "5"
 
 _MONTHS = (
     "January",
@@ -105,8 +105,6 @@ _REFERENCES_HEADING_RE = re.compile(
         | notes\s+and\s+references
         | notes\s+and\s+bibliography
         | endnotes
-        | footnotes?
-        | notes
         | citations
         | further\s+reading
         | sources
@@ -146,6 +144,42 @@ _PAREN_CITE_RE = re.compile(
 )
 
 _NUMERIC_REF_RE = re.compile(r"\s*\[\d+(?:\s*[-–,;]\s*\d+)*\]")
+
+# Mid-body footnote callouts broken onto their own line (Urbanomic EPUB style).
+_FOOTNOTE_CALLOUT_LINE_RE = re.compile(r"(?m)^\d{1,3}\s*$")
+_SEE_NOTE_RE = re.compile(
+    r"\[?\s*see\s+notes?\s+\d+[a-z]?(?:\s*[-–,]\s*\d+[a-z]?)?\s*\]?",
+    re.IGNORECASE,
+)
+
+# Chapter-end note apparatus we keep for discursive content, but scrub cites from.
+_NOTES_APPARATUS_HEADING_RE = re.compile(
+    r"""
+    ^
+    (?:\#{1,6}\s+)?
+    [\*"'_]*
+    (?:notes|footnotes)
+    [\*"'_]*
+    \s*[:.]?
+    \s*
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_ENDNOTE_ENTRY_START_RE = re.compile(r"(?m)^(?P<num>\d{1,3})\s*(?:\n\.\s*|\.\s+)")
+_PAGE_CITE_RE = re.compile(
+    r"(?:,\s*\d+[a-z]?(?:\s*[-–—]\s*\d+[a-z]?)?\s*\.?$|\bpp?\.\s*\d+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PUBLISHER_CITE_RE = re.compile(
+    r"\([^)]*(?:Press|University|Verlag|Macmillan|Urbanomic|Publisher|Editionen|Madra|Tuttle)",
+    re.IGNORECASE,
+)
+_URL_CITE_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_SEE_WORK_RE = re.compile(r"^See\s+[A-Z]", re.MULTILINE)
+_AUTHOR_START_RE = re.compile(
+    r"^(?:[A-Z]\.\s*)+[A-Z][A-Za-z'’.-]+|^[A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+)?,",
+)
 
 _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\be\.i\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "in other words"),
@@ -371,6 +405,87 @@ def simplify_inline_citations(text: str) -> str:
     return text
 
 
+def strip_footnote_callouts(text: str) -> str:
+    """Remove bare footnote markers and 'see note N' pointers from running text."""
+    text = _FOOTNOTE_CALLOUT_LINE_RE.sub("", text)
+    text = _SEE_NOTE_RE.sub("", text)
+    return text
+
+
+def is_citation_only_note(text: str) -> bool:
+    """True when an endnote is bibliographic rather than discursive prose."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    words = stripped.split()
+    if len(words) > 80:
+        return False
+    has_page = bool(_PAGE_CITE_RE.search(stripped))
+    has_pub = bool(_PUBLISHER_CITE_RE.search(stripped))
+    has_url = bool(_URL_CITE_RE.search(stripped))
+    has_see = bool(_SEE_WORK_RE.search(stripped))
+    has_author = bool(_AUTHOR_START_RE.match(stripped))
+    score = sum((has_page, has_pub, has_url, has_see, has_author))
+    if score >= 2:
+        return True
+    # A lone "See …" opener is not enough — short discursive asides use it too.
+    if len(words) <= 25 and (has_page or has_pub or has_url):
+        return True
+    return False
+
+
+def _iter_endnote_entries(notes_body: str) -> tuple[str, list[str]]:
+    """Split a Notes section into leading preamble plus numbered entry bodies."""
+    matches = list(_ENDNOTE_ENTRY_START_RE.finditer(notes_body))
+    if not matches:
+        return notes_body.strip(), []
+    preamble = notes_body[: matches[0].start()].strip()
+    entries: list[str] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(notes_body)
+        entries.append(notes_body[start:end].strip())
+    return preamble, entries
+
+
+def scrub_notes_citations(text: str) -> str:
+    """Keep discursive Notes/Footnotes content; drop citation-only endnotes."""
+    lines = text.splitlines()
+    rebuilt: list[str] = []
+    index = 0
+    while index < len(lines):
+        if not _NOTES_APPARATUS_HEADING_RE.match(_heading_text(lines[index])):
+            rebuilt.append(lines[index])
+            index += 1
+            continue
+        index += 1
+        block_lines: list[str] = []
+        while index < len(lines):
+            heading = _heading_text(lines[index])
+            if is_references_heading(heading) or _is_resume_heading(lines[index]):
+                break
+            if _NOTES_APPARATUS_HEADING_RE.match(heading):
+                break
+            block_lines.append(lines[index])
+            index += 1
+        preamble, entries = _iter_endnote_entries("\n".join(block_lines))
+        kept = [preamble] if preamble else []
+        kept.extend(entry for entry in entries if entry and not is_citation_only_note(entry))
+        if kept:
+            rebuilt.append("")
+            rebuilt.extend(kept)
+            rebuilt.append("")
+    return "\n".join(rebuilt).strip()
+
+
+def scrub_citations_for_tts(text: str) -> str:
+    """Drop citation-only notes and footnote callouts; keep discursive note prose."""
+    # Notes apparatus first — callout stripping would eat endnote markers (`35\\n.`).
+    text = scrub_notes_citations(text)
+    text = strip_footnote_callouts(text)
+    return text
+
+
 def _collapse_whitespace(text: str) -> str:
     text = _WHITESPACE_RE.sub(" ", text)
     text = _BLANK_LINES_RE.sub("\n\n", text)
@@ -485,6 +600,7 @@ def format_for_tts(
 ) -> str:
     """Rewrite a chunk so Kokoro hears spoken forms instead of print conventions."""
     text = strip_reference_sections(text)
+    text = scrub_citations_for_tts(text)
     text = replace_tables_and_figures(
         text, chapter_title=chapter_title, source_kind=source_kind
     )
@@ -498,12 +614,13 @@ def format_for_tts(
 
 
 def prepare_chapters_for_tts(chapters: list[Chapter]) -> list[Chapter]:
-    """Drop reference-only chapters and trailing bibliography blocks before chunking."""
+    """Drop reference-only chapters and scrub citations before chunking."""
     prepared: list[Chapter] = []
     for chapter in chapters:
         if is_references_heading(chapter.title):
             continue
         text = strip_reference_sections(chapter.text)
+        text = scrub_citations_for_tts(text)
         if not text.strip():
             continue
         prepared.append(replace(chapter, text=text))

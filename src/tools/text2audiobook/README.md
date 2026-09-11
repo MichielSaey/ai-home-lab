@@ -94,7 +94,8 @@ Deterministic rules (also in the LLM prompt):
 
 - Dates such as `03/09/2026` become `the third of September, twenty twenty-six` (29 February only in leap years)
 - `i.e.` / `e.i.` become `in other words`; `e.g.` becomes `for example`
-- References / bibliography / works-cited / Notes / endnotes sections are dropped
+- References / bibliography / works-cited sections are dropped
+- Citation-only endnotes and bare footnote markers are dropped; discursive Notes prose is kept
 - Inline citations such as `Mark Fisher (2012). Title in Book, Publisher, p. 342.` become `Wrote Mark Fisher in twenty twelve.`
 - Tables and figures become a short pointer: ebook *See the table Title in this chapter of the ebook.*; HTML/URL *…on the original page.*
 - Section marks `§0.21` become `section 0.21`; title lists like `(Cyberpunk, Elysium)` become `for example Cyberpunk, Elysium`

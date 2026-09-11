@@ -1,4 +1,5 @@
 import logging
+import re
 
 from text2audiobook.chunking import TextChunk
 from text2audiobook.config import DEFAULT_CLEAN_PROMPT, LlmConfig, load_config
@@ -70,36 +71,77 @@ def test_plain_bibliography_heading_is_removed() -> None:
     assert text == "Keep this."
 
 
-def test_plain_notes_heading_is_removed() -> None:
+def test_citation_only_endnote_is_dropped_but_notes_prose_kept() -> None:
     text = format_for_tts(
-        "Cute remains cryptic.\n\nNotes\n34\n. Harris, Cute, Quaint, Hungry and Romantic, 20."
+        "Cute remains cryptic.\n"
+        "38\n"
+        "and empty of sapience.\n\n"
+        "Notes\n"
+        "35\n. Harris,\nCute, Quaint, Hungry and Romantic\n, 20.\n"
+        "36\n. Humpty Dumpty is a can(n)onical eggman and arche-grammatologist of "
+        "language after the crack.\n"
     )
-    assert text == "Cute remains cryptic."
+    assert "Cute remains cryptic." in text
+    assert "and empty of sapience." in text
+    assert "38" not in text
     assert "Harris" not in text
+    assert "Humpty Dumpty is a can(n)onical eggman" in text
 
 
-def test_footnotes_heading_is_removed() -> None:
-    text = format_for_tts("Keep this.\n\nFootnotes\n1. A digression.")
-    assert text == "Keep this."
+def test_footnote_callout_and_see_note_are_stripped() -> None:
+    text = format_for_tts(
+        "Burikko is closer to aegyo [see note 55] and sajiao.\n"
+        "34\n"
+        "Cute diffuses across surfaces."
+    )
+    assert "see note" not in text.lower()
+    assert "34" not in text
+    assert "Burikko is closer to aegyo  and sajiao." in text or (
+        "Burikko is closer to aegyo and sajiao." in text
+    )
+    assert "Cute diffuses across surfaces." in text
 
 
-def test_prepare_chapters_strips_trailing_notes_before_chunking() -> None:
+def test_short_discursive_note_is_kept() -> None:
+    text = format_for_tts(
+        "Main claim.\n\nNotes\n"
+        "15\n. Even the norm daddies can’t help yielding to the pleasure of telling you what to do."
+    )
+    assert "norm daddies" in text
+    assert "Main claim." in text
+
+
+def test_see_opener_without_biblio_signals_is_kept() -> None:
+    text = format_for_tts(
+        "Main claim.\n\nNotes\n"
+        "41\n. See Mackay for the fuller account of hyperplastic supernormal stimuli in practice."
+    )
+    assert "hyperplastic supernormal stimuli" in text
+
+
+def test_prepare_chapters_scrubs_citations_before_chunking() -> None:
     chapters = [
         Chapter(
             index=4,
             title="Topology of Bobbles",
             text=(
-                "Cuddles have no interiority.\n\n"
+                "Cuddles have no interiority.\n"
+                "35\n"
+                "Cute stays cryptic.\n\n"
                 "Notes\n"
-                "34\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
-                "35\n. More endnote filler that must not be narrated."
+                "35\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+                "36\n. Discursive note about eggmen and language after the crack."
             ),
             slug="topology_of_bobbles",
         ),
     ]
     prepared = prepare_chapters_for_tts(chapters)
     assert len(prepared) == 1
-    assert prepared[0].text == "Cuddles have no interiority."
+    assert "Cuddles have no interiority." in prepared[0].text
+    assert "Cute stays cryptic." in prepared[0].text
+    assert "Harris" not in prepared[0].text
+    assert "Discursive note about eggmen" in prepared[0].text
+    assert re.search(r"(?m)^35\s*$", prepared[0].text) is None
 
 
 def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
