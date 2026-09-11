@@ -546,14 +546,24 @@ def _replace_see_note_pointers(
     pieces: list[str] = []
     cursor = 0
     for match in _SEE_NOTE_NUM_RE.finditer(line):
-        pieces.append(line[cursor : match.start()])
+        prefix = line[cursor : match.start()]
         blocks = [
             block
             for num in _note_numbers_from_spec(match.group("nums"))
             if (block := _consume_footnote(num, entries, used))
         ]
-        pieces.append(("\n\n" + "\n\n".join(blocks) + "\n\n") if blocks else "")
-        cursor = match.end()
+        rest_start = match.end()
+        # Keep a following sentence period with the host clause, not after the note.
+        trailing_period = ""
+        if rest_start < len(line) and line[rest_start] == ".":
+            trailing_period = "."
+            rest_start += 1
+            prefix = prefix.rstrip()
+        pieces.append(prefix)
+        pieces.append(trailing_period)
+        if blocks:
+            pieces.append("\n\n" + "\n\n".join(blocks) + "\n\n")
+        cursor = rest_start
     pieces.append(line[cursor:])
     return "".join(pieces)
 

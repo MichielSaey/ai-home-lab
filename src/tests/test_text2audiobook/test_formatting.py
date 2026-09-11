@@ -185,7 +185,9 @@ def test_see_note_consumes_below_and_trailing_punct() -> None:
     assert "below" not in text.lower()
     assert "Footnote." in text
     assert "Discursive clarification" in text
-    assert "Next claim." in text
+    assert "Read on." in text
+    assert text.index("Read on.") < text.index("Footnote.")
+    assert text.index("Footnote.") < text.index("Next claim.")
 
 
 def test_orphan_see_note_without_notes_section_is_stripped() -> None:
