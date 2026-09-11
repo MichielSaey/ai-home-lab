@@ -299,6 +299,8 @@ def load_format_units(stems: BookStems) -> list:
             title = str(row["chapter_title"])
         if row.get("chapter_slug"):
             slug = str(row["chapter_slug"])
+        instruct_raw = row.get("instruct")
+        instruct = None if instruct_raw is None else str(instruct_raw).strip() or None
         units.append(
             TextChunk(
                 chapter_index=chapter_index,
@@ -307,6 +309,7 @@ def load_format_units(stems: BookStems) -> list:
                 chunk_index=int(row["chunk_index"]),
                 text=str(row["cleaned_text"]),
                 source_kind=str(row.get("source_kind") or "ebook"),
+                instruct=instruct,
             )
         )
     units.sort(key=lambda unit: (unit.chapter_index, unit.chunk_index))

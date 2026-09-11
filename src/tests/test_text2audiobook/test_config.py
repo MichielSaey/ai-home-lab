@@ -168,6 +168,20 @@ def test_resolve_book_config_merges_overlay(tmp_path: Path) -> None:
     assert resolved.paths.input_dir == tmp_path / "input"
 
 
+def test_load_config_defaults_direction_and_serena(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    cfg = load_config(config_path)
+    assert cfg.tts.voice == "Serena"
+    assert cfg.tts.lang == "English"
+    assert cfg.tts.instruct is not None
+    assert "warm" in cfg.tts.instruct.lower()
+    assert cfg.llm.direction is True
+    assert "{text}" in cfg.llm.direction_prompt
+    assert "bracket" in cfg.llm.direction_prompt.lower()
+    assert cfg.llm.direction_max_new_tokens == 128
+
+
 def test_resolve_book_config_missing_keeps_default(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
