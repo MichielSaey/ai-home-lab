@@ -70,10 +70,9 @@ from text2audiobook.stems import (
 )
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
-    KOKORO_REPO_ID,
-    load_kokoro,
+    load_tts,
     synthesize_to_wav,
-    unload_kokoro,
+    unload_tts,
 )
 from text2audiobook.voices import lang_for_voice, resolve_voice
 
@@ -112,8 +111,8 @@ def run(
     logger.debug("Config: %s", json.dumps(config.to_dict(), indent=2))
     if config.pipeline.concurrent_models:
         logger.warning(
-            "pipeline.concurrent_models is ignored in v2: format unloads Qwen "
-            "before Kokoro loads."
+            "pipeline.concurrent_models is ignored in v2: format unloads the LLM "
+            "before TTS loads."
         )
 
     try:
@@ -142,7 +141,9 @@ def run(
         python=platform.python_version(),
         llm_model_id=config.llm.model_id if need_llm else None,
         llm_device=config.llm.device if need_llm else None,
-        tts_model_id=KOKORO_REPO_ID if "speak" in selected else None,
+        tts_model_id=(
+            config.tts.model_id if "speak" in selected else None
+        ),
         tts_device=tts_device if "speak" in selected else None,
         concurrent_models=False,
         stages=list(selected),
@@ -203,7 +204,7 @@ def process_source(
     tracker: RunTracker,
     record: BookRecord,
     llm: LoadedLlm | None = None,
-    kokoro: Any = None,
+    tts_model: Any = None,
     position: tuple[int, int] | None = None,
     tts_device: str | None = None,
     stages: tuple[str, ...] = PIPELINE_STAGES,
@@ -276,7 +277,7 @@ def process_source(
         )
 
     own_llm: LoadedLlm | None = None
-    own_kokoro: Any = None
+    own_tts: Any = None
 
     def ensure_llm() -> LoadedLlm | None:
         nonlocal own_llm
@@ -370,11 +371,11 @@ def process_source(
         )
 
     def run_speak() -> None:
-        nonlocal own_llm, own_kokoro
+        nonlocal own_llm, own_tts
         if own_llm is not None:
             unload_llm(own_llm)
             own_llm = None
-            logger.info("Unloaded LLM to free GPU memory for Kokoro")
+            logger.info("Unloaded LLM to free GPU memory for TTS")
 
         scripts = state.scripts
         format_units = state.format_units
@@ -391,10 +392,10 @@ def process_source(
             state.scripts = scripts
             state.format_units = format_units
 
-        own_kokoro = kokoro
+        own_tts = tts_model
         loaded_here = False
-        if own_kokoro is None:
-            own_kokoro = load_kokoro(tts_config, device=tts_device)
+        if own_tts is None:
+            own_tts = load_tts(tts_config, device=tts_device)
             loaded_here = True
         try:
             _run_speak(
@@ -404,7 +405,7 @@ def process_source(
                 config=config,
                 tts_config=tts_config,
                 stems=stems,
-                kokoro=own_kokoro,
+                tts_model=own_tts,
                 tracker=tracker,
                 record=record,
                 progress=progress,
@@ -412,8 +413,8 @@ def process_source(
             )
         finally:
             if loaded_here:
-                unload_kokoro(own_kokoro)
-                own_kokoro = None
+                unload_tts(own_tts)
+                own_tts = None
 
     handlers = {
         "extract": run_extract,
@@ -430,8 +431,8 @@ def process_source(
     finally:
         if own_llm is not None:
             unload_llm(own_llm)
-        if own_kokoro is not None and kokoro is None:
-            unload_kokoro(own_kokoro)
+        if own_tts is not None and tts_model is None:
+            unload_tts(own_tts)
 
 
 def _run_needs_llm(config: AppConfig, stages: tuple[str, ...]) -> bool:
@@ -451,9 +452,14 @@ def _resolve_tts(
         default=config.tts.voice,
         state_path=staging_root / "_voice_random.json",
     )
-    lang = lang_for_voice(chosen)
-    if chosen != config.tts.voice or lang != config.tts.lang:
-        logger.info("Voice %s (lang=%s)", chosen, lang)
+    # Content language stays from config (book text). Speaker native language is
+    # only a quality hint — CustomVoice speakers can narrate any supported lang.
+    lang = config.tts.lang
+    native = lang_for_voice(chosen)
+    if chosen != config.tts.voice:
+        logger.info("Voice %s (lang=%s, native=%s)", chosen, lang, native)
+    elif native != lang:
+        logger.info("Voice %s (lang=%s; speaker native is %s)", chosen, lang, native)
     return replace(config.tts, voice=chosen, lang=lang)
 
 
@@ -511,15 +517,16 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
     return {
         "version": 2,
         "format_hash": format_hash,
+        "model_id": tts.model_id,
         "voice": tts.voice,
         "lang": tts.lang,
-        "speed": tts.speed,
+        "instruct": tts.instruct,
         "m4b_bitrate": config.output.m4b_bitrate,
         "loudnorm": config.output.loudnorm,
         "chunk_silence_ms": config.output.chunk_silence_ms,
         "chapter_silence_ms": config.output.chapter_silence_ms,
-        "speak_target_phonemes": config.chunking.speak_target_phonemes,
-        "speak_max_phonemes": config.chunking.speak_max_phonemes,
+        "speak_target_chars": config.chunking.speak_target_chars,
+        "speak_max_chars": config.chunking.speak_max_chars,
     }
 
 
@@ -868,7 +875,7 @@ def _run_speak(
     config: AppConfig,
     tts_config: TtsConfig,
     stems: BookStems,
-    kokoro: Any,
+    tts_model: Any,
     tracker: RunTracker,
     record: BookRecord,
     progress: ProgressContext,
@@ -878,22 +885,20 @@ def _run_speak(
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_ok = manifest_matches(stems.speak_manifest, fingerprint)
 
-    british = tts_config.lang == "b"
     units = build_speak_units_from_chunks(
         format_units,
-        target_phonemes=config.chunking.speak_target_phonemes,
-        max_phonemes=config.chunking.speak_max_phonemes,
-        british=british,
+        target_chars=config.chunking.speak_target_chars,
+        max_chars=config.chunking.speak_max_chars,
     )
     record.chapter_count = len(scripts)
     record.chunk_count = len(units)
     record.word_count = sum(len(unit.text.split()) for unit in format_units)
     tracker.write()
     logger.info(
-        "Created %d speak unit(s) (target %d phonemes, cap %d)",
+        "Created %d speak unit(s) (target %d chars, cap %d)",
         len(units),
-        config.chunking.speak_target_phonemes,
-        config.chunking.speak_max_phonemes,
+        config.chunking.speak_target_chars,
+        config.chunking.speak_max_chars,
     )
 
     if force and stems.speak_wav_dir.exists():
@@ -928,7 +933,7 @@ def _run_speak(
     with ThreadPoolExecutor(max_workers=max(1, config.pipeline.ffmpeg_workers)) as executor:
         wavs_by_slug, futures = _synthesize_and_encode(
             units,
-            kokoro=kokoro,
+            tts_model=tts_model,
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -979,7 +984,7 @@ def _run_speak(
 def _synthesize_and_encode(
     units: list[TextChunk],
     *,
-    kokoro: Any,
+    tts_model: Any,
     config: AppConfig,
     tts_config: TtsConfig,
     metadata: BookMetadata,
@@ -1021,11 +1026,12 @@ def _synthesize_and_encode(
         if not (skip_wavs and wav_path.exists() and hash_ok):
             start = time.perf_counter()
             synthesize_to_wav(
-                kokoro,
+                tts_model,
                 unit.text,
                 wav_path,
                 voice=tts_config.voice,
-                speed=tts_config.speed,
+                language=tts_config.lang,
+                instruct=tts_config.instruct,
                 chunk_silence_ms=config.output.chunk_silence_ms,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)

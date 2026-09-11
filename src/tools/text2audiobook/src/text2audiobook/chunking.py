@@ -1,4 +1,4 @@
-"""Two chunkers: word windows for LLM formatting, phoneme units for Kokoro."""
+"""Two chunkers: word windows for LLM formatting, character units for TTS."""
 
 from __future__ import annotations
 
@@ -11,12 +11,10 @@ from text2audiobook.io import Chapter
 
 logger = logging.getLogger(__name__)
 
-PHONEMES_PER_WORD = 2.5
 _HARD_BREAK_RE = re.compile(r"(?<=[;:—–])\s+")
 _COMMA_BREAK_RE = re.compile(r"(?<=,)\s+")
 
 _punkt_ready = False
-_g2p_cache: dict[bool, object] = {}
 
 
 @dataclass
@@ -47,34 +45,9 @@ def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in sent_tokenize(text) if s.strip()]
 
 
-def phoneme_count(text: str, *, british: bool = False) -> int:
-    """Length of Kokoro's English phoneme string, with a 2.5/word fallback."""
-    stripped = text.strip()
-    if not stripped:
-        return 0
-    try:
-        return _misaki_phoneme_len(stripped, british=british)
-    except Exception:
-        logger.debug("G2P unavailable; approximating phoneme count", exc_info=True)
-        return max(1, round(len(stripped.split()) * PHONEMES_PER_WORD))
-
-
-def _misaki_phoneme_len(text: str, *, british: bool) -> int:
-    g2p = _g2p_cache.get(british)
-    if g2p is None:
-        from misaki import en
-
-        g2p = en.G2P(british=british, unk="")
-        _g2p_cache[british] = g2p
-    phonemes, _tokens = g2p(text)
-    if isinstance(phonemes, str):
-        return len(phonemes.strip())
-    joined = "".join(
-        (getattr(token, "phonemes", None) or "")
-        + (" " if getattr(token, "whitespace", "") else "")
-        for token in _tokens
-    ).strip()
-    return len(joined)
+def char_count(text: str) -> int:
+    """Character count used for speak-unit packing (includes spaces)."""
+    return len(text)
 
 
 def chunk_sentences(text: str, words_per_chunk: int) -> list[str]:
@@ -114,24 +87,23 @@ def chunk_sentences(text: str, words_per_chunk: int) -> list[str]:
     return chunks
 
 
-def chunk_sentences_by_phonemes(
+def chunk_sentences_by_chars(
     text: str,
     *,
-    target_phonemes: int = 160,
-    max_phonemes: int = 400,
-    british: bool = False,
+    target_chars: int = 400,
+    max_chars: int = 800,
     count_fn: Callable[[str], int] | None = None,
 ) -> list[str]:
-    """Pack sentences toward target_phonemes without exceeding max_phonemes.
+    """Pack sentences toward target_chars without exceeding max_chars.
 
     Over-long sentences split on ; : em-dash first, then commas, then words.
     """
-    if max_phonemes < 1:
-        raise ValueError("max_phonemes must be positive")
-    if target_phonemes < 1:
-        target_phonemes = max_phonemes
-    target_phonemes = min(target_phonemes, max_phonemes)
-    count = count_fn or (lambda piece: phoneme_count(piece, british=british))
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    if target_chars < 1:
+        target_chars = max_chars
+    target_chars = min(target_chars, max_chars)
+    count = count_fn or char_count
 
     units: list[str] = []
     current: list[str] = []
@@ -145,21 +117,21 @@ def chunk_sentences_by_phonemes(
             current.clear()
 
     for sentence in split_sentences(text):
-        for piece in _split_overlong(sentence, max_phonemes, count):
+        for piece in _split_overlong(sentence, max_chars, count):
             if not current:
                 current.append(piece)
                 continue
             candidate = f"{current_text()} {piece}"
             candidate_count = count(candidate)
-            if candidate_count <= target_phonemes:
+            if candidate_count <= target_chars:
                 current.append(piece)
-            elif candidate_count <= max_phonemes and count(current_text()) < target_phonemes:
+            elif candidate_count <= max_chars and count(current_text()) < target_chars:
                 current.append(piece)
                 flush()
             else:
                 flush()
                 current.append(piece)
-                if count(current_text()) >= target_phonemes:
+                if count(current_text()) >= target_chars:
                     flush()
 
     flush()
@@ -168,10 +140,10 @@ def chunk_sentences_by_phonemes(
 
 def _split_overlong(
     sentence: str,
-    max_phonemes: int,
+    max_chars: int,
     count: Callable[[str], int],
 ) -> list[str]:
-    if count(sentence) <= max_phonemes:
+    if count(sentence) <= max_chars:
         return [sentence]
     parts = [piece.strip() for piece in _HARD_BREAK_RE.split(sentence) if piece.strip()]
     if len(parts) == 1:
@@ -182,7 +154,7 @@ def _split_overlong(
         current: list[str] = []
         for word in words:
             trial = " ".join(current + [word])
-            if current and count(trial) > max_phonemes:
+            if current and count(trial) > max_chars:
                 packed.append(" ".join(current))
                 current = [word]
             else:
@@ -194,11 +166,11 @@ def _split_overlong(
     current: list[str] = []
     for part in parts:
         trial = " ".join(current + [part])
-        if current and count(trial) > max_phonemes:
+        if current and count(trial) > max_chars:
             packed.append(" ".join(current))
             current = [part]
-            if count(part) > max_phonemes:
-                packed.extend(_split_overlong(part, max_phonemes, count))
+            if count(part) > max_chars:
+                packed.extend(_split_overlong(part, max_chars, count))
                 current = []
         else:
             current.append(part)
@@ -336,9 +308,8 @@ def build_chunks_from_sections(
 def build_speak_units(
     chapters: list[Chapter],
     *,
-    target_phonemes: int,
-    max_phonemes: int,
-    british: bool = False,
+    target_chars: int,
+    max_chars: int,
     source_kind: str = "ebook",
     count_fn: Callable[[str], int] | None = None,
 ) -> list[TextChunk]:
@@ -355,9 +326,8 @@ def build_speak_units(
     ]
     return build_speak_units_from_chunks(
         seeds,
-        target_phonemes=target_phonemes,
-        max_phonemes=max_phonemes,
-        british=british,
+        target_chars=target_chars,
+        max_chars=max_chars,
         count_fn=count_fn,
     )
 
@@ -365,25 +335,23 @@ def build_speak_units(
 def build_speak_units_from_chunks(
     format_units: list[TextChunk],
     *,
-    target_phonemes: int,
-    max_phonemes: int,
-    british: bool = False,
+    target_chars: int,
+    max_chars: int,
     count_fn: Callable[[str], int] | None = None,
 ) -> list[TextChunk]:
-    """Further-split prior format units by phoneme budget; never rematch."""
-    count = count_fn or (lambda piece: phoneme_count(piece, british=british))
+    """Further-split prior format units by character budget; never rematch."""
+    count = count_fn or char_count
 
     def split_text(text: str) -> list[str]:
-        return chunk_sentences_by_phonemes(
+        return chunk_sentences_by_chars(
             text,
-            target_phonemes=target_phonemes,
-            max_phonemes=max_phonemes,
-            british=british,
+            target_chars=target_chars,
+            max_chars=max_chars,
             count_fn=count,
         )
 
     return further_split(
         format_units,
-        over_budget=lambda text: count(text) > max_phonemes,
+        over_budget=lambda text: count(text) > max_chars,
         split_text=split_text,
     )

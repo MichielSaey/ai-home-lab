@@ -227,7 +227,7 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\be\.g\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "for example"),
 )
 
-# §0.21 / §3.741 → "section 0.21" so Kokoro does not say "section sign".
+# §0.21 / §3.741 → "section 0.21" so TTS does not say "section sign".
 _SECTION_MARK_RE = re.compile(r"§\s*(?P<label>[0-9]+(?:\.[0-9]+)*)")
 
 # Title-like media lists in parentheses, rewritten only with a nearby cue
@@ -854,7 +854,7 @@ def format_for_tts(
     source_kind: str = "ebook",
     speak_footnote_cues: bool = False,
 ) -> str:
-    """Rewrite a chunk so Kokoro hears spoken forms instead of print conventions."""
+    """Rewrite a chunk so TTS hears spoken forms instead of print conventions."""
     text = strip_reference_sections(text)
     text = scrub_citations_for_tts(text, speak_footnote_cues=speak_footnote_cues)
     text = replace_tables_and_figures(

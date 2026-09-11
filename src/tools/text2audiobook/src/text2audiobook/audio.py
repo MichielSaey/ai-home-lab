@@ -164,8 +164,13 @@ def _flatten_chapter_wavs(
     chapter_timings: list[tuple[str, int]] = []
     silence_path: Path | None = None
     if chapter_silence_ms > 0:
+        sample_rate = SAMPLE_RATE
+        for _, paths in chapter_wavs:
+            if paths:
+                sample_rate = int(sf.info(str(paths[0])).samplerate)
+                break
         silence_path = temp_dir / "chapter_gap.wav"
-        make_silence_wav(chapter_silence_ms, silence_path)
+        make_silence_wav(chapter_silence_ms, silence_path, sample_rate=sample_rate)
 
     for index, (chapter_title, paths) in enumerate(chapter_wavs):
         if not paths:

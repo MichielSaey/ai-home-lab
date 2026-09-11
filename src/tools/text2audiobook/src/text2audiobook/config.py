@@ -65,8 +65,8 @@ class PathsConfig:
 @dataclass
 class ChunkingConfig:
     format_words_per_chunk: int = 1000
-    speak_target_phonemes: int = 160
-    speak_max_phonemes: int = 400
+    speak_target_chars: int = 400
+    speak_max_chars: int = 800
     max_chunks_per_chapter: int | None = None
 
 
@@ -92,10 +92,11 @@ class LlmConfig:
 
 @dataclass
 class TtsConfig:
-    lang: str = "a"
-    voice: str = "af_bella"
-    speed: float = 0.90
+    model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    lang: str = "English"
+    voice: str = "Ryan"
     device: str = "auto"
+    instruct: str | None = None
 
 
 @dataclass
@@ -197,7 +198,25 @@ def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
         if "format_words_per_chunk" not in chunking_data and "words_per_chunk" in chunking_data:
             chunking_data["format_words_per_chunk"] = chunking_data["words_per_chunk"]
         chunking_data.pop("words_per_chunk", None)
+        if "speak_target_phonemes" in chunking_data or "speak_max_phonemes" in chunking_data:
+            logger.warning(
+                "chunking.speak_*_phonemes is obsolete (Qwen3-TTS uses character "
+                "budgets); ignoring old keys — set speak_target_chars / speak_max_chars"
+            )
+            chunking_data.pop("speak_target_phonemes", None)
+            chunking_data.pop("speak_max_phonemes", None)
         normalized["chunking"] = chunking_data
+
+    tts_data = normalized.get("tts")
+    if isinstance(tts_data, dict):
+        tts_data = dict(tts_data)
+        if "speed" in tts_data:
+            logger.warning(
+                "tts.speed is ignored (Qwen3-TTS CustomVoice); "
+                "use tts.instruct for style/rate hints"
+            )
+            tts_data.pop("speed", None)
+        normalized["tts"] = tts_data
     return normalized
 
 

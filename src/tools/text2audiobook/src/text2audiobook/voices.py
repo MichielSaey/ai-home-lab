@@ -1,4 +1,4 @@
-"""Kokoro voice catalog, CLI listing, and random-without-replacement picks."""
+"""Qwen3-TTS CustomVoice catalog, CLI listing, and random-without-replacement picks."""
 
 from __future__ import annotations
 
@@ -10,104 +10,54 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-RANDOM_GRADES = frozenset({"A", "A-", "B-"})
-
 
 @dataclass(frozen=True)
 class VoiceInfo:
     name: str
-    grade: str
+    description: str
     language: str
-    lang_code: str
 
 
-# Official Kokoro-82M grades (VOICES.md). Ungraded locale voices are listed as "?".
+# Official Qwen3-TTS CustomVoice speakers (model card).
 VOICES: tuple[VoiceInfo, ...] = (
-    VoiceInfo("af_heart", "A", "American English", "a"),
-    VoiceInfo("af_bella", "A-", "American English", "a"),
-    VoiceInfo("af_nicole", "B-", "American English", "a"),
-    VoiceInfo("af_aoede", "C+", "American English", "a"),
-    VoiceInfo("af_kore", "C+", "American English", "a"),
-    VoiceInfo("af_sarah", "C+", "American English", "a"),
-    VoiceInfo("am_fenrir", "C+", "American English", "a"),
-    VoiceInfo("am_michael", "C+", "American English", "a"),
-    VoiceInfo("am_puck", "C+", "American English", "a"),
-    VoiceInfo("af_alloy", "C", "American English", "a"),
-    VoiceInfo("af_nova", "C", "American English", "a"),
-    VoiceInfo("af_sky", "C-", "American English", "a"),
-    VoiceInfo("af_jessica", "D", "American English", "a"),
-    VoiceInfo("af_river", "D", "American English", "a"),
-    VoiceInfo("am_echo", "D", "American English", "a"),
-    VoiceInfo("am_eric", "D", "American English", "a"),
-    VoiceInfo("am_liam", "D", "American English", "a"),
-    VoiceInfo("am_onyx", "D", "American English", "a"),
-    VoiceInfo("am_santa", "D-", "American English", "a"),
-    VoiceInfo("am_adam", "F+", "American English", "a"),
-    VoiceInfo("bf_emma", "B-", "British English", "b"),
-    VoiceInfo("bf_isabella", "C", "British English", "b"),
-    VoiceInfo("bm_fable", "C", "British English", "b"),
-    VoiceInfo("bm_george", "C", "British English", "b"),
-    VoiceInfo("bf_alice", "D", "British English", "b"),
-    VoiceInfo("bf_lily", "D", "British English", "b"),
-    VoiceInfo("bm_daniel", "D", "British English", "b"),
-    VoiceInfo("bm_lewis", "D+", "British English", "b"),
-    VoiceInfo("ff_siwis", "B-", "French", "f"),
-    VoiceInfo("jf_alpha", "C+", "Japanese", "j"),
-    VoiceInfo("jf_gongitsune", "C", "Japanese", "j"),
-    VoiceInfo("jf_tebukuro", "C", "Japanese", "j"),
-    VoiceInfo("jf_nezumi", "C-", "Japanese", "j"),
-    VoiceInfo("jm_kumo", "C-", "Japanese", "j"),
-    VoiceInfo("zf_xiaobei", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zf_xiaoni", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zf_xiaoxiao", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zf_xiaoyi", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zm_yunjian", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zm_yunxi", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zm_yunxia", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("zm_yunyang", "D", "Mandarin Chinese", "z"),
-    VoiceInfo("hf_alpha", "C", "Hindi", "h"),
-    VoiceInfo("hf_beta", "C", "Hindi", "h"),
-    VoiceInfo("hm_omega", "C", "Hindi", "h"),
-    VoiceInfo("hm_psi", "C", "Hindi", "h"),
-    VoiceInfo("if_sara", "C", "Italian", "i"),
-    VoiceInfo("im_nicola", "C", "Italian", "i"),
-    VoiceInfo("ef_dora", "?", "Spanish", "e"),
-    VoiceInfo("em_alex", "?", "Spanish", "e"),
-    VoiceInfo("em_santa", "?", "Spanish", "e"),
-    VoiceInfo("pf_dora", "?", "Brazilian Portuguese", "p"),
-    VoiceInfo("pm_alex", "?", "Brazilian Portuguese", "p"),
-    VoiceInfo("pm_santa", "?", "Brazilian Portuguese", "p"),
+    VoiceInfo("Vivian", "Bright, slightly edgy young female voice", "Chinese"),
+    VoiceInfo("Serena", "Warm, gentle young female voice", "Chinese"),
+    VoiceInfo("Uncle_Fu", "Seasoned male voice with a low, mellow timbre", "Chinese"),
+    VoiceInfo("Dylan", "Youthful Beijing male voice with a clear, natural timbre", "Chinese"),
+    VoiceInfo("Eric", "Lively Chengdu male voice with a slightly husky brightness", "Chinese"),
+    VoiceInfo("Ryan", "Dynamic male voice with strong rhythmic drive", "English"),
+    VoiceInfo("Aiden", "Sunny American male voice with a clear midrange", "English"),
+    VoiceInfo("Ono_Anna", "Playful Japanese female voice with a light, nimble timbre", "Japanese"),
+    VoiceInfo("Sohee", "Warm Korean female voice with rich emotion", "Korean"),
 )
 
 _BY_NAME = {voice.name: voice for voice in VOICES}
-RANDOM_POOL: tuple[str, ...] = tuple(
-    voice.name for voice in VOICES if voice.grade in RANDOM_GRADES
-)
+_BY_NAME_CI = {voice.name.lower(): voice for voice in VOICES}
+RANDOM_POOL: tuple[str, ...] = tuple(voice.name for voice in VOICES)
 
 
 def lang_for_voice(name: str) -> str:
-    known = _BY_NAME.get(name)
+    """Return the speaker's recommended Qwen language string."""
+    known = _BY_NAME.get(name) or _BY_NAME_CI.get(name.lower())
     if known is not None:
-        return known.lang_code
-    if name:
-        return name[0].lower()
-    return "a"
+        return known.language
+    return "English"
 
 
 def get_voice(name: str) -> VoiceInfo | None:
-    return _BY_NAME.get(name)
+    return _BY_NAME.get(name) or _BY_NAME_CI.get(name.lower())
 
 
 def list_voices() -> list[VoiceInfo]:
-    """Return the baked Kokoro-82M catalog (same ids as voices/*.pt on the Hub)."""
+    """Return the baked Qwen3-TTS CustomVoice catalog."""
     return list(VOICES)
 
 
 def format_voice_table(voices: list[VoiceInfo] | None = None) -> str:
     rows = voices if voices is not None else list_voices()
-    lines = [f"{'name':<16} {'grade':<4} language"]
+    lines = [f"{'name':<12} {'language':<10} description"]
     for voice in rows:
-        lines.append(f"{voice.name:<16} {voice.grade:<4} {voice.language}")
+        lines.append(f"{voice.name:<12} {voice.language:<10} {voice.description}")
     return "\n".join(lines)
 
 
@@ -120,7 +70,7 @@ def pick_random_voice(
     *,
     rng: random.Random | None = None,
 ) -> str:
-    """Pick the next A / A- / B- voice without replacement until the pool wraps."""
+    """Pick the next CustomVoice speaker without replacement until the pool wraps."""
     pool = list(RANDOM_POOL)
     rng = rng or random.Random()
     remaining = _load_remaining(state_path, pool)
@@ -147,14 +97,11 @@ def resolve_voice(
     name = requested.strip()
     if name.lower() == "random":
         return pick_random_voice(state_path, rng=rng)
-    if name not in _BY_NAME and not _looks_like_voice(name):
-        known = ", ".join(voice.name for voice in VOICES)
-        raise ValueError(f"Unknown voice {name!r}. Known voices: {known}")
-    return name
-
-
-def _looks_like_voice(name: str) -> bool:
-    return bool(name) and "_" in name and name[0].isalpha()
+    known = get_voice(name)
+    if known is not None:
+        return known.name
+    known_names = ", ".join(voice.name for voice in VOICES)
+    raise ValueError(f"Unknown voice {name!r}. Known voices: {known_names}")
 
 
 def _load_remaining(state_path: Path, pool: list[str]) -> list[str]:

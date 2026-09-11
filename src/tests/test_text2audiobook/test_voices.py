@@ -9,18 +9,19 @@ from text2audiobook.voices import (
 )
 
 
-def test_lang_follows_voice_prefix() -> None:
-    assert lang_for_voice("af_bella") == "a"
-    assert lang_for_voice("bf_emma") == "b"
-    assert lang_for_voice("ff_siwis") == "f"
+def test_lang_follows_speaker_native() -> None:
+    assert lang_for_voice("Ryan") == "English"
+    assert lang_for_voice("Aiden") == "English"
+    assert lang_for_voice("Vivian") == "Chinese"
+    assert lang_for_voice("Ono_Anna") == "Japanese"
 
 
-def test_random_pool_is_top_grades_only() -> None:
-    names = {voice.name for voice in list_voices() if voice.grade in {"A", "A-", "B-"}}
+def test_random_pool_is_all_custom_voices() -> None:
+    names = {voice.name for voice in list_voices()}
     assert set(RANDOM_POOL) == names
-    assert "af_bella" in RANDOM_POOL
-    assert "bf_emma" in RANDOM_POOL
-    assert "af_heart" in RANDOM_POOL
+    assert "Ryan" in RANDOM_POOL
+    assert "Aiden" in RANDOM_POOL
+    assert "Vivian" in RANDOM_POOL
 
 
 def test_random_without_replacement_then_wraps(tmp_path: Path) -> None:
@@ -34,5 +35,5 @@ def test_random_without_replacement_then_wraps(tmp_path: Path) -> None:
 
 
 def test_resolve_voice_default_and_named(tmp_path: Path) -> None:
-    assert resolve_voice(None, default="af_bella", state_path=tmp_path / "s.json") == "af_bella"
-    assert resolve_voice("bf_emma", default="af_bella", state_path=tmp_path / "s.json") == "bf_emma"
+    assert resolve_voice(None, default="Ryan", state_path=tmp_path / "s.json") == "Ryan"
+    assert resolve_voice("Aiden", default="Ryan", state_path=tmp_path / "s.json") == "Aiden"

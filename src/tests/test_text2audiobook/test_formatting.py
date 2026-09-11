@@ -504,7 +504,7 @@ def test_default_clean_prompt_covers_new_rules() -> None:
     assert "[...]" in DEFAULT_CLEAN_PROMPT
     cfg = load_config()
     assert "in other words" in cfg.llm.clean_prompt
-    assert cfg.tts.voice == "af_bella"
+    assert cfg.tts.voice == "Ryan"
     assert cfg.llm.max_new_tokens == 2048
     assert cfg.chunking.format_words_per_chunk == 1000
 
