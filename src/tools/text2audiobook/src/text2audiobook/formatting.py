@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "5"
+FORMATTER_VERSION = "6"
 
 _MONTHS = (
     "January",
@@ -179,6 +179,13 @@ _URL_CITE_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 _SEE_WORK_RE = re.compile(r"^See\s+[A-Z]", re.MULTILINE)
 _AUTHOR_START_RE = re.compile(
     r"^(?:[A-Z]\.\s*)+[A-Z][A-Za-z'’.-]+|^[A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+)?,",
+)
+
+# Spoken cue when a discursive endnote is inlined after its callout.
+FOOTNOTE_SPOKEN_MARKER = "Footnote."
+_SEE_NOTE_NUM_RE = re.compile(
+    r"\[?\s*see\s+notes?\s+(?P<num>\d+[a-z]?)(?:\s*[-–,]\s*\d+[a-z]?)?\s*\]?",
+    re.IGNORECASE,
 )
 
 _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -434,24 +441,30 @@ def is_citation_only_note(text: str) -> bool:
     return False
 
 
-def _iter_endnote_entries(notes_body: str) -> tuple[str, list[str]]:
+def _iter_endnote_entries(notes_body: str) -> tuple[str, dict[str, str]]:
     """Split a Notes section into leading preamble plus numbered entry bodies."""
     matches = list(_ENDNOTE_ENTRY_START_RE.finditer(notes_body))
     if not matches:
-        return notes_body.strip(), []
+        return notes_body.strip(), {}
     preamble = notes_body[: matches[0].start()].strip()
-    entries: list[str] = []
+    entries: dict[str, str] = {}
     for index, match in enumerate(matches):
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(notes_body)
-        entries.append(notes_body[start:end].strip())
+        entries[match.group("num")] = notes_body[start:end].strip()
     return preamble, entries
 
 
-def scrub_notes_citations(text: str) -> str:
-    """Keep discursive Notes/Footnotes content; drop citation-only endnotes."""
+def _format_footnote_block(body: str) -> str:
+    return f"{FOOTNOTE_SPOKEN_MARKER}\n{body.strip()}"
+
+
+def _extract_notes_apparatus(text: str) -> tuple[str, str, dict[str, str]]:
+    """Return body without Notes sections, combined preamble, and numbered entries."""
     lines = text.splitlines()
     rebuilt: list[str] = []
+    preambles: list[str] = []
+    entries: dict[str, str] = {}
     index = 0
     while index < len(lines):
         if not _NOTES_APPARATUS_HEADING_RE.match(_heading_text(lines[index])):
@@ -468,22 +481,91 @@ def scrub_notes_citations(text: str) -> str:
                 break
             block_lines.append(lines[index])
             index += 1
-        preamble, entries = _iter_endnote_entries("\n".join(block_lines))
-        kept = [preamble] if preamble else []
-        kept.extend(entry for entry in entries if entry and not is_citation_only_note(entry))
-        if kept:
-            rebuilt.append("")
-            rebuilt.extend(kept)
-            rebuilt.append("")
-    return "\n".join(rebuilt).strip()
+        preamble, block_entries = _iter_endnote_entries("\n".join(block_lines))
+        if preamble:
+            preambles.append(preamble)
+        entries.update(block_entries)
+    return "\n".join(rebuilt), "\n\n".join(preambles), entries
+
+
+def _consume_footnote(
+    num: str,
+    entries: dict[str, str],
+    used: set[str],
+) -> str | None:
+    """Return a spoken footnote block, or None when the note is dropped/already used."""
+    body = entries.get(num)
+    if body is None:
+        return None
+    if num in used:
+        return None
+    used.add(num)
+    if is_citation_only_note(body):
+        return None
+    return _format_footnote_block(body)
+
+
+def _replace_see_note_pointers(
+    line: str,
+    entries: dict[str, str],
+    used: set[str],
+) -> str:
+    pieces: list[str] = []
+    cursor = 0
+    for match in _SEE_NOTE_NUM_RE.finditer(line):
+        pieces.append(line[cursor : match.start()])
+        block = _consume_footnote(match.group("num"), entries, used)
+        pieces.append(f"\n\n{block}\n\n" if block else "")
+        cursor = match.end()
+    pieces.append(line[cursor:])
+    return "".join(pieces)
+
+
+def relocate_footnotes(text: str) -> str:
+    """Move discursive endnotes after their callouts; drop citation-only notes.
+
+    Bare markers like ``34`` and ``see note 34`` are removed. Discursive note
+    bodies are inserted immediately afterward, prefixed with
+    :data:`FOOTNOTE_SPOKEN_MARKER`, so later word-window chunking keeps them
+    next to the claim they annotate. Unreferenced discursive notes (and any
+    Notes preamble) are appended at the end.
+    """
+    body, preamble, entries = _extract_notes_apparatus(text)
+    if not entries and not preamble:
+        return strip_footnote_callouts(body)
+
+    used: set[str] = set()
+    out_lines: list[str] = []
+    for line in body.splitlines():
+        if _FOOTNOTE_CALLOUT_LINE_RE.match(line):
+            block = _consume_footnote(line.strip(), entries, used)
+            if block:
+                out_lines.append("")
+                out_lines.extend(block.splitlines())
+                out_lines.append("")
+            continue
+        out_lines.append(_replace_see_note_pointers(line, entries, used))
+
+    trailing: list[str] = []
+    if preamble:
+        trailing.append(preamble)
+    for num in sorted(entries, key=lambda value: int(re.sub(r"\D", "", value) or 0)):
+        if num in used:
+            continue
+        body_text = entries[num]
+        if is_citation_only_note(body_text):
+            continue
+        trailing.append(_format_footnote_block(body_text))
+    if trailing:
+        out_lines.append("")
+        out_lines.extend(trailing)
+
+    return "\n".join(out_lines).strip()
 
 
 def scrub_citations_for_tts(text: str) -> str:
-    """Drop citation-only notes and footnote callouts; keep discursive note prose."""
-    # Notes apparatus first — callout stripping would eat endnote markers (`35\\n.`).
-    text = scrub_notes_citations(text)
-    text = strip_footnote_callouts(text)
-    return text
+    """Relocate discursive footnotes and drop citation-only endnotes/callouts."""
+    return relocate_footnotes(text)
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -614,7 +696,7 @@ def format_for_tts(
 
 
 def prepare_chapters_for_tts(chapters: list[Chapter]) -> list[Chapter]:
-    """Drop reference-only chapters and scrub citations before chunking."""
+    """Drop reference-only chapters and relocate footnotes before chunking."""
     prepared: list[Chapter] = []
     for chapter in chapters:
         if is_references_heading(chapter.title):
