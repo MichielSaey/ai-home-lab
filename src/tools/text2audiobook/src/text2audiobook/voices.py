@@ -93,7 +93,13 @@ def resolve_voice(
     rng: random.Random | None = None,
 ) -> str:
     if requested is None or requested.strip() == "":
-        return default
+        known = get_voice(default)
+        if known is None:
+            known_names = ", ".join(voice.name for voice in VOICES)
+            raise ValueError(
+                f"Unknown default voice {default!r}. Known voices: {known_names}"
+            )
+        return known.name
     name = requested.strip()
     if name.lower() == "random":
         return pick_random_voice(state_path, rng=rng)

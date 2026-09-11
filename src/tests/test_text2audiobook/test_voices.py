@@ -37,3 +37,12 @@ def test_random_without_replacement_then_wraps(tmp_path: Path) -> None:
 def test_resolve_voice_default_and_named(tmp_path: Path) -> None:
     assert resolve_voice(None, default="Ryan", state_path=tmp_path / "s.json") == "Ryan"
     assert resolve_voice("Aiden", default="Ryan", state_path=tmp_path / "s.json") == "Aiden"
+
+
+def test_resolve_voice_rejects_unknown_default(tmp_path: Path) -> None:
+    try:
+        resolve_voice(None, default="af_bella", state_path=tmp_path / "s.json")
+    except ValueError as exc:
+        assert "af_bella" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unknown default voice")

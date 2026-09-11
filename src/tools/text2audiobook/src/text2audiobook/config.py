@@ -218,20 +218,37 @@ def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
             tts_data.pop("speed", None)
         if "lang" in tts_data:
             tts_data["lang"] = _normalize_tts_lang(tts_data["lang"])
+        if "voice" in tts_data:
+            tts_data["voice"] = _normalize_tts_voice(tts_data["voice"])
         normalized["tts"] = tts_data
     return normalized
 
 
-# Kokoro single-letter codes → Qwen3-TTS language names (unsupported → English).
+# Kokoro single-letter codes → Qwen3-TTS language names.
+# Unsupported codes (e.g. Hindi "h") fall back to English with a warning.
 _KOKORO_LANG_TO_QWEN: dict[str, str] = {
     "a": "English",  # American
     "b": "English",  # British
     "e": "Spanish",
     "f": "French",
+    "h": "English",  # Hindi — not in Qwen3-TTS language set
     "i": "Italian",
     "j": "Japanese",
     "p": "Portuguese",
     "z": "Chinese",
+}
+
+# First letter of Kokoro voice ids → approximate Qwen CustomVoice speaker.
+_KOKORO_VOICE_PREFIX_TO_QWEN: dict[str, str] = {
+    "af": "Serena",  # American female → warm female (can speak English)
+    "am": "Ryan",
+    "bf": "Serena",
+    "bm": "Ryan",
+    "ff": "Serena",
+    "jf": "Ono_Anna",
+    "jm": "Ono_Anna",
+    "zf": "Vivian",
+    "zm": "Uncle_Fu",
 }
 
 
@@ -245,6 +262,30 @@ def _normalize_tts_lang(lang: Any) -> Any:
     if mapped is not None:
         logger.warning(
             "tts.lang %r is a legacy Kokoro code; mapping to %r for Qwen3-TTS",
+            stripped,
+            mapped,
+        )
+        return mapped
+    return stripped
+
+
+def _normalize_tts_voice(voice: Any) -> Any:
+    if not isinstance(voice, str):
+        return voice
+    stripped = voice.strip()
+    if not stripped:
+        return voice
+    # Already a Qwen speaker (case-insensitive); leave for resolve_voice to canonicalize.
+    from text2audiobook.voices import get_voice
+
+    if get_voice(stripped) is not None:
+        return stripped
+    # Kokoro ids look like af_bella / bm_george.
+    prefix = stripped.lower().split("_", 1)[0]
+    mapped = _KOKORO_VOICE_PREFIX_TO_QWEN.get(prefix)
+    if mapped is not None:
+        logger.warning(
+            "tts.voice %r is a legacy Kokoro id; mapping to %r for Qwen3-TTS",
             stripped,
             mapped,
         )
