@@ -254,11 +254,19 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     assert "Discursive note about eggmen" in uncued
 
 
-def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
+def test_cleanup_accepts_heavy_citation_cuts() -> None:
     from text2audiobook.llm import _guard_cleaned
 
     raw = " ".join(["word"] * 100)
     cleaned = " ".join(["word"] * 10)
+    assert _guard_cleaned(raw, cleaned) == cleaned
+
+
+def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
+    from text2audiobook.llm import _guard_cleaned
+
+    raw = " ".join(["word"] * 100)
+    cleaned = " ".join(["word"] * 400)
     with caplog.at_level(logging.WARNING, logger="text2audiobook.llm"):
         assert _guard_cleaned(
             raw,
@@ -268,7 +276,7 @@ def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
             chapter_title="On Several Regimes of Lines",
         ) == raw
     assert "chapter=9 chunk=1 (On Several Regimes of Lines)" in caplog.text
-    assert "100 -> 10 words" in caplog.text
+    assert "100 -> 400 words" in caplog.text
 
 
 def test_references_heading_with_colon_is_removed() -> None:
