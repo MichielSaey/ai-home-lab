@@ -216,8 +216,40 @@ def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
                 "use tts.instruct for style/rate hints"
             )
             tts_data.pop("speed", None)
+        if "lang" in tts_data:
+            tts_data["lang"] = _normalize_tts_lang(tts_data["lang"])
         normalized["tts"] = tts_data
     return normalized
+
+
+# Kokoro single-letter codes → Qwen3-TTS language names (unsupported → English).
+_KOKORO_LANG_TO_QWEN: dict[str, str] = {
+    "a": "English",  # American
+    "b": "English",  # British
+    "e": "Spanish",
+    "f": "French",
+    "i": "Italian",
+    "j": "Japanese",
+    "p": "Portuguese",
+    "z": "Chinese",
+}
+
+
+def _normalize_tts_lang(lang: Any) -> Any:
+    if not isinstance(lang, str):
+        return lang
+    stripped = lang.strip()
+    if not stripped:
+        return lang
+    mapped = _KOKORO_LANG_TO_QWEN.get(stripped.lower())
+    if mapped is not None:
+        logger.warning(
+            "tts.lang %r is a legacy Kokoro code; mapping to %r for Qwen3-TTS",
+            stripped,
+            mapped,
+        )
+        return mapped
+    return stripped
 
 
 def app_config_from_dict(

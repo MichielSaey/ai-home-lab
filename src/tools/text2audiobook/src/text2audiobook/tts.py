@@ -42,26 +42,30 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
         device = resolve_tts_device(config.device)
 
     device_map = "cpu" if device == "cpu" else "cuda:0"
-    dtype = torch.bfloat16
+    # Qwen3-TTS expects float32 on CPU; bfloat16 on CUDA.
+    dtype = torch.float32 if device == "cpu" else torch.bfloat16
     load_kwargs: dict[str, Any] = {
         "device_map": device_map,
         "dtype": dtype,
     }
 
     model_id = config.model_id
-    try:
-        model = Qwen3TTSModel.from_pretrained(
-            model_id,
-            attn_implementation="flash_attention_2",
-            **load_kwargs,
-        )
-    except Exception:
-        logger.info(
-            "flash_attention_2 unavailable for %s; loading without it",
-            model_id,
-            exc_info=True,
-        )
+    if device == "cpu":
         model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
+    else:
+        try:
+            model = Qwen3TTSModel.from_pretrained(
+                model_id,
+                attn_implementation="flash_attention_2",
+                **load_kwargs,
+            )
+        except Exception:
+            logger.info(
+                "flash_attention_2 unavailable for %s; loading without it",
+                model_id,
+                exc_info=True,
+            )
+            model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
 
     logger.info(
         "Loaded Qwen3-TTS on %s (model=%s, lang=%s, voice=%s, instruct=%r)",

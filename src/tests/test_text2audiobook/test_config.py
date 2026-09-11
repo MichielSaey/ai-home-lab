@@ -72,6 +72,23 @@ def test_load_config_ignores_legacy_tts_speed(tmp_path: Path) -> None:
     assert not hasattr(cfg.tts, "speed")
 
 
+def test_load_config_maps_legacy_kokoro_lang_codes(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "a", "voice": "Ryan"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.lang == "English"
+
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "z", "voice": "Vivian"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.lang == "Chinese"
+
+
 def test_load_config_accepts_epub_dir_alias(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
