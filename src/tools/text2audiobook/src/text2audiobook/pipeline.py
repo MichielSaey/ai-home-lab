@@ -10,23 +10,34 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from text2audiobook import formats  # noqa: F401 — register built-in readers
 from text2audiobook.audio import build_m4b, encode_chapter_mp3
 from text2audiobook.catalog import select_chapters
-from text2audiobook.cleanup import (
-    CLEANER_VERSION,
-    chapters_from_clean_sections,
-    clean_chapters,
+from text2audiobook.cleanup import CLEANER_VERSION, CleanSection, clean_chapters
+from text2audiobook.chunking import (
+    TextChunk,
+    build_chunks_from_sections,
+    build_speak_units_from_chunks,
 )
-from text2audiobook.chunking import TextChunk, build_chunks, build_speak_units
-from text2audiobook.config import AppConfig, TtsConfig
+from text2audiobook.config import (
+    AppConfig,
+    TtsConfig,
+    resolve_book_config,
+    with_speak_footnote_cues,
+)
 from text2audiobook.formatting import FORMATTER_VERSION
 from text2audiobook.gpu import resolve_tts_device
-from text2audiobook.io import BookMetadata, find_sources, infer_source_kind, parse_source
+from text2audiobook.io import (
+    BookMetadata,
+    Chapter,
+    find_sources,
+    infer_source_kind,
+    parse_source,
+)
 from text2audiobook.llm import (
     CleanedChunk,
     LoadedLlm,
@@ -48,6 +59,7 @@ from text2audiobook.stems import (
     load_clean_sections,
     load_extract_chapters,
     load_format_scripts,
+    load_format_units,
     load_jsonl,
     manifest_matches,
     save_clean_sections,
@@ -68,6 +80,16 @@ from text2audiobook.voices import lang_for_voice, resolve_voice
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class StageState:
+    """Mutable stem outputs threaded through injectable stage handlers."""
+
+    chapters: list[Chapter] | None = None
+    sections: list[CleanSection] | None = None
+    format_units: list[TextChunk] | None = None
+    scripts: list[Chapter] | None = None
+
+
 def run(
     config: AppConfig,
     *,
@@ -75,6 +97,7 @@ def run(
     stages: tuple[str, ...] | list[str] | None = None,
     force: bool = False,
     voice: str | None = None,
+    speak_footnote_cues: bool | None = None,
 ) -> int:
     """Process supported sources. Returns a process exit code.
 
@@ -144,6 +167,7 @@ def run(
                     stages=selected,
                     force=force,
                     voice=voice,
+                    speak_footnote_cues=speak_footnote_cues,
                 )
             except KeyboardInterrupt:
                 tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
@@ -185,6 +209,7 @@ def process_source(
     stages: tuple[str, ...] = PIPELINE_STAGES,
     force: bool = False,
     voice: str | None = None,
+    speak_footnote_cues: bool | None = None,
 ) -> None:
     """Convert one source through the requested extract / format / speak stages."""
     selected = canonical_stages(stages)
@@ -201,6 +226,10 @@ def process_source(
     record.title = metadata.title
     record.author = metadata.author
     tracker.write()
+
+    config = resolve_book_config(config, metadata.slug)
+    if speak_footnote_cues is not None:
+        config = with_speak_footnote_cues(config, speak_footnote_cues)
 
     book_idx, total_books = position if position is not None else (1, 1)
     progress = ProgressContext(
@@ -257,8 +286,10 @@ def process_source(
             own_llm = load_llm(config.llm)
         return own_llm
 
-    try:
-        chapters = _run_extract(
+    state = StageState()
+
+    def run_extract() -> None:
+        state.chapters = _run_extract(
             all_chapters,
             metadata=metadata,
             source_path=source_path,
@@ -272,7 +303,26 @@ def process_source(
             force=force,
             ensure_llm=ensure_llm,
         )
-        cleaned_chapters = _run_clean(
+
+    def run_clean() -> None:
+        chapters = state.chapters
+        if chapters is None:
+            chapters = _run_extract(
+                all_chapters,
+                metadata=metadata,
+                source_path=source_path,
+                source_kind=source_kind,
+                config=config,
+                stems=stems,
+                tracker=tracker,
+                record=record,
+                progress=progress,
+                selected=selected,
+                force=force,
+                ensure_llm=ensure_llm,
+            )
+            state.chapters = chapters
+        state.sections = _run_clean(
             chapters,
             metadata=metadata,
             source_kind=source_kind,
@@ -283,8 +333,30 @@ def process_source(
             selected=selected,
             force=force,
         )
-        scripts = _run_format(
-            cleaned_chapters,
+
+    def run_format() -> None:
+        sections = state.sections
+        if sections is None:
+            extract_hash = (
+                file_sha256(stems.chapters_json) if stems.chapters_json.exists() else ""
+            )
+            fingerprint = _clean_fingerprint(
+                config, extract_hash=extract_hash, source_kind=source_kind
+            )
+            clean_ok = (
+                manifest_matches(stems.clean_manifest, fingerprint)
+                and stems.clean_sections_jsonl.exists()
+                and stems.clean_chapters_index.exists()
+            )
+            if not clean_ok:
+                raise FileNotFoundError(
+                    f"Clean stem missing for {metadata.title!r}. "
+                    "Run --clean or --stage clean first."
+                )
+            sections = load_clean_sections(stems)
+            state.sections = sections
+        state.scripts, state.format_units = _run_format(
+            sections,
             metadata=metadata,
             source_kind=source_kind,
             config=config,
@@ -296,21 +368,38 @@ def process_source(
             force=force,
             ensure_llm=ensure_llm,
         )
+
+    def run_speak() -> None:
+        nonlocal own_llm, own_kokoro
         if own_llm is not None:
             unload_llm(own_llm)
             own_llm = None
             logger.info("Unloaded LLM to free GPU memory for Kokoro")
 
-        if "speak" in selected:
+        scripts = state.scripts
+        format_units = state.format_units
+        if scripts is None or format_units is None:
+            format_hash_ok = stems.format_manifest.exists() and stems.format_chapters_index.exists()
+            if not format_hash_ok or not stems.format_chunks_jsonl.exists():
+                raise FileNotFoundError(
+                    f"Format stem missing for {metadata.title!r}. Run --stage format first."
+                )
             if scripts is None:
                 scripts = load_format_scripts(stems)
-            own_kokoro = kokoro
-            loaded_here = False
-            if own_kokoro is None:
-                own_kokoro = load_kokoro(tts_config, device=tts_device)
-                loaded_here = True
+            if format_units is None:
+                format_units = load_format_units(stems)
+            state.scripts = scripts
+            state.format_units = format_units
+
+        own_kokoro = kokoro
+        loaded_here = False
+        if own_kokoro is None:
+            own_kokoro = load_kokoro(tts_config, device=tts_device)
+            loaded_here = True
+        try:
             _run_speak(
-                scripts,
+                format_units,
+                scripts=scripts,
                 metadata=metadata,
                 config=config,
                 tts_config=tts_config,
@@ -321,10 +410,22 @@ def process_source(
                 progress=progress,
                 force=force,
             )
+        finally:
             if loaded_here:
                 unload_kokoro(own_kokoro)
                 own_kokoro = None
-        elif "format" in selected or "clean" in selected or "extract" in selected:
+
+    handlers = {
+        "extract": run_extract,
+        "clean": run_clean,
+        "format": run_format,
+        "speak": run_speak,
+    }
+
+    try:
+        for stage_name in selected:
+            handlers[stage_name]()
+        if "speak" not in selected:
             tracker.finish_book(record, status="ok")
     finally:
         if own_llm is not None:
@@ -386,6 +487,7 @@ def _clean_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str
         "extract_hash": extract_hash,
         "cleaner_version": CLEANER_VERSION,
         "source_kind": source_kind,
+        "speak_footnote_cues": config.output.speak_footnote_cues,
     }
 
 
@@ -421,15 +523,38 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
     }
 
 
+def _format_units_hash(stems: BookStems) -> str:
+    """Hash cleaned format windows so speak invalidates when chunks change."""
+    if not stems.format_chunks_jsonl.exists():
+        return ""
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    return stable_hash(
+        [
+            {
+                "chapter_index": row.get("chapter_index"),
+                "chunk_index": row.get("chunk_index"),
+                "cleaned_text": row.get("cleaned_text"),
+            }
+            for row in rows
+        ]
+    )
+
+
 def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
-    """Hash formatter inputs plus on-disk chapter scripts (not only the manifest)."""
+    """Hash formatter inputs plus on-disk scripts/units (not only the manifest)."""
     source_kind = "ebook"
     data = json.loads(stems.format_manifest.read_text(encoding="utf-8")) if stems.format_manifest.exists() else {}
     if isinstance(data, dict) and data.get("source_kind"):
         source_kind = str(data["source_kind"])
     clean_hash = clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
     fingerprint = _format_fingerprint(config, clean_hash=clean_hash, source_kind=source_kind)
-    return stable_hash({**fingerprint, "scripts_hash": format_scripts_hash(stems)})
+    return stable_hash(
+        {
+            **fingerprint,
+            "scripts_hash": format_scripts_hash(stems),
+            "units_hash": _format_units_hash(stems),
+        }
+    )
 
 
 def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
@@ -505,7 +630,7 @@ def _run_extract(
 
 
 def _run_clean(
-    chapters: list,
+    chapters: list[Chapter],
     *,
     metadata: BookMetadata,
     source_kind: str,
@@ -515,7 +640,7 @@ def _run_clean(
     record: BookRecord,
     selected: tuple[str, ...],
     force: bool,
-) -> list:
+) -> list[CleanSection]:
     extract_hash = file_sha256(stems.chapters_json)
     fingerprint = _clean_fingerprint(
         config, extract_hash=extract_hash, source_kind=source_kind
@@ -527,14 +652,11 @@ def _run_clean(
     )
 
     if "clean" not in selected:
-        if ("format" in selected or "speak" in selected) and not clean_ok:
+        if not clean_ok:
             raise FileNotFoundError(
                 f"Clean stem missing for {metadata.title!r}. Run --clean or --stage clean first."
             )
-        if not clean_ok:
-            return chapters
-        sections = load_clean_sections(stems)
-        return chapters_from_clean_sections(sections)
+        return load_clean_sections(stems)
 
     if clean_ok and not force:
         logger.info("Clean stem current — skipping deterministic cleanup")
@@ -543,13 +665,17 @@ def _run_clean(
         record.chunk_count = len(sections)
         record.word_count = sum(len(section.text.split()) for section in sections)
         tracker.write()
-        return chapters_from_clean_sections(sections)
+        return sections
 
     if force and stems.clean_dir.exists():
         shutil.rmtree(stems.clean_dir)
 
     with tracker.stage(record, "clean"):
-        sections = clean_chapters(chapters, source_kind=source_kind)
+        sections = clean_chapters(
+            chapters,
+            source_kind=source_kind,
+            speak_footnote_cues=config.output.speak_footnote_cues,
+        )
     if not sections:
         raise ValueError(
             f"No sections left after clean stage for {metadata.title!r}"
@@ -574,11 +700,48 @@ def _run_clean(
         len(sections),
         record.chapter_count,
     )
-    return chapters_from_clean_sections(sections)
+    return sections
+
+
+def _chapter_stubs_from_sections(sections: list[CleanSection]) -> list[Chapter]:
+    """Unique chapter meta in section order (empty text; scripts filled later)."""
+    stubs: list[Chapter] = []
+    seen: set[int] = set()
+    for section in sections:
+        if section.chapter_index in seen:
+            continue
+        seen.add(section.chapter_index)
+        stubs.append(
+            Chapter(
+                index=section.chapter_index,
+                title=section.chapter_title,
+                slug=section.chapter_slug,
+                text="",
+            )
+        )
+    return stubs
+
+
+def _format_units_from_cleaned(
+    cleaned: list[CleanedChunk],
+    *,
+    source_kind: str,
+) -> list[TextChunk]:
+    return [
+        TextChunk(
+            chapter_index=item.chapter_index,
+            chapter_title=item.chapter_title,
+            chapter_slug=item.chapter_slug,
+            chunk_index=item.chunk_index,
+            text=item.cleaned_text,
+            source_kind=source_kind,
+        )
+        for item in cleaned
+    ]
 
 
 def _run_format(
-    chapters: list,
+    sections: list[CleanSection],
     *,
     metadata: BookMetadata,
     source_kind: str,
@@ -590,7 +753,7 @@ def _run_format(
     selected: tuple[str, ...],
     force: bool,
     ensure_llm,
-) -> list | None:
+) -> tuple[list[Chapter], list[TextChunk]]:
     clean_hash = (
         clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
     )
@@ -600,6 +763,7 @@ def _run_format(
     format_ok = (
         manifest_matches(stems.format_manifest, fingerprint)
         and stems.format_chapters_index.exists()
+        and stems.format_chunks_jsonl.exists()
     )
 
     if "format" not in selected:
@@ -607,38 +771,36 @@ def _run_format(
             raise FileNotFoundError(
                 f"Format stem missing for {metadata.title!r}. Run --stage format first."
             )
-        return None
+        return load_format_scripts(stems), load_format_units(stems)
 
     if format_ok and not force:
         logger.info("Format stem current — skipping LLM cleanup")
         scripts = load_format_scripts(stems)
+        format_units = load_format_units(stems)
         record.chapter_count = len(scripts)
-        record.chunk_count = sum(
-            1 for _ in load_jsonl(stems.format_chunks_jsonl)
-        )
-        record.word_count = sum(len(chapter.text.split()) for chapter in scripts)
+        record.chunk_count = len(format_units)
+        record.word_count = sum(len(unit.text.split()) for unit in format_units)
         tracker.write()
-        return scripts
+        return scripts, format_units
 
     if force and stems.format_dir.exists():
         shutil.rmtree(stems.format_dir)
     else:
         _drop_stale_format_cache(stems, fingerprint)
 
-    # Chapters are already clean-stage output (split + deterministic scrub).
-    prepared = chapters
-    if not prepared:
+    if not sections:
         raise ValueError(
-            f"No chapters left after clean stage for {metadata.title!r}"
+            f"No sections left after clean stage for {metadata.title!r}"
         )
 
-    chunks = build_chunks(
-        prepared,
+    chunks = build_chunks_from_sections(
+        sections,
         config.chunking.format_words_per_chunk,
         max_chunks_per_chapter=config.chunking.max_chunks_per_chapter,
         source_kind=source_kind,
     )
-    record.chapter_count = len(prepared)
+    chapter_stubs = _chapter_stubs_from_sections(sections)
+    record.chapter_count = len(chapter_stubs)
     record.chunk_count = len(chunks)
     record.word_count = sum(len(chunk.text.split()) for chunk in chunks)
     tracker.write()
@@ -668,20 +830,23 @@ def _run_format(
             record=record,
             cache=cache,
             stems=stems,
+            source_kind=source_kind,
         )
     )
-    _write_format_scripts(stems, prepared, cleaned_list)
+    _write_format_scripts(stems, chapter_stubs, cleaned_list)
     write_json(
         stems.format_manifest,
         {**fingerprint, "scripts_hash": format_scripts_hash(stems)},
     )
-    logger.info("Wrote format stem (%d chapter script(s))", len(prepared))
-    return load_format_scripts(stems)
+    logger.info("Wrote format stem (%d chapter script(s))", len(chapter_stubs))
+    scripts = load_format_scripts(stems)
+    format_units = _format_units_from_cleaned(cleaned_list, source_kind=source_kind)
+    return scripts, format_units
 
 
 def _write_format_scripts(
     stems: BookStems,
-    chapters: list,
+    chapters: list[Chapter],
     cleaned: list[CleanedChunk],
 ) -> None:
     by_slug: dict[str, list[str]] = defaultdict(list)
@@ -696,8 +861,9 @@ def _write_format_scripts(
 
 
 def _run_speak(
-    scripts: list,
+    format_units: list[TextChunk],
     *,
+    scripts: list[Chapter],
     metadata: BookMetadata,
     config: AppConfig,
     tts_config: TtsConfig,
@@ -708,22 +874,20 @@ def _run_speak(
     progress: ProgressContext,
     force: bool,
 ) -> None:
-    format_data = json.loads(stems.format_manifest.read_text(encoding="utf-8"))
     format_hash = _live_format_hash(stems, config)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_ok = manifest_matches(stems.speak_manifest, fingerprint)
 
     british = tts_config.lang == "b"
-    units = build_speak_units(
-        scripts,
+    units = build_speak_units_from_chunks(
+        format_units,
         target_phonemes=config.chunking.speak_target_phonemes,
         max_phonemes=config.chunking.speak_max_phonemes,
         british=british,
-        source_kind=str(format_data.get("source_kind") or "ebook"),
     )
     record.chapter_count = len(scripts)
     record.chunk_count = len(units)
-    record.word_count = sum(len(chapter.text.split()) for chapter in scripts)
+    record.word_count = sum(len(unit.text.split()) for unit in format_units)
     tracker.write()
     logger.info(
         "Created %d speak unit(s) (target %d phonemes, cap %d)",
@@ -899,6 +1063,7 @@ def _timed_persist_iter(
     record: BookRecord,
     cache: dict[tuple[int, int], str],
     stems: BookStems,
+    source_kind: str,
 ) -> Iterator[CleanedChunk]:
     while True:
         start = time.perf_counter()
@@ -914,6 +1079,9 @@ def _timed_persist_iter(
                 {
                     "chapter_index": item.chapter_index,
                     "chunk_index": item.chunk_index,
+                    "chapter_title": item.chapter_title,
+                    "chapter_slug": item.chapter_slug,
+                    "source_kind": source_kind,
                     "raw_hash": text_hash(item.raw_text),
                     "cleaned_text": item.cleaned_text,
                 },

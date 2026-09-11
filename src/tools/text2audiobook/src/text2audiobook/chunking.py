@@ -207,6 +207,59 @@ def _split_overlong(
     return packed
 
 
+def further_split(
+    units: list[TextChunk],
+    *,
+    over_budget: Callable[[str], bool],
+    split_text: Callable[[str], list[str]],
+) -> list[TextChunk]:
+    """Keep units under budget; only subdivide oversized ones. Never merge."""
+    out: list[TextChunk] = []
+    for unit in units:
+        if not over_budget(unit.text):
+            out.append(
+                TextChunk(
+                    chapter_index=unit.chapter_index,
+                    chapter_title=unit.chapter_title,
+                    chapter_slug=unit.chapter_slug,
+                    chunk_index=len(out),
+                    text=unit.text,
+                    source_kind=unit.source_kind,
+                )
+            )
+            continue
+        for piece in split_text(unit.text):
+            if not piece.strip():
+                continue
+            out.append(
+                TextChunk(
+                    chapter_index=unit.chapter_index,
+                    chapter_title=unit.chapter_title,
+                    chapter_slug=unit.chapter_slug,
+                    chunk_index=len(out),
+                    text=piece,
+                    source_kind=unit.source_kind,
+                )
+            )
+    # Re-number chunk_index per chapter for stable speak/format resumes.
+    by_chapter: dict[int, int] = {}
+    renumbered: list[TextChunk] = []
+    for unit in out:
+        index = by_chapter.get(unit.chapter_index, 0)
+        by_chapter[unit.chapter_index] = index + 1
+        renumbered.append(
+            TextChunk(
+                chapter_index=unit.chapter_index,
+                chapter_title=unit.chapter_title,
+                chapter_slug=unit.chapter_slug,
+                chunk_index=index,
+                text=unit.text,
+                source_kind=unit.source_kind,
+            )
+        )
+    return renumbered
+
+
 def build_chunks(
     chapters: list[Chapter],
     words_per_chunk: int,
@@ -214,24 +267,70 @@ def build_chunks(
     max_chunks_per_chapter: int | None = None,
     source_kind: str = "ebook",
 ) -> list[TextChunk]:
-    all_chunks: list[TextChunk] = []
-    for chapter in chapters:
-        texts = chunk_sentences(chapter.text, words_per_chunk)
-        if max_chunks_per_chapter is not None:
-            texts = texts[:max_chunks_per_chapter]
+    seeds = [
+        TextChunk(
+            chapter_index=chapter.index,
+            chapter_title=chapter.title,
+            chapter_slug=chapter.slug,
+            chunk_index=0,
+            text=chapter.text,
+            source_kind=source_kind,
+        )
+        for chapter in chapters
+    ]
+    chunks = further_split(
+        seeds,
+        over_budget=lambda text: len(text.split()) > words_per_chunk,
+        split_text=lambda text: chunk_sentences(text, words_per_chunk),
+    )
+    if max_chunks_per_chapter is None:
+        return chunks
+    capped: list[TextChunk] = []
+    counts: dict[int, int] = {}
+    for chunk in chunks:
+        used = counts.get(chunk.chapter_index, 0)
+        if used >= max_chunks_per_chapter:
+            continue
+        counts[chunk.chapter_index] = used + 1
+        capped.append(chunk)
+    return capped
 
-        for i, chunk_text in enumerate(texts):
-            all_chunks.append(
-                TextChunk(
-                    chapter_index=chapter.index,
-                    chapter_title=chapter.title,
-                    chapter_slug=chapter.slug,
-                    chunk_index=i,
-                    text=chunk_text,
-                    source_kind=source_kind,
-                )
-            )
-    return all_chunks
+
+def build_chunks_from_sections(
+    sections: list,
+    words_per_chunk: int,
+    *,
+    max_chunks_per_chapter: int | None = None,
+    source_kind: str = "ebook",
+) -> list[TextChunk]:
+    """Further-split clean sections by word budget without rematching chapters."""
+    seeds = [
+        TextChunk(
+            chapter_index=section.chapter_index,
+            chapter_title=section.chapter_title,
+            chapter_slug=section.chapter_slug,
+            chunk_index=section.section_index,
+            text=section.text,
+            source_kind=source_kind,
+        )
+        for section in sections
+    ]
+    chunks = further_split(
+        seeds,
+        over_budget=lambda text: len(text.split()) > words_per_chunk,
+        split_text=lambda text: chunk_sentences(text, words_per_chunk),
+    )
+    if max_chunks_per_chapter is None:
+        return chunks
+    capped: list[TextChunk] = []
+    counts: dict[int, int] = {}
+    for chunk in chunks:
+        used = counts.get(chunk.chapter_index, 0)
+        if used >= max_chunks_per_chapter:
+            continue
+        counts[chunk.chapter_index] = used + 1
+        capped.append(chunk)
+    return capped
 
 
 def build_speak_units(
@@ -243,24 +342,48 @@ def build_speak_units(
     source_kind: str = "ebook",
     count_fn: Callable[[str], int] | None = None,
 ) -> list[TextChunk]:
-    all_units: list[TextChunk] = []
-    for chapter in chapters:
-        texts = chunk_sentences_by_phonemes(
-            chapter.text,
+    seeds = [
+        TextChunk(
+            chapter_index=chapter.index,
+            chapter_title=chapter.title,
+            chapter_slug=chapter.slug,
+            chunk_index=0,
+            text=chapter.text,
+            source_kind=source_kind,
+        )
+        for chapter in chapters
+    ]
+    return build_speak_units_from_chunks(
+        seeds,
+        target_phonemes=target_phonemes,
+        max_phonemes=max_phonemes,
+        british=british,
+        count_fn=count_fn,
+    )
+
+
+def build_speak_units_from_chunks(
+    format_units: list[TextChunk],
+    *,
+    target_phonemes: int,
+    max_phonemes: int,
+    british: bool = False,
+    count_fn: Callable[[str], int] | None = None,
+) -> list[TextChunk]:
+    """Further-split prior format units by phoneme budget; never rematch."""
+    count = count_fn or (lambda piece: phoneme_count(piece, british=british))
+
+    def split_text(text: str) -> list[str]:
+        return chunk_sentences_by_phonemes(
+            text,
             target_phonemes=target_phonemes,
             max_phonemes=max_phonemes,
             british=british,
-            count_fn=count_fn,
+            count_fn=count,
         )
-        for i, unit_text in enumerate(texts):
-            all_units.append(
-                TextChunk(
-                    chapter_index=chapter.index,
-                    chapter_title=chapter.title,
-                    chapter_slug=chapter.slug,
-                    chunk_index=i,
-                    text=unit_text,
-                    source_kind=source_kind,
-                )
-            )
-    return all_units
+
+    return further_split(
+        format_units,
+        over_budget=lambda text: count(text) > max_phonemes,
+        split_text=split_text,
+    )

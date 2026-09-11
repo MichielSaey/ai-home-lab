@@ -276,6 +276,43 @@ def load_format_scripts(stems: BookStems) -> list[Chapter]:
     return chapters
 
 
+def load_format_units(stems: BookStems) -> list:
+    """Load cleaned format windows as TextChunk units (further-split inputs for speak)."""
+    from text2audiobook.chunking import TextChunk
+
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    if not rows:
+        raise FileNotFoundError(
+            f"Format stem missing chunks at {stems.format_chunks_jsonl}"
+        )
+    index = read_json(stems.format_chapters_index)
+    meta_by_index: dict[int, tuple[str, str]] = {}
+    if isinstance(index, list):
+        for item in index:
+            meta_by_index[int(item["index"])] = (str(item["title"]), str(item["slug"]))
+
+    units: list[TextChunk] = []
+    for row in rows:
+        chapter_index = int(row["chapter_index"])
+        title, slug = meta_by_index.get(chapter_index, ("", ""))
+        if row.get("chapter_title"):
+            title = str(row["chapter_title"])
+        if row.get("chapter_slug"):
+            slug = str(row["chapter_slug"])
+        units.append(
+            TextChunk(
+                chapter_index=chapter_index,
+                chapter_title=title,
+                chapter_slug=slug,
+                chunk_index=int(row["chunk_index"]),
+                text=str(row["cleaned_text"]),
+                source_kind=str(row.get("source_kind") or "ebook"),
+            )
+        )
+    units.sort(key=lambda unit: (unit.chapter_index, unit.chunk_index))
+    return units
+
+
 def format_scripts_hash(stems: BookStems) -> str:
     """Hash merged chapter scripts so speak invalidates when format output changes."""
     index = read_json(stems.format_chapters_index)

@@ -35,9 +35,13 @@ def test_split_places_discursive_footnote_after_sentence() -> None:
     assert "Cuddles have no interiority." in body0.text
     assert re.search(r"(?m)^\s*\.\s*$", body0.text) is None
     assert foot.note_number == "36"
-    assert FOOTNOTE_SPOKEN_MARKER in foot.text
-    assert FOOTNOTE_END_MARKER in foot.text
+    assert FOOTNOTE_SPOKEN_MARKER not in foot.text
+    assert FOOTNOTE_END_MARKER not in foot.text
     assert "Discursive note about eggmen" in foot.text
+    cued = split_chapter_sections(chapter, speak_footnote_cues=True)
+    cued_foot = next(section for section in cued if section.kind == "footnote")
+    assert FOOTNOTE_SPOKEN_MARKER in cued_foot.text
+    assert FOOTNOTE_END_MARKER in cued_foot.text
     assert "Harris" not in "\n".join(section.text for section in sections)
     # Footnote section follows the body section that contained the callout.
     assert sections.index(foot) == sections.index(body0) + 1

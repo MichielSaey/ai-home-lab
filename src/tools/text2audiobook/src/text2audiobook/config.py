@@ -2,7 +2,8 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass, fields
+from copy import deepcopy
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = _TOOL_ROOT / "config.json"
+BOOKS_CONFIG_DIRNAME = "config.books"
 EXPERIMENT_CONFIG_PATH = _TOOL_ROOT.parent / "epub-to-audiobook/config.json"
 
 DEFAULT_CLEAN_PROMPT = (
@@ -97,6 +99,7 @@ class OutputConfig:
     chunk_silence_ms: int = 300
     chapter_silence_ms: int = 1000
     loudnorm: bool = True
+    speak_footnote_cues: bool = False
 
 
 @dataclass
@@ -143,6 +146,21 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge overlay onto a copy of base (overlay wins)."""
+    result = deepcopy(base)
+    for key, value in overlay.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
 def _build_section(cls: type, data: Any, section: str) -> Any:
     if data is None:
         return cls()
@@ -154,36 +172,46 @@ def _build_section(cls: type, data: Any, section: str) -> Any:
     return cls(**{key: value for key, value in data.items() if key in known})
 
 
-def load_config(path: Path | None = None) -> AppConfig:
-    """Load an AppConfig from a JSON file (default: the shipped experiment config)."""
-    config_path = (Path(path) if path is not None else DEFAULT_CONFIG_PATH).resolve()
-    data = json.loads(config_path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"Config root must be a JSON object: {config_path}")
-
-    for key in sorted(set(data) - set(_SECTIONS)):
-        logger.warning("Ignoring unknown config section: %s", key)
-
-    paths_data = data.get("paths")
+def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(data)
+    paths_data = normalized.get("paths")
     if isinstance(paths_data, dict):
         paths_data = dict(paths_data)
-        # Backward-compatible alias from the EPUB-only era.
         if "input_dir" not in paths_data and "epub_dir" in paths_data:
             paths_data["input_dir"] = paths_data["epub_dir"]
         paths_data.pop("epub_dir", None)
-    paths = _build_section(PathsConfig, paths_data, "paths")
-    paths.resolve_against(config_path.parent)
+        normalized["paths"] = paths_data
 
-    chunking_data = data.get("chunking")
+    chunking_data = normalized.get("chunking")
     if isinstance(chunking_data, dict):
         chunking_data = dict(chunking_data)
         if "format_words_per_chunk" not in chunking_data and "words_per_chunk" in chunking_data:
             chunking_data["format_words_per_chunk"] = chunking_data["words_per_chunk"]
         chunking_data.pop("words_per_chunk", None)
+        normalized["chunking"] = chunking_data
+    return normalized
+
+
+def app_config_from_dict(
+    data: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> AppConfig:
+    """Build AppConfig from a raw JSON object."""
+    if not isinstance(data, dict):
+        raise ValueError("Config root must be a JSON object")
+
+    for key in sorted(set(data) - set(_SECTIONS)):
+        logger.warning("Ignoring unknown config section: %s", key)
+
+    data = _normalize_raw_config(data)
+    paths = _build_section(PathsConfig, data.get("paths"), "paths")
+    if config_path is not None:
+        paths.resolve_against(config_path.parent)
 
     return AppConfig(
         paths=paths,
-        chunking=_build_section(ChunkingConfig, chunking_data, "chunking"),
+        chunking=_build_section(ChunkingConfig, data.get("chunking"), "chunking"),
         selection=_build_section(SelectionConfig, data.get("selection"), "selection"),
         llm=_build_section(LlmConfig, data.get("llm"), "llm"),
         tts=_build_section(TtsConfig, data.get("tts"), "tts"),
@@ -191,3 +219,64 @@ def load_config(path: Path | None = None) -> AppConfig:
         pipeline=_build_section(PipelineConfig, data.get("pipeline"), "pipeline"),
         config_path=config_path,
     )
+
+
+def load_config(path: Path | None = None) -> AppConfig:
+    """Load an AppConfig from a JSON file (default: the shipped tool config)."""
+    config_path = (Path(path) if path is not None else DEFAULT_CONFIG_PATH).resolve()
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Config root must be a JSON object: {config_path}")
+    return app_config_from_dict(data, config_path=config_path)
+
+
+def book_config_path(base: AppConfig, slug: str) -> Path | None:
+    """Path to ``config.books/<slug>.json`` next to the base config, if any."""
+    if base.config_path is None:
+        return None
+    return base.config_path.parent / BOOKS_CONFIG_DIRNAME / f"{slug}.json"
+
+
+def resolve_book_config(base: AppConfig, slug: str) -> AppConfig:
+    """Deep-merge ``config.books/<slug>.json`` onto base when the file exists.
+
+    Book overlays may not redefine ``paths`` (kept from the base/default).
+    """
+    path = book_config_path(base, slug)
+    if path is None or not path.exists():
+        return base
+
+    overlay = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(overlay, dict):
+        raise ValueError(f"Book config root must be a JSON object: {path}")
+    if "paths" in overlay:
+        logger.info(
+            "Ignoring paths in book overlay %s (paths come from the base config)",
+            path.name,
+        )
+        overlay = {key: value for key, value in overlay.items() if key != "paths"}
+
+    raw_base = {
+        "paths": {
+            "input_dir": str(base.paths.input_dir),
+            "staging_dir": str(base.paths.staging_dir),
+            "output_dir": str(base.paths.output_dir),
+            "runs_dir": str(base.paths.runs_dir),
+        },
+        "chunking": asdict(base.chunking),
+        "selection": asdict(base.selection),
+        "llm": asdict(base.llm),
+        "tts": asdict(base.tts),
+        "output": asdict(base.output),
+        "pipeline": asdict(base.pipeline),
+    }
+    merged = deep_merge(raw_base, overlay)
+    logger.info("Applied book config overlay: %s", path)
+    resolved = app_config_from_dict(merged, config_path=base.config_path)
+    # Paths were already absolute in raw_base; re-resolve is a no-op for abs paths.
+    return resolved
+
+
+def with_speak_footnote_cues(config: AppConfig, enabled: bool) -> AppConfig:
+    """Return a copy with output.speak_footnote_cues set."""
+    return replace(config, output=replace(config.output, speak_footnote_cues=enabled))
