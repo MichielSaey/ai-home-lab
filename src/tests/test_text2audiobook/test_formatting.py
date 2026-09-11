@@ -92,10 +92,16 @@ def test_footnote_callout_and_see_note_are_stripped() -> None:
     text = format_for_tts(
         "Burikko is closer to aegyo [see note 55] and sajiao.\n"
         "34\n"
-        "Cute diffuses across surfaces."
+        "Cute diffuses across surfaces.\n\n"
+        "Notes\n"
+        "34\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+        "55\n. Ngai, Our Aesthetic Categories, 4."
     )
     assert "see note" not in text.lower()
     assert re.search(r"(?m)^34\s*$", text) is None
+    assert "Harris" not in text
+    assert "Ngai" not in text
+    assert "Footnote." not in text
     assert "Burikko is closer to aegyo" in text
     assert "and sajiao." in text
     assert "Cute diffuses across surfaces." in text
@@ -149,15 +155,36 @@ def test_second_format_pass_keeps_digits_inside_footnotes() -> None:
 
 def test_see_notes_range_inserts_each_discursive_note() -> None:
     text = format_for_tts(
-        "See the twin asides [see notes 1-2] in order.\n\n"
+        "See the twin asides [see notes 1-3] in order.\n\n"
         "Notes\n"
         "1\n. First discursive aside about surfaces.\n"
-        "2\n. Second discursive aside about bobbles."
+        "2\n. Middle discursive aside about curves.\n"
+        "3\n. Third discursive aside about bobbles."
     )
     assert text.index("twin asides") < text.index("First discursive")
-    assert text.index("First discursive") < text.index("Second discursive")
-    assert text.index("Second discursive") < text.index("in order.")
-    assert text.count("Footnote.") == 2
+    assert text.index("First discursive") < text.index("Middle discursive")
+    assert text.index("Middle discursive") < text.index("Third discursive")
+    assert text.index("Third discursive") < text.index("in order.")
+    assert text.count("Footnote.") == 3
+
+
+def test_chunked_format_pass_keeps_digits_without_footnote_cue() -> None:
+    # Simulate a format window that split away from the Footnote. cue.
+    window = "The count was\n42\nand then the argument continued about cuteness."
+    assert format_for_tts(window) == (
+        "The count was\n42\nand then the argument continued about cuteness."
+    )
+
+
+def test_see_note_consumes_below_and_trailing_punct() -> None:
+    text = format_for_tts(
+        "Read on (see note 9 below).\n\n"
+        "Notes\n"
+        "9\n. Discursive clarification about the prior claim."
+    )
+    assert "below" not in text.lower()
+    assert "Footnote." in text
+    assert "Discursive clarification" in text
 
 
 def test_short_discursive_note_is_kept() -> None:

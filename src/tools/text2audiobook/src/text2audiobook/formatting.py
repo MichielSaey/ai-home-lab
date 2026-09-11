@@ -184,7 +184,8 @@ _AUTHOR_START_RE = re.compile(
 # Spoken cue when a discursive endnote is inlined after its callout.
 FOOTNOTE_SPOKEN_MARKER = "Footnote."
 _SEE_NOTE_NUM_RE = re.compile(
-    r"\[?\s*see\s+notes?\s+(?P<nums>\d+[a-z]?(?:\s*[-–,;]\s*\d+[a-z]?)*)\s*\]?",
+    r"\[?\(?\s*see\s+notes?\s+(?P<nums>\d+[a-z]?(?:\s*[-–,;—]\s*\d+[a-z]?)*)"
+    r"(?:\s+below)?\s*\)?\]?\.?",
     re.IGNORECASE,
 )
 
@@ -525,6 +526,18 @@ def _consume_footnote(
     return _format_footnote_block(body)
 
 
+def _note_numbers_from_spec(nums: str) -> list[str]:
+    """Expand ``1-3``, ``1–3``, or ``1, 2`` into ordered note-number strings."""
+    found: list[str] = []
+    for match in re.finditer(r"(\d+)(?:\s*[-–—]\s*(\d+))?", nums):
+        start = int(match.group(1))
+        end = int(match.group(2) or match.group(1))
+        if end < start:
+            start, end = end, start
+        found.extend(str(value) for value in range(start, end + 1))
+    return found
+
+
 def _replace_see_note_pointers(
     line: str,
     entries: dict[str, str],
@@ -536,7 +549,7 @@ def _replace_see_note_pointers(
         pieces.append(line[cursor : match.start()])
         blocks = [
             block
-            for num in re.findall(r"\d+[a-z]?", match.group("nums"))
+            for num in _note_numbers_from_spec(match.group("nums"))
             if (block := _consume_footnote(num, entries, used))
         ]
         pieces.append(("\n\n" + "\n\n".join(blocks) + "\n\n") if blocks else "")
@@ -556,11 +569,9 @@ def relocate_footnotes(text: str) -> str:
     """
     body, preamble, entries = _extract_notes_apparatus(text)
     if not entries and not preamble:
-        # Already relocated (or never had Notes). Do not strip lone digits inside
-        # inlined footnote prose on a second format_for_tts pass.
-        if FOOTNOTE_SPOKEN_MARKER in body:
-            return body
-        return strip_footnote_callouts(body)
+        # Already relocated, or no Notes apparatus. Do not strip lone digits —
+        # format windows may split a footnote body away from its Footnote. cue.
+        return body
 
     used: set[str] = set()
     out_lines: list[str] = []
