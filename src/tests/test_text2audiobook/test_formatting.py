@@ -1,3 +1,5 @@
+import logging
+
 from text2audiobook.chunking import TextChunk
 from text2audiobook.config import DEFAULT_CLEAN_PROMPT, LlmConfig, load_config
 from text2audiobook.formatting import (
@@ -66,6 +68,55 @@ def test_reference_section_is_removed() -> None:
 def test_plain_bibliography_heading_is_removed() -> None:
     text = format_for_tts("Keep this.\n\nBibliography\nFisher, Mark. 2012.")
     assert text == "Keep this."
+
+
+def test_plain_notes_heading_is_removed() -> None:
+    text = format_for_tts(
+        "Cute remains cryptic.\n\nNotes\n34\n. Harris, Cute, Quaint, Hungry and Romantic, 20."
+    )
+    assert text == "Cute remains cryptic."
+    assert "Harris" not in text
+
+
+def test_footnotes_heading_is_removed() -> None:
+    text = format_for_tts("Keep this.\n\nFootnotes\n1. A digression.")
+    assert text == "Keep this."
+
+
+def test_prepare_chapters_strips_trailing_notes_before_chunking() -> None:
+    chapters = [
+        Chapter(
+            index=4,
+            title="Topology of Bobbles",
+            text=(
+                "Cuddles have no interiority.\n\n"
+                "Notes\n"
+                "34\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
+                "35\n. More endnote filler that must not be narrated."
+            ),
+            slug="topology_of_bobbles",
+        ),
+    ]
+    prepared = prepare_chapters_for_tts(chapters)
+    assert len(prepared) == 1
+    assert prepared[0].text == "Cuddles have no interiority."
+
+
+def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:
+    from text2audiobook.llm import _guard_cleaned
+
+    raw = " ".join(["word"] * 100)
+    cleaned = " ".join(["word"] * 10)
+    with caplog.at_level(logging.WARNING, logger="text2audiobook.llm"):
+        assert _guard_cleaned(
+            raw,
+            cleaned,
+            chapter_index=9,
+            chunk_index=1,
+            chapter_title="On Several Regimes of Lines",
+        ) == raw
+    assert "chapter=9 chunk=1 (On Several Regimes of Lines)" in caplog.text
+    assert "100 -> 10 words" in caplog.text
 
 
 def test_references_heading_with_colon_is_removed() -> None:

@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "3"
+FORMATTER_VERSION = "4"
 
 _MONTHS = (
     "January",
@@ -105,6 +105,8 @@ _REFERENCES_HEADING_RE = re.compile(
         | notes\s+and\s+references
         | notes\s+and\s+bibliography
         | endnotes
+        | footnotes?
+        | notes
         | citations
         | further\s+reading
         | sources

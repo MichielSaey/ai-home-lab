@@ -90,23 +90,41 @@ def _build_prompt(tokenizer: Any, clean_prompt: str, text: str) -> str:
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
-def _guard_cleaned(raw: str, cleaned: str) -> str:
+def _guard_cleaned(
+    raw: str,
+    cleaned: str,
+    *,
+    chapter_index: int | None = None,
+    chunk_index: int | None = None,
+    chapter_title: str | None = None,
+) -> str:
     raw_words = len(raw.split())
     cleaned_words = len(cleaned.split())
     if raw_words == 0:
         return cleaned
     ratio = cleaned_words / raw_words
     if not cleaned or ratio < MIN_CLEANED_RATIO or ratio > MAX_CLEANED_RATIO:
+        where = ""
+        if chapter_index is not None and chunk_index is not None:
+            title = f" ({chapter_title})" if chapter_title else ""
+            where = f" chapter={chapter_index} chunk={chunk_index}{title};"
         logger.warning(
-            "LLM cleanup output rejected (%d -> %d words); falling back to raw chunk",
+            "LLM cleanup output rejected (%d -> %d words);%s falling back to raw chunk",
             raw_words,
             cleaned_words,
+            where,
         )
         return raw
     return cleaned
 
 
-def clean_texts_batch(llm: LoadedLlm, texts: list[str], config: LlmConfig) -> list[str]:
+def clean_texts_batch(
+    llm: LoadedLlm,
+    texts: list[str],
+    config: LlmConfig,
+    *,
+    chunks: list[TextChunk] | None = None,
+) -> list[str]:
     """Clean a batch of texts with one generate() call (left-padded prompts)."""
     import torch
 
@@ -128,7 +146,19 @@ def clean_texts_batch(llm: LoadedLlm, texts: list[str], config: LlmConfig) -> li
 
     generated = output_ids[:, inputs["input_ids"].shape[1] :]
     decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
-    return [_guard_cleaned(raw, text.strip()) for raw, text in zip(texts, decoded)]
+    guarded: list[str] = []
+    for i, (raw, text) in enumerate(zip(texts, decoded)):
+        chunk = chunks[i] if chunks is not None else None
+        guarded.append(
+            _guard_cleaned(
+                raw,
+                text.strip(),
+                chapter_index=None if chunk is None else chunk.chapter_index,
+                chunk_index=None if chunk is None else chunk.chunk_index,
+                chapter_title=None if chunk is None else chunk.chapter_title,
+            )
+        )
+    return guarded
 
 
 def iter_clean_chunks_batched(
@@ -194,7 +224,9 @@ def iter_clean_chunks_batched(
         if not pending:
             return
         assert llm is not None
-        cleaned_texts = clean_texts_batch(llm, [c.text for c in pending], config)
+        cleaned_texts = clean_texts_batch(
+            llm, [c.text for c in pending], config, chunks=pending
+        )
         for chunk, cleaned_text in zip(pending, cleaned_texts):
             yield to_cleaned(chunk, cleaned_text)
         pending.clear()
