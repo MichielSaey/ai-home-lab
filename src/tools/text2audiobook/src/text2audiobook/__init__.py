@@ -1,4 +1,4 @@
-"""Text to M4B audiobook pipeline: LLM chapter selection and cleanup, Kokoro TTS, ffmpeg assembly."""
+"""Text to M4B audiobook pipeline: LLM chapter selection and cleanup, Qwen3-TTS, ffmpeg assembly."""
 
 from text2audiobook.config import AppConfig, load_config
 

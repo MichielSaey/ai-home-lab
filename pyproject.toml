@@ -23,17 +23,17 @@ dev = [
     "garminconnect==0.3.6",
 ]
 text-audiobook = [
-    "en-core-web-sm",
     "ipywidgets",
     "ebooklib",
     "beautifulsoup4",
     "lxml",
     "nltk",
     "httpx",
-    "transformers>=5.0,<5.10", # 5.10+ needs torch.float8_e8m0fnu (torch 2.7+)
-    "accelerate",
+    # qwen-tts pins transformers==4.57.3 / accelerate==1.12.0 (was transformers>=5.0,<5.10).
+    "transformers==4.57.3",
+    "accelerate==1.12.0",
     "bitsandbytes",
-    "kokoro>=0.9.4",
+    "qwen-tts>=0.1.1",
     "soundfile",
     "pydub",
     "mutagen",
@@ -47,7 +47,6 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
-en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shared", "src/tools/text2audiobook/src/text2audiobook"]

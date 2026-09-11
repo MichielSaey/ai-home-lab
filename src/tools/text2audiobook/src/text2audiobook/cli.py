@@ -57,14 +57,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--voice",
         default=None,
         help=(
-            "Kokoro voice id, or 'random' to pick A / A- / B- without replacement. "
-            "Language code follows the voice prefix (af_* → a, bf_* → b)."
+            "Qwen3-TTS CustomVoice speaker (e.g. Ryan, Aiden), or 'random' "
+            "to pick without replacement until the pool wraps. "
+            "Language defaults from the speaker's native language."
         ),
     )
     parser.add_argument(
         "--list-voices",
         action="store_true",
-        help="Print Kokoro voices and exit (no GPU / LLM load).",
+        help="Print Qwen3-TTS CustomVoice speakers and exit (no GPU / LLM load).",
     )
     cues = parser.add_mutually_exclusive_group()
     cues.add_argument(

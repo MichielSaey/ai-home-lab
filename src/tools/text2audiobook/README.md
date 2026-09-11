@@ -40,13 +40,13 @@ text2audiobook --clean
 text2audiobook --stage clean
 text2audiobook --stage format
 text2audiobook --stage speak
-text2audiobook --stage speak --voice bf_emma
+text2audiobook --stage speak --voice Aiden
 text2audiobook --force
 text2audiobook --footnote-cues
 text2audiobook --no-footnote-cues
 ```
 
-`--clean` is an alias for `--stage clean` (clean-only). `--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+`--clean` is an alias for `--stage clean` (clean-only). `--stage speak` loads Qwen3-TTS only (no LLM). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
 
 Spoken `Footnote.` / `End of footnote.` cues are **off** by default (`output.speak_footnote_cues`). Enable per book in `config.books/<slug>.json` or with `--footnote-cues`.
 
@@ -54,11 +54,11 @@ Spoken `Footnote.` / `End of footnote.` cues are **off** by default (`output.spe
 
 ```bash
 text2audiobook --list-voices
-text2audiobook --voice af_bella
+text2audiobook --voice Ryan
 text2audiobook --voice random
 ```
 
-Default voice is `af_bella` (American, lang `a`). `--voice random` picks from official grades A / A- / B- without replacement until the pool wraps. Language follows the voice prefix (`bf_emma` → British `b`).
+Default voice is `Ryan` (English). Optional `tts.instruct` controls style/rate (CustomVoice has no `speed`). `--voice random` picks from the nine CustomVoice speakers without replacement until the pool wraps. `tts.lang` is the book/content language (default `English`) and stays independent of the speaker; speakers can narrate any supported language.
 
 ## Supported inputs
 
@@ -87,7 +87,7 @@ Stems live under `data/staging/<book_slug>/`:
 | `extract/` | Selected chapters + extract manifest |
 | `clean/` | Deterministic sections (`sections.jsonl`: body/footnote in reading order) + clean manifest |
 | `format/` | LLM windows (`chunks.jsonl`), joined chapter scripts, format manifest |
-| `speak/` | Phoneme units, WAVs, speak manifest (voice, speed, bitrate, loudnorm, silences) |
+| `speak/` | Character-budget units, WAVs, speak manifest (model_id, voice, lang, instruct, bitrate, loudnorm, silences) |
 | `data/staging/_url_cache/` | Fetched HTML cache (keyed by URL hash) |
 | `data/output/<book_slug>.m4b` | Finished audiobooks |
 | `data/runs/` | Run manifests, logs, `ledger.jsonl` |
@@ -104,7 +104,7 @@ Each stage starts from the previous stem’s units and **further-splits only whe
 2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections (optional spoken cues)
 3. Scrub URLs, inline citations, dates, abbreviations, tables/figures, and other print conventions
 
-**Format** further-splits clean sections by word budget (~1000), rewrites each window for spoken English (optional LLM), then joins windows per chapter for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by phoneme budget (target 160, cap 400).
+**Format** further-splits clean sections by word budget (~1000), rewrites each window for spoken English (optional LLM), then joins windows per chapter for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by character budget (target 400, cap 800) for Qwen3-TTS CustomVoice.
 
 Deterministic rules (also in the LLM prompt):
 
@@ -120,7 +120,7 @@ Deterministic rules (also in the LLM prompt):
 
 Format chapter scripts are written as `format/chapters/NNNN_<slug>.txt` so directory order matches narration order.
 
-GPU default is sequential: unload Qwen before Kokoro. `pipeline.concurrent_models` is ignored.
+GPU default is sequential: unload the Qwen LLM before Qwen3-TTS loads. `pipeline.concurrent_models` is ignored. Dependencies: `qwen-tts` requires `transformers==4.57.3` (and `accelerate==1.12.0`), so the text-audiobook group pins those instead of transformers 5.x.
 
 ## Adding a format
 

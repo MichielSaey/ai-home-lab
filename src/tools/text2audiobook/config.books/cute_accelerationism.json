@@ -1,8 +1,8 @@
 {
   "chunking": {
     "format_words_per_chunk": 1000,
-    "speak_target_phonemes": 160,
-    "speak_max_phonemes": 400,
+    "speak_target_chars": 400,
+    "speak_max_chars": 800,
     "max_chunks_per_chapter": null
   },
   "selection": {
@@ -21,10 +21,11 @@
     "max_new_tokens": 2048
   },
   "tts": {
-    "lang": "a",
-    "voice": "af_bella",
-    "speed": 0.9,
-    "device": "auto"
+    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "lang": "English",
+    "voice": "Ryan",
+    "device": "auto",
+    "instruct": null
   },
   "output": {
     "chapter_mp3": false,

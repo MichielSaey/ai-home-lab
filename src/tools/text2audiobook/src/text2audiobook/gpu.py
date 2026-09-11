@@ -1,4 +1,4 @@
-"""GPU preflight: make NVIDIA driver-side libs loadable under Nix, verify cuFFT."""
+"""GPU preflight: make NVIDIA driver-side libs loadable under Nix, resolve TTS device."""
 
 import ctypes
 import logging
@@ -13,11 +13,10 @@ _HOST_LIB_DIRS = (
     Path("/usr/lib/x86_64-linux-gnu"),
     Path("/run/opengl-driver/lib"),  # NixOS hosts
 )
-# libcuda: CUDA driver API; ptxjitcompiler: dlopen'd by libcuda for PTX->SASS JIT,
-# required by cuFFT (not by cuBLAS/cuDNN, which ship sm_86 SASS).
+# libcuda: CUDA driver API; ptxjitcompiler: dlopen'd by libcuda for PTX->SASS JIT.
 _DRIVER_LIBS = ("libcuda.so.1", "libnvidia-ptxjitcompiler.so.1")
 
-__all__ = ["cuda_fft_available", "prepare_gpu_env", "resolve_tts_device"]
+__all__ = ["cuda_available", "prepare_gpu_env", "resolve_tts_device"]
 
 
 def _preload_driver_libs() -> list[str]:
@@ -34,41 +33,29 @@ def _preload_driver_libs() -> list[str]:
     return loaded
 
 
-def cuda_fft_available() -> bool:
-    """Return True if a minimal CUDA FFT works (Kokoro's vocoder uses torch.stft).
-
-    Unlike shared.cuda_bootstrap.cuda_fft_available, this probe does not touch
-    cufft_plan_cache.max_size (setting it to 0 can trigger false failures).
-    """
+def cuda_available() -> bool:
+    """Return True if torch can see a CUDA device."""
     import torch
 
-    if not torch.cuda.is_available():
-        return False
-    try:
-        torch.fft.rfft(torch.randn(512, device="cuda"))
-        torch.cuda.synchronize()
-        return True
-    except RuntimeError:
-        return False
+    return bool(torch.cuda.is_available())
 
 
 def prepare_gpu_env() -> bool:
-    """Preload driver libs; return True if CUDA FFT (Kokoro vocoder) works."""
+    """Preload driver libs; return True if CUDA is available for TTS/LLM."""
     _preload_driver_libs()
     ensure_torch_compat()
     ensure_triton_compat()
-    ok = cuda_fft_available()
+    ok = cuda_available()
     if not ok:
-        log.warning("CUDA FFT unavailable; Kokoro will fall back to CPU")
+        log.warning("CUDA unavailable; TTS/LLM will fall back to CPU when device=auto")
     return ok
 
 
 def resolve_tts_device(requested: str) -> str:
     """Map the configured TTS device to a concrete torch device.
 
-    "auto" picks cuda only when a minimal CUDA FFT works (Kokoro's vocoder
-    needs torch.stft); "cuda" and "cpu" pass through unchanged.
+    "auto" picks cuda when available; "cuda" and "cpu" pass through unchanged.
     """
     if requested == "auto":
-        return "cuda" if cuda_fft_available() else "cpu"
+        return "cuda" if cuda_available() else "cpu"
     return requested

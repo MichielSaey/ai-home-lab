@@ -65,8 +65,8 @@ class PathsConfig:
 @dataclass
 class ChunkingConfig:
     format_words_per_chunk: int = 1000
-    speak_target_phonemes: int = 160
-    speak_max_phonemes: int = 400
+    speak_target_chars: int = 400
+    speak_max_chars: int = 800
     max_chunks_per_chapter: int | None = None
 
 
@@ -92,10 +92,11 @@ class LlmConfig:
 
 @dataclass
 class TtsConfig:
-    lang: str = "a"
-    voice: str = "af_bella"
-    speed: float = 0.90
+    model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    lang: str = "English"
+    voice: str = "Ryan"
     device: str = "auto"
+    instruct: str | None = None
 
 
 @dataclass
@@ -197,8 +198,99 @@ def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
         if "format_words_per_chunk" not in chunking_data and "words_per_chunk" in chunking_data:
             chunking_data["format_words_per_chunk"] = chunking_data["words_per_chunk"]
         chunking_data.pop("words_per_chunk", None)
+        if "speak_target_phonemes" in chunking_data or "speak_max_phonemes" in chunking_data:
+            logger.warning(
+                "chunking.speak_*_phonemes is obsolete (Qwen3-TTS uses character "
+                "budgets); ignoring old keys — set speak_target_chars / speak_max_chars"
+            )
+            chunking_data.pop("speak_target_phonemes", None)
+            chunking_data.pop("speak_max_phonemes", None)
         normalized["chunking"] = chunking_data
+
+    tts_data = normalized.get("tts")
+    if isinstance(tts_data, dict):
+        tts_data = dict(tts_data)
+        if "speed" in tts_data:
+            logger.warning(
+                "tts.speed is ignored (Qwen3-TTS CustomVoice); "
+                "use tts.instruct for style/rate hints"
+            )
+            tts_data.pop("speed", None)
+        if "lang" in tts_data:
+            tts_data["lang"] = _normalize_tts_lang(tts_data["lang"])
+        if "voice" in tts_data:
+            tts_data["voice"] = _normalize_tts_voice(tts_data["voice"])
+        normalized["tts"] = tts_data
     return normalized
+
+
+# Kokoro single-letter codes → Qwen3-TTS language names.
+# Unsupported codes (e.g. Hindi "h") fall back to English with a warning.
+_KOKORO_LANG_TO_QWEN: dict[str, str] = {
+    "a": "English",  # American
+    "b": "English",  # British
+    "e": "Spanish",
+    "f": "French",
+    "h": "English",  # Hindi — not in Qwen3-TTS language set
+    "i": "Italian",
+    "j": "Japanese",
+    "p": "Portuguese",
+    "z": "Chinese",
+}
+
+# First letter of Kokoro voice ids → approximate Qwen CustomVoice speaker.
+_KOKORO_VOICE_PREFIX_TO_QWEN: dict[str, str] = {
+    "af": "Serena",  # American female → warm female (can speak English)
+    "am": "Ryan",
+    "bf": "Serena",
+    "bm": "Ryan",
+    "ff": "Serena",
+    "jf": "Ono_Anna",
+    "jm": "Ono_Anna",
+    "zf": "Vivian",
+    "zm": "Uncle_Fu",
+}
+
+
+def _normalize_tts_lang(lang: Any) -> Any:
+    if not isinstance(lang, str):
+        return lang
+    stripped = lang.strip()
+    if not stripped:
+        return lang
+    mapped = _KOKORO_LANG_TO_QWEN.get(stripped.lower())
+    if mapped is not None:
+        logger.warning(
+            "tts.lang %r is a legacy Kokoro code; mapping to %r for Qwen3-TTS",
+            stripped,
+            mapped,
+        )
+        return mapped
+    return stripped
+
+
+def _normalize_tts_voice(voice: Any) -> Any:
+    if not isinstance(voice, str):
+        return voice
+    stripped = voice.strip()
+    if not stripped:
+        return voice
+    # Already a Qwen speaker (case-insensitive); leave for resolve_voice to canonicalize.
+    from text2audiobook.voices import get_voice
+
+    if get_voice(stripped) is not None:
+        return stripped
+    # Kokoro ids look like af_bella / bm_george.
+    prefix = stripped.lower().split("_", 1)[0]
+    mapped = _KOKORO_VOICE_PREFIX_TO_QWEN.get(prefix)
+    if mapped is not None:
+        logger.warning(
+            "tts.voice %r is a legacy Kokoro id; mapping to %r for Qwen3-TTS",
+            stripped,
+            mapped,
+        )
+        return mapped
+    return stripped
 
 
 def app_config_from_dict(

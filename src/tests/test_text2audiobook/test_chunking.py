@@ -4,7 +4,7 @@ from text2audiobook.chunking import (
     build_chunks_from_sections,
     build_speak_units_from_chunks,
     chunk_sentences,
-    chunk_sentences_by_phonemes,
+    chunk_sentences_by_chars,
     further_split,
 )
 from text2audiobook.cleanup import CleanSection
@@ -61,20 +61,20 @@ def test_speak_further_split_from_format_units() -> None:
     ]
     spoken = build_speak_units_from_chunks(
         units,
-        target_phonemes=8,
-        max_phonemes=12,
+        target_chars=8,
+        max_chars=12,
         count_fn=len,
     )
     assert spoken[0].text == "Short."
     assert all(len(unit.text) <= 12 for unit in spoken)
 
 
-def test_phoneme_packer_stays_under_cap() -> None:
+def test_char_packer_stays_under_cap() -> None:
     text = "Short one. Another short sentence. Third sentence here."
-    units = chunk_sentences_by_phonemes(
+    units = chunk_sentences_by_chars(
         text,
-        target_phonemes=20,
-        max_phonemes=40,
+        target_chars=20,
+        max_chars=40,
         count_fn=len,
     )
     assert units
@@ -85,12 +85,12 @@ def test_phoneme_packer_stays_under_cap() -> None:
         assert word in joined
 
 
-def test_phoneme_packer_splits_semicolon_before_comma() -> None:
+def test_char_packer_splits_semicolon_before_comma() -> None:
     long_piece = "aaaa; " + ("b" * 12) + ", " + ("c" * 12)
-    units = chunk_sentences_by_phonemes(
+    units = chunk_sentences_by_chars(
         long_piece,
-        target_phonemes=10,
-        max_phonemes=20,
+        target_chars=10,
+        max_chars=20,
         count_fn=len,
     )
     assert len(units) >= 2

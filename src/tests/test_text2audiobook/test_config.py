@@ -40,7 +40,78 @@ def test_load_config_maps_legacy_words_per_chunk(tmp_path: Path) -> None:
     )
     cfg = load_config(config_path)
     assert cfg.chunking.format_words_per_chunk == 800
-    assert cfg.chunking.speak_target_phonemes == 160
+    assert cfg.chunking.speak_target_chars == 400
+
+
+def test_load_config_maps_legacy_phoneme_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "chunking": {
+                    "speak_target_phonemes": 160,
+                    "speak_max_phonemes": 400,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.chunking.speak_target_chars == 400
+    assert cfg.chunking.speak_max_chars == 800
+
+
+def test_load_config_ignores_legacy_tts_speed(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tts": {"voice": "Ryan", "speed": 0.9}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.voice == "Ryan"
+    assert not hasattr(cfg.tts, "speed")
+
+
+def test_load_config_maps_legacy_kokoro_lang_codes(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "a", "voice": "Ryan"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.lang == "English"
+
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "z", "voice": "Vivian"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.lang == "Chinese"
+
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "h", "voice": "Ryan"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.lang == "English"
+
+
+def test_load_config_maps_legacy_kokoro_voices(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tts": {"lang": "a", "voice": "af_bella"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.voice == "Serena"
+    assert cfg.tts.lang == "English"
+
+    config_path.write_text(
+        json.dumps({"tts": {"voice": "bm_george"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.voice == "Ryan"
 
 
 def test_load_config_accepts_epub_dir_alias(tmp_path: Path) -> None:
