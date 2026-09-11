@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "6"
+FORMATTER_VERSION = "7"
 
 _MONTHS = (
     "January",
@@ -472,8 +472,11 @@ def _iter_endnote_entries(notes_body: str) -> tuple[str, dict[str, str]]:
     return preamble, entries
 
 
-def _format_footnote_block(body: str) -> str:
-    return f"{FOOTNOTE_SPOKEN_MARKER}\n{body.strip()}"
+def _format_footnote_block(body: str, *, speak_footnote_cues: bool = False) -> str:
+    stripped = body.strip()
+    if not speak_footnote_cues:
+        return stripped
+    return f"{FOOTNOTE_SPOKEN_MARKER}\n{stripped}"
 
 
 def _extract_notes_apparatus(text: str) -> tuple[str, str, dict[str, str]]:
@@ -513,6 +516,8 @@ def _consume_footnote(
     num: str,
     entries: dict[str, str],
     used: set[str],
+    *,
+    speak_footnote_cues: bool = False,
 ) -> str | None:
     """Return a spoken footnote block, or None when the note is dropped/already used."""
     body = entries.get(num)
@@ -523,7 +528,7 @@ def _consume_footnote(
     used.add(num)
     if is_citation_only_note(body):
         return None
-    return _format_footnote_block(body)
+    return _format_footnote_block(body, speak_footnote_cues=speak_footnote_cues)
 
 
 def _note_numbers_from_spec(nums: str) -> list[str]:
@@ -542,6 +547,8 @@ def _replace_see_note_pointers(
     line: str,
     entries: dict[str, str],
     used: set[str],
+    *,
+    speak_footnote_cues: bool = False,
 ) -> str:
     pieces: list[str] = []
     cursor = 0
@@ -550,7 +557,11 @@ def _replace_see_note_pointers(
         blocks = [
             block
             for num in _note_numbers_from_spec(match.group("nums"))
-            if (block := _consume_footnote(num, entries, used))
+            if (
+                block := _consume_footnote(
+                    num, entries, used, speak_footnote_cues=speak_footnote_cues
+                )
+            )
         ]
         rest_start = match.end()
         # Keep a following sentence period with the host clause, not after the note.
@@ -568,13 +579,12 @@ def _replace_see_note_pointers(
     return "".join(pieces)
 
 
-def relocate_footnotes(text: str) -> str:
+def relocate_footnotes(text: str, *, speak_footnote_cues: bool = False) -> str:
     """Move discursive endnotes after their callouts; drop citation-only notes.
 
     Bare markers like ``34`` and ``see note 34`` are removed. Discursive note
-    bodies are inserted immediately afterward, prefixed with
-    :data:`FOOTNOTE_SPOKEN_MARKER`, so later word-window chunking keeps them
-    next to the claim they annotate. Unreferenced discursive notes (and any
+    bodies are inserted immediately afterward (optionally prefixed with
+    :data:`FOOTNOTE_SPOKEN_MARKER`). Unreferenced discursive notes (and any
     Notes preamble) are appended at the end.
     """
     body, preamble, entries = _extract_notes_apparatus(text)
@@ -584,20 +594,32 @@ def relocate_footnotes(text: str) -> str:
         # split a footnote body away from its Footnote. cue).
         unused: set[str] = set()
         return "\n".join(
-            _replace_see_note_pointers(line, {}, unused) for line in body.splitlines()
+            _replace_see_note_pointers(
+                line, {}, unused, speak_footnote_cues=speak_footnote_cues
+            )
+            for line in body.splitlines()
         )
 
     used: set[str] = set()
     out_lines: list[str] = []
     for line in body.splitlines():
         if _FOOTNOTE_CALLOUT_LINE_RE.match(line):
-            block = _consume_footnote(line.strip(), entries, used)
+            block = _consume_footnote(
+                line.strip(),
+                entries,
+                used,
+                speak_footnote_cues=speak_footnote_cues,
+            )
             if block:
                 out_lines.append("")
                 out_lines.extend(block.splitlines())
                 out_lines.append("")
             continue
-        out_lines.append(_replace_see_note_pointers(line, entries, used))
+        out_lines.append(
+            _replace_see_note_pointers(
+                line, entries, used, speak_footnote_cues=speak_footnote_cues
+            )
+        )
 
     trailing: list[str] = []
     if preamble:
@@ -608,7 +630,9 @@ def relocate_footnotes(text: str) -> str:
         body_text = entries[num]
         if is_citation_only_note(body_text):
             continue
-        trailing.append(_format_footnote_block(body_text))
+        trailing.append(
+            _format_footnote_block(body_text, speak_footnote_cues=speak_footnote_cues)
+        )
     if trailing:
         out_lines.append("")
         out_lines.extend(trailing)
@@ -616,9 +640,9 @@ def relocate_footnotes(text: str) -> str:
     return "\n".join(out_lines).strip()
 
 
-def scrub_citations_for_tts(text: str) -> str:
+def scrub_citations_for_tts(text: str, *, speak_footnote_cues: bool = False) -> str:
     """Relocate discursive footnotes and drop citation-only endnotes/callouts."""
-    return relocate_footnotes(text)
+    return relocate_footnotes(text, speak_footnote_cues=speak_footnote_cues)
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -732,10 +756,11 @@ def format_for_tts(
     *,
     chapter_title: str = "",
     source_kind: str = "ebook",
+    speak_footnote_cues: bool = False,
 ) -> str:
     """Rewrite a chunk so Kokoro hears spoken forms instead of print conventions."""
     text = strip_reference_sections(text)
-    text = scrub_citations_for_tts(text)
+    text = scrub_citations_for_tts(text, speak_footnote_cues=speak_footnote_cues)
     text = replace_tables_and_figures(
         text, chapter_title=chapter_title, source_kind=source_kind
     )
@@ -752,8 +777,13 @@ def prepare_chapters_for_tts(
     chapters: list[Chapter],
     *,
     source_kind: str = "ebook",
+    speak_footnote_cues: bool = False,
 ) -> list[Chapter]:
     """Compatibility wrapper around the clean-stage split/scrub."""
     from text2audiobook.cleanup import prepare_chapters_for_tts as prepare
 
-    return prepare(chapters, source_kind=source_kind)
+    return prepare(
+        chapters,
+        source_kind=source_kind,
+        speak_footnote_cues=speak_footnote_cues,
+    )

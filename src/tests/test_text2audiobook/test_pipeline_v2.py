@@ -84,13 +84,13 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
         wav_path.parent.mkdir(parents=True, exist_ok=True)
         wav_path.write_bytes(b"RIFF")
 
-    def fake_units(chapters, **_kwargs):
-        chapter = chapters[0]
+    def fake_units(format_units, **_kwargs):
+        unit = format_units[0]
         return [
             TextChunk(
-                chapter_index=chapter.index,
-                chapter_title=chapter.title,
-                chapter_slug=chapter.slug,
+                chapter_index=unit.chapter_index,
+                chapter_title=unit.chapter_title,
+                chapter_slug=unit.chapter_slug,
                 chunk_index=0,
                 text="hello",
             )
@@ -107,7 +107,7 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
     )
-    monkeypatch.setattr("text2audiobook.pipeline.build_speak_units", fake_units)
+    monkeypatch.setattr("text2audiobook.pipeline.build_speak_units_from_chunks", fake_units)
 
     record = tracker.start_book(source)
     process_source(
@@ -263,14 +263,14 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
     )
     monkeypatch.setattr(
-        "text2audiobook.pipeline.build_speak_units",
-        lambda chapters, **_kwargs: [
+        "text2audiobook.pipeline.build_speak_units_from_chunks",
+        lambda format_units, **_kwargs: [
             TextChunk(
-                chapter_index=chapters[0].index,
-                chapter_title=chapters[0].title,
-                chapter_slug=chapters[0].slug,
+                chapter_index=format_units[0].chapter_index,
+                chapter_title=format_units[0].chapter_title,
+                chapter_slug=format_units[0].chapter_slug,
                 chunk_index=0,
-                text=chapters[0].text,
+                text=format_units[0].text,
             )
         ],
     )
@@ -309,7 +309,7 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
     assert synth_calls == ["first pass script", "second pass script"]
 
 
-def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> None:
+def test_edited_format_unit_resynthesizes(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path, skip_existing=True)
     synth_calls: list[str] = []
 
@@ -327,14 +327,14 @@ def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> Non
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
     )
     monkeypatch.setattr(
-        "text2audiobook.pipeline.build_speak_units",
-        lambda chapters, **_kwargs: [
+        "text2audiobook.pipeline.build_speak_units_from_chunks",
+        lambda format_units, **_kwargs: [
             TextChunk(
-                chapter_index=chapters[0].index,
-                chapter_title=chapters[0].title,
-                chapter_slug=chapters[0].slug,
+                chapter_index=format_units[0].chapter_index,
+                chapter_title=format_units[0].chapter_title,
+                chapter_slug=format_units[0].chapter_slug,
                 chunk_index=0,
-                text=chapters[0].text,
+                text=format_units[0].text,
             )
         ],
     )
@@ -351,8 +351,12 @@ def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> Non
     )
     assert synth_calls
     stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
-    script_path = next(stems.format_chapter_dir.glob("*.txt"))
-    script_path.write_text("manually edited script", encoding="utf-8")
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    rows[0]["cleaned_text"] = "manually edited format unit"
+    stems.format_chunks_jsonl.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
     record = tracker.start_book(source)
     process_source(
@@ -363,4 +367,4 @@ def test_edited_chapter_script_resynthesizes(tmp_path: Path, monkeypatch) -> Non
         stages=("speak",),
         tts_device="cpu",
     )
-    assert synth_calls[-1] == "manually edited script"
+    assert synth_calls[-1] == "manually edited format unit"

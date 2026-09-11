@@ -66,6 +66,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Print Kokoro voices and exit (no GPU / LLM load).",
     )
+    cues = parser.add_mutually_exclusive_group()
+    cues.add_argument(
+        "--footnote-cues",
+        action="store_true",
+        dest="footnote_cues",
+        help="Speak footnote start/end markers (overrides config).",
+    )
+    cues.add_argument(
+        "--no-footnote-cues",
+        action="store_false",
+        dest="footnote_cues",
+        help="Omit spoken footnote markers (overrides config).",
+    )
+    parser.set_defaults(footnote_cues=None)
     args = parser.parse_args(argv)
 
     if args.list_voices:
@@ -106,6 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         stages=stages or None,
         force=args.force,
         voice=args.voice,
+        speak_footnote_cues=args.footnote_cues,
     )
 
 

@@ -79,7 +79,8 @@ def test_citation_only_endnote_is_dropped_but_notes_prose_kept() -> None:
         "Notes\n"
         "35\n. Harris,\nCute, Quaint, Hungry and Romantic\n, 20.\n"
         "36\n. Humpty Dumpty is a can(n)onical eggman and arche-grammatologist of "
-        "language after the crack.\n"
+        "language after the crack.\n",
+        speak_footnote_cues=True,
     )
     assert "Harris" not in text
     assert "Footnote." in text
@@ -111,7 +112,8 @@ def test_see_note_inserts_discursive_footnote() -> None:
     text = format_for_tts(
         "Burikko is closer to aegyo [see note 55] and sajiao.\n\n"
         "Notes\n"
-        "55\n. Aegyo is a performative mode of sweetness with its own grammar of voice."
+        "55\n. Aegyo is a performative mode of sweetness with its own grammar of voice.",
+        speak_footnote_cues=True,
     )
     assert "see note" not in text.lower()
     assert "Footnote." in text
@@ -127,7 +129,8 @@ def test_duplicate_note_number_prefers_discursive_body() -> None:
         "Next sentence.\n\n"
         "Notes\n"
         "7\n. Harris, Cute, Quaint, Hungry and Romantic, 20.\n"
-        "7\n. Discursive expansion about cuteness as an inhuman dynamic of surfaces."
+        "7\n. Discursive expansion about cuteness as an inhuman dynamic of surfaces.",
+        speak_footnote_cues=True,
     )
     assert "Harris" not in text
     assert "Discursive expansion about cuteness" in text
@@ -146,9 +149,9 @@ def test_second_format_pass_keeps_digits_inside_footnotes() -> None:
     chapters = [
         Chapter(index=0, title="One", text=source, slug="one"),
     ]
-    prepared = prepare_chapters_for_tts(chapters)[0].text
+    prepared = prepare_chapters_for_tts(chapters, speak_footnote_cues=True)[0].text
     assert "42" in prepared
-    again = format_for_tts(prepared)
+    again = format_for_tts(prepared, speak_footnote_cues=True)
     assert "42" in again
     assert again.count("Footnote.") == prepared.count("Footnote.")
 
@@ -159,7 +162,8 @@ def test_see_notes_range_inserts_each_discursive_note() -> None:
         "Notes\n"
         "1\n. First discursive aside about surfaces.\n"
         "2\n. Middle discursive aside about curves.\n"
-        "3\n. Third discursive aside about bobbles."
+        "3\n. Third discursive aside about bobbles.",
+        speak_footnote_cues=True,
     )
     assert text.index("twin asides") < text.index("First discursive")
     assert text.index("First discursive") < text.index("Middle discursive")
@@ -180,7 +184,8 @@ def test_see_note_consumes_below_and_trailing_punct() -> None:
     text = format_for_tts(
         "Read on (see note 9 below). Next claim.\n\n"
         "Notes\n"
-        "9\n. Discursive clarification about the prior claim."
+        "9\n. Discursive clarification about the prior claim.",
+        speak_footnote_cues=True,
     )
     assert "below" not in text.lower()
     assert "Footnote." in text
@@ -200,7 +205,8 @@ def test_orphan_see_note_without_notes_section_is_stripped() -> None:
 def test_short_discursive_note_is_kept() -> None:
     text = format_for_tts(
         "Main claim.\n\nNotes\n"
-        "15\n. Even the norm daddies can’t help yielding to the pleasure of telling you what to do."
+        "15\n. Even the norm daddies can’t help yielding to the pleasure of telling you what to do.",
+        speak_footnote_cues=True,
     )
     assert "norm daddies" in text
     assert "Footnote." in text
@@ -231,7 +237,7 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
             slug="topology_of_bobbles",
         ),
     ]
-    prepared = prepare_chapters_for_tts(chapters)
+    prepared = prepare_chapters_for_tts(chapters, speak_footnote_cues=True)
     assert len(prepared) == 1
     text = prepared[0].text
     assert "Harris" not in text
@@ -241,6 +247,11 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     assert text.index("Footnote.") < text.index("Discursive note about eggmen")
     assert text.index("Discursive note about eggmen") < text.index("Cute stays cryptic.")
     assert re.search(r"(?m)^36\s*$", text) is None
+
+    uncued = prepare_chapters_for_tts(chapters)[0].text
+    assert "Footnote." not in uncued
+    assert "End of footnote." not in uncued
+    assert "Discursive note about eggmen" in uncued
 
 
 def test_cleanup_reject_log_includes_chapter_and_chunk(caplog) -> None:

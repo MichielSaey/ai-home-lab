@@ -1,11 +1,12 @@
 # text2audiobook
 
-v2 fire-and-forget CLI: extract → format → speak, then an M4B audiobook.
+v2 fire-and-forget CLI: extract → clean → format → speak, then an M4B audiobook.
 
 ```
 src/tools/text2audiobook/
 ├── src/text2audiobook/   # Python package
-├── config.json           # CLI default config
+├── config.json           # default config for undefined books
+├── config.books/         # optional per-book overlays (`<slug>.json`)
 ├── data/                 # production input / staging / output / runs
 └── __main__.py
 ```
@@ -27,7 +28,7 @@ Or fetch a page directly:
 text2audiobook --url https://retrochronic.com
 ```
 
-`text2audiobook` loads `config.json` in the tool directory by default. Paths in the config are relative to that folder.
+`text2audiobook` loads `config.json` in the tool directory by default. Paths in the config are relative to that folder. For each book slug, if `config.books/<slug>.json` exists it is deep-merged on top of the base (book wins; `paths` stay on the base).
 
 ### Stages
 
@@ -41,9 +42,13 @@ text2audiobook --stage format
 text2audiobook --stage speak
 text2audiobook --stage speak --voice bf_emma
 text2audiobook --force
+text2audiobook --footnote-cues
+text2audiobook --no-footnote-cues
 ```
 
 `--clean` is an alias for `--stage clean` (clean-only). `--stage speak` loads Kokoro only (no Qwen). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+
+Spoken `Footnote.` / `End of footnote.` cues are **off** by default (`output.speak_footnote_cues`). Enable per book in `config.books/<slug>.json` or with `--footnote-cues`.
 
 ### Voices
 
@@ -81,7 +86,7 @@ Stems live under `data/staging/<book_slug>/`:
 |------|---------|
 | `extract/` | Selected chapters + extract manifest |
 | `clean/` | Deterministic sections (`sections.jsonl`: body/footnote in reading order) + clean manifest |
-| `format/` | LLM windows (`chunks.jsonl`), merged chapter scripts, format manifest |
+| `format/` | LLM windows (`chunks.jsonl`), joined chapter scripts, format manifest |
 | `speak/` | Phoneme units, WAVs, speak manifest (voice, speed, bitrate, loudnorm, silences) |
 | `data/staging/_url_cache/` | Fetched HTML cache (keyed by URL hash) |
 | `data/output/<book_slug>.m4b` | Finished audiobooks |
@@ -91,13 +96,15 @@ Stems live under `data/staging/<book_slug>/`:
 
 ## Cleanup / formatting
 
+Each stage starts from the previous stem’s units and **further-splits only when over budget** (never rematches body+footnote into one chapter blob then re-chunks).
+
 **Clean** (after extract) splits each chapter into ordered sections and applies deterministic scrubbing—no LLM. Inspect `clean/sections.jsonl` before formatting:
 
-1. Split on footnote callouts at sentence boundaries
-2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections marked `Footnote.` … `End of footnote.`
+1. Split on footnote callouts at unit boundaries (sentence end or newline before a new capital unit)
+2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections (optional spoken cues)
 3. Scrub URLs, inline citations, dates, abbreviations, tables/figures, and other print conventions
 
-**Format** windows (~1000 words) over the cleaned chapter text are rewritten for spoken English by the LLM, then merged into a chapter script. Speak packing uses a phoneme budget (target 160, cap 400) so Kokoro does not waterfall-split mid-sentence.
+**Format** further-splits clean sections by word budget (~1000), rewrites each window for spoken English (optional LLM), then joins windows per chapter for inspection/M4B titles. **Speak** further-splits those format windows by phoneme budget (target 160, cap 400).
 
 Deterministic rules (also in the LLM prompt):
 

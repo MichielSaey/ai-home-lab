@@ -32,7 +32,7 @@ from text2audiobook.formatting import (
 )
 from text2audiobook.io import Chapter
 
-CLEANER_VERSION = "2"
+CLEANER_VERSION = "3"
 FOOTNOTE_END_MARKER = "End of footnote."
 
 _FN_TOKEN_RE = re.compile(r"⟦FN:(\d+[a-z]?)⟧\.?")
@@ -77,8 +77,15 @@ def strip_urls(text: str) -> str:
     return _URL_RE.sub("", text)
 
 
-def format_footnote_section_text(body: str) -> str:
-    return f"{FOOTNOTE_SPOKEN_MARKER}\n{body.strip()}\n{FOOTNOTE_END_MARKER}"
+def format_footnote_section_text(
+    body: str,
+    *,
+    speak_footnote_cues: bool = False,
+) -> str:
+    stripped = body.strip()
+    if not speak_footnote_cues:
+        return stripped
+    return f"{FOOTNOTE_SPOKEN_MARKER}\n{stripped}\n{FOOTNOTE_END_MARKER}"
 
 
 def apply_deterministic_cleanup(
@@ -87,6 +94,7 @@ def apply_deterministic_cleanup(
     chapter_title: str = "",
     source_kind: str = "ebook",
     kind: str = "body",
+    speak_footnote_cues: bool = False,
 ) -> str:
     """Scrub print conventions from an already-split body or footnote section."""
     text = strip_urls(text)
@@ -101,13 +109,15 @@ def apply_deterministic_cleanup(
     text = expand_symbols(text)
     text = _collapse_whitespace(text)
     if kind == "footnote":
-        # Preserve spoken markers if cleanup collapsed them away.
+        # Strip cues before optionally re-wrapping so scrubbing never doubles them.
         body = text
         if body.startswith(FOOTNOTE_SPOKEN_MARKER):
             body = body[len(FOOTNOTE_SPOKEN_MARKER) :].strip()
         if body.endswith(FOOTNOTE_END_MARKER):
             body = body[: -len(FOOTNOTE_END_MARKER)].strip()
-        return format_footnote_section_text(body)
+        return format_footnote_section_text(
+            body, speak_footnote_cues=speak_footnote_cues
+        )
     return text
 
 
@@ -168,12 +178,13 @@ def split_chapter_sections(
     chapter: Chapter,
     *,
     source_kind: str = "ebook",
+    speak_footnote_cues: bool = False,
 ) -> list[CleanSection]:
     """Split one chapter into body/footnote sections in reading order.
 
     Discursive notes are placed after the sentence that referenced them.
-    Citation-only notes are dropped. Each footnote section is wrapped with
-    spoken start/end markers for later verification and narration.
+    Citation-only notes are dropped. Optional spoken start/end markers wrap
+    footnote sections when ``speak_footnote_cues`` is true.
     """
     if is_references_heading(chapter.title):
         return []
@@ -231,10 +242,13 @@ def split_chapter_sections(
     for section_index, (kind, note_number, raw_text) in enumerate(raw_sections):
         if kind == "footnote":
             cleaned = apply_deterministic_cleanup(
-                format_footnote_section_text(raw_text),
+                format_footnote_section_text(
+                    raw_text, speak_footnote_cues=speak_footnote_cues
+                ),
                 chapter_title=chapter.title,
                 source_kind=source_kind,
                 kind="footnote",
+                speak_footnote_cues=speak_footnote_cues,
             )
         else:
             cleaned = apply_deterministic_cleanup(
@@ -242,6 +256,7 @@ def split_chapter_sections(
                 chapter_title=chapter.title,
                 source_kind=source_kind,
                 kind="body",
+                speak_footnote_cues=speak_footnote_cues,
             )
         if not cleaned.strip():
             continue
@@ -275,16 +290,23 @@ def clean_chapters(
     chapters: list[Chapter],
     *,
     source_kind: str = "ebook",
+    speak_footnote_cues: bool = False,
 ) -> list[CleanSection]:
     """Run split + deterministic cleanup for every non-reference chapter."""
     sections: list[CleanSection] = []
     for chapter in chapters:
-        sections.extend(split_chapter_sections(chapter, source_kind=source_kind))
+        sections.extend(
+            split_chapter_sections(
+                chapter,
+                source_kind=source_kind,
+                speak_footnote_cues=speak_footnote_cues,
+            )
+        )
     return sections
 
 
 def chapters_from_clean_sections(sections: list[CleanSection]) -> list[Chapter]:
-    """Merge cleaned sections back into Chapter objects for format chunking."""
+    """Merge cleaned sections back into Chapter objects (inspect/debug helper)."""
     order: list[tuple[int, str, str]] = []
     texts: dict[int, list[str]] = {}
     for section in sections:
@@ -310,8 +332,13 @@ def prepare_chapters_for_tts(
     chapters: list[Chapter],
     *,
     source_kind: str = "ebook",
+    speak_footnote_cues: bool = False,
 ) -> list[Chapter]:
     """Compatibility wrapper: clean-stage split/scrub, then merge to chapters."""
     return chapters_from_clean_sections(
-        clean_chapters(chapters, source_kind=source_kind)
+        clean_chapters(
+            chapters,
+            source_kind=source_kind,
+            speak_footnote_cues=speak_footnote_cues,
+        )
     )
