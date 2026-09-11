@@ -104,7 +104,7 @@ Each stage starts from the previous stem’s units and **further-splits only whe
 2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections (optional spoken cues)
 3. Scrub URLs, inline citations, dates, abbreviations, tables/figures, and other print conventions
 
-**Format** further-splits clean sections by word budget (~1000), rewrites each window for spoken English (optional LLM), then joins windows per chapter for inspection/M4B titles. **Speak** further-splits those format windows by phoneme budget (target 160, cap 400).
+**Format** further-splits clean sections by word budget (~1000), rewrites each window for spoken English (optional LLM), then joins windows per chapter for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by phoneme budget (target 160, cap 400).
 
 Deterministic rules (also in the LLM prompt):
 
