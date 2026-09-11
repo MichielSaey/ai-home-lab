@@ -38,6 +38,8 @@ text-audiobook = [
     "pydub",
     "mutagen",
     "torch",
+    # Match torch 2.6+cu124 — unpinned torchaudio pulls 2.11 needing libcudart.so.13.
+    "torchaudio==2.6.0",
 ]
 
 [[tool.uv.index]]
@@ -47,6 +49,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shared", "src/tools/text2audiobook/src/text2audiobook"]
