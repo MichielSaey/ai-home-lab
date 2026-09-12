@@ -318,6 +318,85 @@ def test_synthesize_batch_raises_on_wav_count_mismatch(tmp_path: Path) -> None:
         raise AssertionError("expected RuntimeError")
 
 
+def test_synthesize_batch_oom_splits_and_retries(tmp_path: Path, monkeypatch) -> None:
+    """CUDA OOM on a large batch should empty cache, split halves, and write all WAVs."""
+    model = MagicMock()
+    prompt = object()
+    call_sizes: list[int] = []
+
+    def generate_side_effect(**kwargs):
+        texts = kwargs["text"]
+        size = len(texts)
+        call_sizes.append(size)
+        if size >= 3:
+            raise RuntimeError("CUDA out of memory")
+        return (
+            [np.zeros(4 + i, dtype=np.float32) for i in range(size)],
+            24000,
+        )
+
+    model.generate_voice_clone.side_effect = generate_side_effect
+
+    def fake_write(path, *_a, **_k):
+        Path(path).write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.tts.sf.write", fake_write)
+
+    empty_cache = MagicMock()
+    fake_torch = MagicMock()
+    fake_torch.cuda.is_available.return_value = True
+    fake_torch.cuda.empty_cache = empty_cache
+    # Not an OutOfMemoryError subclass — exercise the RuntimeError/"out of memory" path.
+    fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    paths = [tmp_path / f"{i}.wav" for i in range(4)]
+    synthesize_batch_to_wavs(
+        model,
+        [(f"t{i}", paths[i]) for i in range(4)],
+        voice="cloned",
+        language="English",
+        model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+        voice_clone_prompt=prompt,
+    )
+
+    assert call_sizes[0] == 4
+    assert all(size < 3 for size in call_sizes[1:])
+    assert sum(call_sizes[1:]) == 4
+    empty_cache.assert_called()
+    for path in paths:
+        assert path.exists()
+
+
+def test_synthesize_batch_oom_on_single_item_reraises(
+    tmp_path: Path, monkeypatch
+) -> None:
+    model = MagicMock()
+    model.generate_voice_clone.side_effect = RuntimeError("CUDA out of memory")
+
+    empty_cache = MagicMock()
+    fake_torch = MagicMock()
+    fake_torch.cuda.is_available.return_value = True
+    fake_torch.cuda.empty_cache = empty_cache
+    fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    try:
+        synthesize_batch_to_wavs(
+            model,
+            [("only", tmp_path / "only.wav")],
+            voice="cloned",
+            language="English",
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            voice_clone_prompt=object(),
+        )
+    except RuntimeError as exc:
+        assert "out of memory" in str(exc).lower()
+    else:
+        raise AssertionError("expected RuntimeError")
+    empty_cache.assert_called_once()
+
+
 def test_create_voice_clone_prompt_passes_x_vector_only_mode() -> None:
     model = MagicMock()
     model.create_voice_clone_prompt.return_value = ["prompt"]
