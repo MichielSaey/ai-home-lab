@@ -220,6 +220,33 @@ def _write_wav_atomic(
     tmp_path.replace(wav_path)
 
 
+def _is_cuda_oom(exc: BaseException) -> bool:
+    """True for torch CUDA OOM or RuntimeError mentioning out of memory."""
+    try:
+        import torch
+
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+    except Exception:
+        pass
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def _split_instruct_for_halves(
+    instruct: str | None | Sequence[str | None],
+    mid: int,
+    n: int,
+) -> tuple[str | None | list[str | None], str | None | list[str | None]]:
+    if isinstance(instruct, (str, type(None))):
+        return instruct, instruct
+    values = list(instruct)
+    if len(values) != n:
+        raise ValueError(
+            f"instruct list length {len(values)} does not match batch size {n}"
+        )
+    return values[:mid], values[mid:]
+
+
 def synthesize_batch_to_wavs(
     model: Any,
     items: list[tuple[str, Path]],
@@ -238,6 +265,7 @@ def synthesize_batch_to_wavs(
 
     Written via temp file + rename so an interrupted run never leaves a partial WAV.
     Sample rate comes from the model (do not assume 24 kHz).
+    On CUDA OOM with batch size > 1, halves the batch and retries recursively.
     """
     if not items:
         return
@@ -248,67 +276,109 @@ def synthesize_batch_to_wavs(
     total_chars = sum(len(t) for t in texts)
     languages = [language] * n
     instruct_list = _normalize_instruct_list(instruct, n)
+    common_kwargs: dict[str, Any] = {
+        "voice": voice,
+        "language": language,
+        "chunk_silence_ms": chunk_silence_ms,
+        "model_id": model_id,
+        "voice_clone_prompt": voice_clone_prompt,
+        "ref_audio": ref_audio,
+        "ref_text": ref_text,
+        "x_vector_only": x_vector_only,
+    }
 
-    if is_base(model_id):
-        gen_kwargs: dict[str, Any] = {
-            "text": texts,
-            "language": languages,
-        }
-        if voice_clone_prompt is not None:
-            gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
+    try:
+        if is_base(model_id):
+            gen_kwargs: dict[str, Any] = {
+                "text": texts,
+                "language": languages,
+            }
+            if voice_clone_prompt is not None:
+                gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
+                logger.info(
+                    "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                    n,
+                    total_chars,
+                )
+            else:
+                if ref_audio is None:
+                    raise ValueError(
+                        "Base voice cloning requires ref_audio or voice_clone_prompt "
+                        "(set tts.ref_audio)"
+                    )
+                gen_kwargs["ref_audio"] = str(ref_audio)
+                gen_kwargs["ref_text"] = ref_text
+                gen_kwargs["x_vector_only_mode"] = x_vector_only
+                logger.info(
+                    "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                    n,
+                    total_chars,
+                )
+            wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
+        elif is_voice_design(model_id):
+            resolved = [_resolve_voice_design_instruct(value) for value in instruct_list]
             logger.info(
-                "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                "TTS API: generate_voice_design batch_size=%d chars=%d",
                 n,
                 total_chars,
+            )
+            wavs, sample_rate = model.generate_voice_design(
+                text=texts,
+                language=languages,
+                instruct=resolved,
             )
         else:
-            if ref_audio is None:
-                raise ValueError(
-                    "Base voice cloning requires ref_audio or voice_clone_prompt "
-                    "(set tts.ref_audio)"
+            gen_kwargs = {
+                "text": texts,
+                "language": languages,
+                "speaker": voice,
+            }
+            if supports_instruct(model_id):
+                if any(value and str(value).strip() for value in instruct_list):
+                    gen_kwargs["instruct"] = instruct_list
+            elif any(value and str(value).strip() for value in instruct_list):
+                logger.debug(
+                    "Ignoring instruct for %s (no instruction control)",
+                    model_id,
                 )
-            gen_kwargs["ref_audio"] = str(ref_audio)
-            gen_kwargs["ref_text"] = ref_text
-            gen_kwargs["x_vector_only_mode"] = x_vector_only
             logger.info(
-                "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                "TTS API: generate_custom_voice batch_size=%d chars=%d speaker=%s",
                 n,
                 total_chars,
+                voice,
             )
-        wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
-    elif is_voice_design(model_id):
-        resolved = [_resolve_voice_design_instruct(value) for value in instruct_list]
-        logger.info(
-            "TTS API: generate_voice_design batch_size=%d chars=%d",
+            wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
+    except Exception as exc:
+        if not _is_cuda_oom(exc):
+            raise
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if n == 1:
+            raise
+        mid = n // 2
+        logger.warning(
+            "CUDA OOM on TTS batch_size=%d chars=%d; splitting into %d + %d",
             n,
             total_chars,
+            mid,
+            n - mid,
         )
-        wavs, sample_rate = model.generate_voice_design(
-            text=texts,
-            language=languages,
-            instruct=resolved,
+        left_instruct, right_instruct = _split_instruct_for_halves(instruct, mid, n)
+        synthesize_batch_to_wavs(
+            model,
+            items[:mid],
+            instruct=left_instruct,
+            **common_kwargs,
         )
-    else:
-        gen_kwargs = {
-            "text": texts,
-            "language": languages,
-            "speaker": voice,
-        }
-        if supports_instruct(model_id):
-            if any(value and str(value).strip() for value in instruct_list):
-                gen_kwargs["instruct"] = instruct_list
-        elif any(value and str(value).strip() for value in instruct_list):
-            logger.debug(
-                "Ignoring instruct for %s (no instruction control)",
-                model_id,
-            )
-        logger.info(
-            "TTS API: generate_custom_voice batch_size=%d chars=%d speaker=%s",
-            n,
-            total_chars,
-            voice,
+        synthesize_batch_to_wavs(
+            model,
+            items[mid:],
+            instruct=right_instruct,
+            **common_kwargs,
         )
-        wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
+        return
 
     if wavs is None:
         raise RuntimeError(f"Qwen3-TTS produced no audio for batch of {n} texts")
