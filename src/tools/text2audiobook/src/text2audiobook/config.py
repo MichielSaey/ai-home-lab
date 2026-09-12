@@ -132,7 +132,7 @@ class TtsConfig:
     # Hard ceiling for short units; pad budget limits long ones.
     batch_max_items: int = 16
     # Full unload+reload every N synthesized units to defrag CUDA VRAM (0 = disable).
-    reload_every_n_units: int = 100
+    reload_every_n_units: int = 50
 
 
 def resolve_ref_audio(
