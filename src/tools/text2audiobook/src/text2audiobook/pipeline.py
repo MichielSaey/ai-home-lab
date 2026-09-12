@@ -1015,6 +1015,11 @@ def _run_speak(
     format_hash = _live_format_hash(stems, config)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_ok = manifest_matches(stems.speak_manifest, fingerprint)
+    speak_in_progress = stems.speak_dir / "in_progress.json"
+    # Resume WAVs only when this speak fingerprint matches a finished or
+    # in-progress run — not when TTS settings changed under the same text.
+    resume_wavs = speak_ok or manifest_matches(speak_in_progress, fingerprint)
+    write_json(speak_in_progress, fingerprint)
 
     units = build_speak_units_from_chunks(
         format_units,
@@ -1074,9 +1079,9 @@ def _run_speak(
             record=record,
             executor=executor,
             progress=progress,
-            # Skip existing WAVs when text hash still matches. Do not require a
-            # finished speak manifest — interrupted runs should resume mid-book.
-            skip_wavs=config.output.skip_existing and not force,
+            # Skip existing WAVs when text hash matches and this speak fingerprint
+            # matches a finished manifest or in-progress marker (interrupted run).
+            skip_wavs=config.output.skip_existing and not force and resume_wavs,
             previous_text_hashes=previous_hashes,
         )
         for future in futures:

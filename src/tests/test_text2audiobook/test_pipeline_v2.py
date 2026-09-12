@@ -265,6 +265,54 @@ def test_speak_resumes_existing_wavs_without_manifest(
     )
 
 
+def test_speak_does_not_reuse_wavs_when_tts_fingerprint_changes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source, config = _write_book(tmp_path, skip_existing=True)
+    stems = _stems_after_extract_format(source, config, monkeypatch)
+    synth_calls = {"n": 0}
+
+    def fake_synth(_model, items, **_kwargs) -> None:
+        synth_calls["n"] += 1
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("speak",),
+        tts_device="cpu",
+    )
+    assert synth_calls["n"] >= 1
+    assert any(stems.speak_wav_dir.rglob("*.wav"))
+
+    synth_calls["n"] = 0
+    config = replace(config, tts=replace(config.tts, voice="Aiden"))
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("speak",),
+        tts_device="cpu",
+        force=False,
+    )
+    assert synth_calls["n"] >= 1, "TTS fingerprint change must not reuse old WAVs"
+
+
 def test_speak_only_rejects_missing_format_stem(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     stems = _stems_after_extract_format(source, config, monkeypatch)
