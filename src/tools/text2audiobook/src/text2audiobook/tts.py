@@ -152,25 +152,44 @@ def iter_speak_batches(
     max_chars: int,
     max_items: int,
 ) -> Iterator[list[Any]]:
-    """Pack units in order until max_chars or max_items; never split a unit.
+    """Pack units with first-fit residual filling toward max_chars / max_items.
 
-    ``max_chars`` / ``max_items`` <= 0 means no limit on that dimension.
+    Scans still-pending units in original order and pulls any unit that fits
+    remaining capacity (not only the next sequential unit). Never splits a
+    unit. ``max_chars`` / ``max_items`` <= 0 means no limit on that dimension.
     A single oversized unit still forms its own batch.
     """
-    batch: list[Any] = []
-    batch_chars = 0
-    for unit in units:
-        text_len = len(unit.text)
-        would_exceed_chars = max_chars > 0 and batch and batch_chars + text_len > max_chars
-        would_exceed_items = max_items > 0 and batch and len(batch) >= max_items
-        if would_exceed_chars or would_exceed_items:
+    pending = list(units)
+    while pending:
+        batch: list[Any] = []
+        rem_chars = max_chars if max_chars > 0 else None
+        rem_items = max_items if max_items > 0 else None
+        while True:
+            if rem_items is not None and rem_items <= 0:
+                break
+            idx: int | None = None
+            for i, unit in enumerate(pending):
+                n = len(unit.text)
+                if rem_chars is not None and n > rem_chars:
+                    if not batch:
+                        # Oversized alone when the batch is empty.
+                        idx = i
+                        break
+                    continue
+                idx = i
+                break
+            if idx is None:
+                break
+            unit = pending.pop(idx)
+            batch.append(unit)
+            if rem_chars is not None:
+                rem_chars -= len(unit.text)
+            if rem_items is not None:
+                rem_items -= 1
+            if rem_chars is not None and rem_chars < 0:
+                break
+        if batch:
             yield batch
-            batch = []
-            batch_chars = 0
-        batch.append(unit)
-        batch_chars += text_len
-    if batch:
-        yield batch
 
 
 def _normalize_instruct_list(

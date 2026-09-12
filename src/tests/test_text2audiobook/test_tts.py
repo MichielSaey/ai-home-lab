@@ -237,6 +237,14 @@ def test_iter_speak_batches_packing_boundaries() -> None:
             self.text = text
             self.label = label
 
+    def _labels(batches: list) -> list[list[str]]:
+        return [[u.label for u in batch] for batch in batches]
+
+    def _assert_each_unit_once(source: list, batches: list) -> None:
+        seen = [u.label for batch in batches for u in batch]
+        assert len(seen) == len(source)
+        assert sorted(seen) == sorted(u.label for u in source)
+
     units = [
         Unit("aa", "a"),
         Unit("bbb", "b"),
@@ -246,21 +254,39 @@ def test_iter_speak_batches_packing_boundaries() -> None:
         Unit("ff", "f"),
     ]
     batches = list(iter_speak_batches(units, max_chars=5, max_items=3))
-    assert [[u.label for u in batch] for batch in batches] == [
+    # First-fit: after [a,b], residual pulls e/f past oversized d.
+    assert _labels(batches) == [
         ["a", "b"],  # 2+3=5
-        ["c"],  # next would exceed chars with d
+        ["c", "e", "f"],  # 1 + residual 2+2; d skipped until alone
         ["d"],  # oversized alone
-        ["e", "f"],
     ]
+    _assert_each_unit_once(units, batches)
 
     by_items = list(iter_speak_batches(units[:4], max_chars=0, max_items=2))
-    assert [[u.label for u in batch] for batch in by_items] == [
+    assert _labels(by_items) == [
         ["a", "b"],
         ["c", "d"],
     ]
+    _assert_each_unit_once(units[:4], by_items)
 
     unlimited = list(iter_speak_batches(units[:3], max_chars=0, max_items=0))
-    assert [[u.label for u in batch] for batch in unlimited] == [["a", "b", "c"]]
+    assert _labels(unlimited) == [["a", "b", "c"]]
+    _assert_each_unit_once(units[:3], unlimited)
+
+    # Residual fill: after first 3, remaining 1 pulls the trailing 1-char unit.
+    residual_units = [
+        Unit("xxx", "x1"),
+        Unit("yyy", "y2"),
+        Unit("zzz", "z3"),
+        Unit("w", "w4"),
+    ]
+    residual = list(iter_speak_batches(residual_units, max_chars=4, max_items=8))
+    assert _labels(residual) == [
+        ["x1", "w4"],  # 3+1; skips later 3s that do not fit rem=1
+        ["y2"],
+        ["z3"],
+    ]
+    _assert_each_unit_once(residual_units, residual)
 
 
 def test_synthesize_batch_voice_clone_writes_each_wav(tmp_path: Path, monkeypatch) -> None:
