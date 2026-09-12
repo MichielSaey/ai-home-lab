@@ -75,6 +75,7 @@ from text2audiobook.tts import (
     compose_instruct,
     is_voice_design,
     load_tts,
+    supports_instruct,
     synthesize_to_wav,
     unload_tts,
 )
@@ -560,13 +561,12 @@ def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str)
 
 
 def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -> dict[str, Any]:
-    return {
+    fingerprint: dict[str, Any] = {
         "version": 2,
         "format_hash": format_hash,
         "model_id": tts.model_id,
         "voice": tts.voice,
         "lang": tts.lang,
-        "instruct": tts.instruct,
         "m4b_bitrate": config.output.m4b_bitrate,
         "loudnorm": config.output.loudnorm,
         "chunk_silence_ms": config.output.chunk_silence_ms,
@@ -574,6 +574,10 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
     }
+    # 0.6B CustomVoice ignores instruct; omit so instruct edits do not force re-speak.
+    if supports_instruct(tts.model_id):
+        fingerprint["instruct"] = tts.instruct
+    return fingerprint
 
 
 def _format_units_hash(stems: BookStems) -> str:

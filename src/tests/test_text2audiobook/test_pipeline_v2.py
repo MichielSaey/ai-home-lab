@@ -172,6 +172,7 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     assert speak["voice"] == "Serena"
     assert speak["lang"] == "English"
     assert speak["model_id"] == "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    assert "instruct" not in speak
     assert (config.paths.output_dir / f"{staging.name}.m4b").exists()
 
 
