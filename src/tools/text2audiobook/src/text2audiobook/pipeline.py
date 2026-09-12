@@ -1195,7 +1195,12 @@ def _synthesize_and_encode(
         """
         nonlocal voice_clone_prompt
         logger.info("%s", reason)
-        tts_slot[0] = reload_tts(tts_config, tts_slot[0])
+        # Drop the live slot ref before load so unload+from_pretrained never
+        # briefly dual-residents the old and new weights (OOM-path reload was
+        # failing with ~7 GiB still held and no "Loaded" log).
+        old = tts_slot[0]
+        tts_slot[0] = None
+        tts_slot[0] = reload_tts(tts_config, old)
         if rebuild_prompt:
             rebuild_voice_clone_prompt()
         else:

@@ -143,6 +143,7 @@ def unload_tts(model: Any) -> None:
                 setattr(model, attr, None)
             except AttributeError:
                 pass
+    del model
     gc.collect()
     if torch.cuda.is_available():
         try:
@@ -154,8 +155,13 @@ def unload_tts(model: Any) -> None:
 
 
 def reload_tts(config: TtsConfig, old_model: Any, *, device: str | None = None) -> Any:
-    """Unload old model, hard-clear CUDA, load a fresh TTS model."""
+    """Unload old model, hard-clear CUDA, load a fresh TTS model.
+
+    Callers must drop their own live references (e.g. ``tts_slot[0] = None``)
+    before calling so the old weights are not dual-resident during load.
+    """
     unload_tts(old_model)
+    old_model = None
     import torch
 
     # Extra pass after unload (matches cli calibration _hard_unload) to nudge
