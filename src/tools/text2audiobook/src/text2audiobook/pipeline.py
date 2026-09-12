@@ -1074,7 +1074,9 @@ def _run_speak(
             record=record,
             executor=executor,
             progress=progress,
-            skip_wavs=config.output.skip_existing and speak_ok and not force,
+            # Skip existing WAVs when text hash still matches. Do not require a
+            # finished speak manifest — interrupted runs should resume mid-book.
+            skip_wavs=config.output.skip_existing and not force,
             previous_text_hashes=previous_hashes,
         )
         for future in futures:
