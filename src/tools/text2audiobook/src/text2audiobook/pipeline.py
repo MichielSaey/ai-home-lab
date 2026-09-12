@@ -265,7 +265,13 @@ def process_source(
 
     source_kind = infer_source_kind(source_path)
     stems = BookStems(metadata.staging_dir)
-    tts_config = _resolve_tts(config, voice=voice, staging_root=config.paths.staging_dir)
+    tts_config = _resolve_tts(
+        config,
+        voice=voice,
+        staging_root=config.paths.staging_dir,
+        # Ref clip is only required when this run will synthesize.
+        validate_clone_ref="speak" in selected,
+    )
 
     if (
         "speak" in selected
@@ -472,40 +478,45 @@ def _resolve_tts(
     *,
     voice: str | None,
     staging_root: Path,
+    validate_clone_ref: bool = True,
 ) -> TtsConfig:
     lang = config.tts.lang
     if is_base(config.tts.model_id):
         ref_path = resolve_ref_audio(config.tts.ref_audio, config_path=config.config_path)
-        if ref_path is None:
-            raise ValueError(
-                "Base voice cloning requires tts.ref_audio "
-                "(path to a reference WAV, relative to the config file or absolute)"
-            )
-        if not ref_path.is_file():
-            raise ValueError(f"tts.ref_audio not found: {ref_path}")
-        if not config.tts.x_vector_only and not (
-            config.tts.ref_text and str(config.tts.ref_text).strip()
-        ):
-            raise ValueError(
-                "Base voice cloning requires non-empty tts.ref_text "
-                "unless tts.x_vector_only is true"
-            )
+        if validate_clone_ref:
+            if ref_path is None:
+                raise ValueError(
+                    "Base voice cloning requires tts.ref_audio "
+                    "(path to a reference WAV, relative to the config file or absolute)"
+                )
+            if not ref_path.is_file():
+                raise ValueError(f"tts.ref_audio not found: {ref_path}")
+            if not config.tts.x_vector_only and not (
+                config.tts.ref_text and str(config.tts.ref_text).strip()
+            ):
+                raise ValueError(
+                    "Base voice cloning requires non-empty tts.ref_text "
+                    "unless tts.x_vector_only is true"
+                )
         if voice and voice.strip() and not is_voice_clone_label(voice):
             logger.info(
                 "Base voice clone uses ref_audio; ignoring --voice=%s",
                 voice,
             )
-        logger.info(
-            "Base voice=%s (lang=%s; clone from %s)",
-            VOICE_CLONE_LABEL,
-            lang,
-            ref_path,
-        )
+        if ref_path is not None:
+            logger.info(
+                "Base voice=%s (lang=%s; clone from %s)",
+                VOICE_CLONE_LABEL,
+                lang,
+                ref_path,
+            )
+        else:
+            logger.info("Base voice=%s (lang=%s; ref_audio deferred)", VOICE_CLONE_LABEL, lang)
         return replace(
             config.tts,
             voice=VOICE_CLONE_LABEL,
             lang=lang,
-            ref_audio=str(ref_path),
+            ref_audio=str(ref_path) if ref_path is not None else config.tts.ref_audio,
         )
 
     if is_voice_design(config.tts.model_id):

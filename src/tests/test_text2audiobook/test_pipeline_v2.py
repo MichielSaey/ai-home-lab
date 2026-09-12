@@ -285,6 +285,16 @@ def test_base_rejects_missing_ref_audio(tmp_path: Path) -> None:
     else:
         raise AssertionError("Base without ref_text should raise when not x_vector_only")
 
+    # Non-speak stages may resolve Base without the ref clip present yet.
+    deferred = _resolve_tts(
+        base_missing,
+        voice=None,
+        staging_root=tmp_path / "staging",
+        validate_clone_ref=False,
+    )
+    assert deferred.voice == "cloned"
+    assert deferred.model_id.endswith("-Base")
+
 
 def test_base_speak_fingerprint_includes_ref_hash(tmp_path: Path) -> None:
     from text2audiobook.pipeline import _resolve_tts, _speak_fingerprint
