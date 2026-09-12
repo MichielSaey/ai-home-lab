@@ -407,15 +407,19 @@ def process_source(
             format_fingerprint = _format_fingerprint(
                 config, clean_hash=clean_hash, source_kind=source_kind
             )
-            format_ok = (
-                manifest_matches(stems.format_manifest, format_fingerprint)
-                and stems.format_chapters_index.exists()
+            format_files_ok = (
+                stems.format_chapters_index.exists()
                 and stems.format_chunks_jsonl.exists()
             )
-            if not format_ok:
+            if not format_files_ok:
                 raise FileNotFoundError(
-                    f"Format stem missing or stale for {metadata.title!r}. "
+                    f"Format stem missing for {metadata.title!r}. "
                     "Run --format first."
+                )
+            if not manifest_matches(stems.format_manifest, format_fingerprint):
+                logger.warning(
+                    "Format stem fingerprint stale for %r — using existing format files",
+                    metadata.title,
                 )
             if scripts is None:
                 scripts = load_format_scripts(stems)
@@ -874,17 +878,25 @@ def _run_format(
     fingerprint = _format_fingerprint(
         config, clean_hash=clean_hash, source_kind=source_kind
     )
-    format_ok = (
-        manifest_matches(stems.format_manifest, fingerprint)
-        and stems.format_chapters_index.exists()
+    format_files_ok = (
+        stems.format_chapters_index.exists()
         and stems.format_chunks_jsonl.exists()
+    )
+    format_ok = (
+        manifest_matches(stems.format_manifest, fingerprint) and format_files_ok
     )
 
     if "format" not in selected:
-        if "speak" in selected and not format_ok:
-            raise FileNotFoundError(
-                f"Format stem missing for {metadata.title!r}. Run --format first."
-            )
+        if "speak" in selected:
+            if not format_files_ok:
+                raise FileNotFoundError(
+                    f"Format stem missing for {metadata.title!r}. Run --format first."
+                )
+            if not manifest_matches(stems.format_manifest, fingerprint):
+                logger.warning(
+                    "Format stem fingerprint stale for %r — using existing format files",
+                    metadata.title,
+                )
         return load_format_scripts(stems), load_format_units(stems)
 
     if format_ok and not force:
