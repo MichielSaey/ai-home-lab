@@ -86,8 +86,8 @@ class PathsConfig:
 @dataclass
 class ChunkingConfig:
     format_words_per_chunk: int = 1000
-    speak_target_chars: int = 400
-    speak_max_chars: int = 800
+    speak_target_chars: int = 800
+    speak_max_chars: int = 1200
     max_chunks_per_chapter: int | None = None
 
 
@@ -124,6 +124,8 @@ class TtsConfig:
     ref_text: str | None = None
     x_vector_only: bool = False
     instruct: str | None = DEFAULT_TTS_INSTRUCT
+    batch_max_chars: int = 3200
+    batch_max_items: int = 8
 
 
 def resolve_ref_audio(

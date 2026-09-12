@@ -12,7 +12,9 @@ from text2audiobook.tts import (
     is_base,
     is_custom_voice,
     is_voice_design,
+    iter_speak_batches,
     supports_instruct,
+    synthesize_batch_to_wavs,
     synthesize_to_wav,
 )
 
@@ -77,9 +79,9 @@ def test_synthesize_routes_to_voice_design(tmp_path: Path, monkeypatch) -> None:
     )
     model.generate_voice_design.assert_called_once()
     kwargs = model.generate_voice_design.call_args.kwargs
-    assert kwargs["text"] == "Hello world."
-    assert kwargs["language"] == "English"
-    assert kwargs["instruct"] == "Native English female narrator."
+    assert kwargs["text"] == ["Hello world."]
+    assert kwargs["language"] == ["English"]
+    assert kwargs["instruct"] == ["Native English female narrator."]
     assert "speaker" not in kwargs
     model.generate_custom_voice.assert_not_called()
     model.generate_voice_clone.assert_not_called()
@@ -107,7 +109,8 @@ def test_synthesize_voice_design_falls_back_default_instruct(
         model_id="Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     )
     assert (
-        model.generate_voice_design.call_args.kwargs["instruct"] == DEFAULT_TTS_INSTRUCT
+        model.generate_voice_design.call_args.kwargs["instruct"]
+        == [DEFAULT_TTS_INSTRUCT]
     )
 
 
@@ -134,7 +137,7 @@ def test_synthesize_routes_to_custom_voice(tmp_path: Path, monkeypatch) -> None:
     model.generate_custom_voice.assert_called_once()
     kwargs = model.generate_custom_voice.call_args.kwargs
     assert kwargs["speaker"] == "Ryan"
-    assert kwargs["instruct"] == "Calm pace."
+    assert kwargs["instruct"] == ["Calm pace."]
     model.generate_voice_design.assert_not_called()
     model.generate_voice_clone.assert_not_called()
 
@@ -186,8 +189,8 @@ def test_synthesize_routes_to_voice_clone_with_prompt(tmp_path: Path, monkeypatc
     )
     model.generate_voice_clone.assert_called_once()
     kwargs = model.generate_voice_clone.call_args.kwargs
-    assert kwargs["text"] == "Hello clone."
-    assert kwargs["language"] == "English"
+    assert kwargs["text"] == ["Hello clone."]
+    assert kwargs["language"] == ["English"]
     assert kwargs["voice_clone_prompt"] is prompt
     assert "speaker" not in kwargs
     assert "instruct" not in kwargs
@@ -226,6 +229,93 @@ def test_synthesize_routes_to_voice_clone_with_ref(tmp_path: Path, monkeypatch) 
     assert "voice_clone_prompt" not in kwargs
     model.generate_custom_voice.assert_not_called()
     model.generate_voice_design.assert_not_called()
+
+
+def test_iter_speak_batches_packing_boundaries() -> None:
+    class Unit:
+        def __init__(self, text: str, label: str) -> None:
+            self.text = text
+            self.label = label
+
+    units = [
+        Unit("aa", "a"),
+        Unit("bbb", "b"),
+        Unit("c", "c"),
+        Unit("dddddddd", "d"),  # oversized alone
+        Unit("ee", "e"),
+        Unit("ff", "f"),
+    ]
+    batches = list(iter_speak_batches(units, max_chars=5, max_items=3))
+    assert [[u.label for u in batch] for batch in batches] == [
+        ["a", "b"],  # 2+3=5
+        ["c"],  # next would exceed chars with d
+        ["d"],  # oversized alone
+        ["e", "f"],
+    ]
+
+    by_items = list(iter_speak_batches(units[:4], max_chars=0, max_items=2))
+    assert [[u.label for u in batch] for batch in by_items] == [
+        ["a", "b"],
+        ["c", "d"],
+    ]
+
+    unlimited = list(iter_speak_batches(units[:3], max_chars=0, max_items=0))
+    assert [[u.label for u in batch] for batch in unlimited] == [["a", "b", "c"]]
+
+
+def test_synthesize_batch_voice_clone_writes_each_wav(tmp_path: Path, monkeypatch) -> None:
+    model = MagicMock()
+    model.generate_voice_clone.return_value = (
+        [
+            np.zeros(4, dtype=np.float32),
+            np.zeros(5, dtype=np.float32),
+            np.zeros(6, dtype=np.float32),
+        ],
+        24000,
+    )
+    prompt = object()
+    written: list[Path] = []
+
+    def fake_write(path, *_a, **_k):
+        Path(path).write_bytes(b"RIFF")
+        written.append(Path(path))
+
+    monkeypatch.setattr("text2audiobook.tts.sf.write", fake_write)
+
+    paths = [tmp_path / f"{i}.wav" for i in range(3)]
+    synthesize_batch_to_wavs(
+        model,
+        [("one", paths[0]), ("two", paths[1]), ("three", paths[2])],
+        voice="cloned",
+        language="English",
+        model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+        voice_clone_prompt=prompt,
+    )
+    model.generate_voice_clone.assert_called_once()
+    kwargs = model.generate_voice_clone.call_args.kwargs
+    assert kwargs["text"] == ["one", "two", "three"]
+    assert kwargs["language"] == ["English", "English", "English"]
+    assert kwargs["voice_clone_prompt"] is prompt
+    for path in paths:
+        assert path.exists()
+
+
+def test_synthesize_batch_raises_on_wav_count_mismatch(tmp_path: Path) -> None:
+    model = MagicMock()
+    model.generate_voice_clone.return_value = ([np.zeros(4, dtype=np.float32)], 24000)
+    try:
+        synthesize_batch_to_wavs(
+            model,
+            [("a", tmp_path / "a.wav"), ("b", tmp_path / "b.wav")],
+            voice="cloned",
+            language="English",
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            voice_clone_prompt=object(),
+        )
+    except RuntimeError as exc:
+        assert "returned 1 wav(s) for 2 text(s)" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
 
 
 def test_create_voice_clone_prompt_passes_x_vector_only_mode() -> None:

@@ -2,7 +2,7 @@
 
 import gc
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -146,6 +146,188 @@ def create_voice_clone_prompt(
     )
 
 
+def iter_speak_batches(
+    units: Sequence[Any],
+    *,
+    max_chars: int,
+    max_items: int,
+) -> Iterator[list[Any]]:
+    """Pack units in order until max_chars or max_items; never split a unit.
+
+    ``max_chars`` / ``max_items`` <= 0 means no limit on that dimension.
+    A single oversized unit still forms its own batch.
+    """
+    batch: list[Any] = []
+    batch_chars = 0
+    for unit in units:
+        text_len = len(unit.text)
+        would_exceed_chars = max_chars > 0 and batch and batch_chars + text_len > max_chars
+        would_exceed_items = max_items > 0 and batch and len(batch) >= max_items
+        if would_exceed_chars or would_exceed_items:
+            yield batch
+            batch = []
+            batch_chars = 0
+        batch.append(unit)
+        batch_chars += text_len
+    if batch:
+        yield batch
+
+
+def _normalize_instruct_list(
+    instruct: str | None | Sequence[str | None],
+    n: int,
+) -> list[str | None]:
+    if isinstance(instruct, (str, type(None))):
+        return [instruct] * n
+    values = list(instruct)
+    if len(values) != n:
+        raise ValueError(
+            f"instruct list length {len(values)} does not match batch size {n}"
+        )
+    return values
+
+
+def _resolve_voice_design_instruct(instruct: str | None) -> str:
+    resolved = instruct
+    if not (resolved and str(resolved).strip()):
+        resolved = DEFAULT_TTS_INSTRUCT
+        logger.warning(
+            "VoiceDesign requires instruct; falling back to DEFAULT_TTS_INSTRUCT"
+        )
+    if not (resolved and str(resolved).strip()):
+        raise ValueError(
+            "VoiceDesign synthesis requires a non-empty instruct "
+            "(set tts.instruct or per-chunk direction)"
+        )
+    return resolved
+
+
+def _write_wav_atomic(
+    audio: np.ndarray,
+    wav_path: Path,
+    *,
+    sample_rate: int,
+    chunk_silence_ms: int,
+) -> None:
+    wav_path.parent.mkdir(parents=True, exist_ok=True)
+    merged = append_silence(
+        np.asarray(audio, dtype=np.float32),
+        chunk_silence_ms,
+        sample_rate=sample_rate,
+    )
+    tmp_path = wav_path.with_suffix(".tmp.wav")
+    sf.write(tmp_path, merged, sample_rate)
+    tmp_path.replace(wav_path)
+
+
+def synthesize_batch_to_wavs(
+    model: Any,
+    items: list[tuple[str, Path]],
+    *,
+    voice: str,
+    language: str,
+    instruct: str | None | Sequence[str | None] = None,
+    chunk_silence_ms: int = 0,
+    model_id: str | None = None,
+    voice_clone_prompt: Any | None = None,
+    ref_audio: Path | str | None = None,
+    ref_text: str | None = None,
+    x_vector_only: bool = False,
+) -> None:
+    """Synthesize one or more chunks in a single generate_* call; write one WAV each.
+
+    Written via temp file + rename so an interrupted run never leaves a partial WAV.
+    Sample rate comes from the model (do not assume 24 kHz).
+    """
+    if not items:
+        return
+
+    texts = [text for text, _ in items]
+    paths = [path for _, path in items]
+    n = len(items)
+    total_chars = sum(len(t) for t in texts)
+    languages = [language] * n
+    instruct_list = _normalize_instruct_list(instruct, n)
+
+    if is_base(model_id):
+        gen_kwargs: dict[str, Any] = {
+            "text": texts,
+            "language": languages,
+        }
+        if voice_clone_prompt is not None:
+            gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
+            logger.info(
+                "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                n,
+                total_chars,
+            )
+        else:
+            if ref_audio is None:
+                raise ValueError(
+                    "Base voice cloning requires ref_audio or voice_clone_prompt "
+                    "(set tts.ref_audio)"
+                )
+            gen_kwargs["ref_audio"] = str(ref_audio)
+            gen_kwargs["ref_text"] = ref_text
+            gen_kwargs["x_vector_only_mode"] = x_vector_only
+            logger.info(
+                "TTS API: generate_voice_clone batch_size=%d chars=%d",
+                n,
+                total_chars,
+            )
+        wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
+    elif is_voice_design(model_id):
+        resolved = [_resolve_voice_design_instruct(value) for value in instruct_list]
+        logger.info(
+            "TTS API: generate_voice_design batch_size=%d chars=%d",
+            n,
+            total_chars,
+        )
+        wavs, sample_rate = model.generate_voice_design(
+            text=texts,
+            language=languages,
+            instruct=resolved,
+        )
+    else:
+        gen_kwargs = {
+            "text": texts,
+            "language": languages,
+            "speaker": voice,
+        }
+        if supports_instruct(model_id):
+            if any(value and str(value).strip() for value in instruct_list):
+                gen_kwargs["instruct"] = instruct_list
+        elif any(value and str(value).strip() for value in instruct_list):
+            logger.debug(
+                "Ignoring instruct for %s (no instruction control)",
+                model_id,
+            )
+        logger.info(
+            "TTS API: generate_custom_voice batch_size=%d chars=%d speaker=%s",
+            n,
+            total_chars,
+            voice,
+        )
+        wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
+
+    if wavs is None:
+        raise RuntimeError(f"Qwen3-TTS produced no audio for batch of {n} texts")
+    if len(wavs) != n:
+        raise RuntimeError(
+            f"Qwen3-TTS returned {len(wavs)} wav(s) for {n} text(s); "
+            "batch size mismatch"
+        )
+
+    sample_rate_i = int(sample_rate)
+    for audio, wav_path in zip(wavs, paths, strict=True):
+        _write_wav_atomic(
+            audio,
+            wav_path,
+            sample_rate=sample_rate_i,
+            chunk_silence_ms=chunk_silence_ms,
+        )
+
+
 def synthesize_to_wav(
     model: Any,
     text: str,
@@ -161,79 +343,20 @@ def synthesize_to_wav(
     ref_text: str | None = None,
     x_vector_only: bool = False,
 ) -> None:
-    """Synthesize one chunk to a WAV file.
-
-    Written via a temp file + rename so an interrupted run never leaves a
-    partial WAV that resume logic would mistake for a finished chunk.
-    Sample rate comes from the model (do not assume 24 kHz).
-
-    Base uses ``generate_voice_clone`` (ref audio + transcript, or a prompt).
-    VoiceDesign uses ``generate_voice_design`` (instruct required; no speaker).
-    CustomVoice uses ``generate_custom_voice`` with a catalog speaker.
-    """
-    wav_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if is_base(model_id):
-        gen_kwargs: dict[str, Any] = {
-            "text": text,
-            "language": language,
-        }
-        if voice_clone_prompt is not None:
-            gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
-            logger.info("TTS API: generate_voice_clone (voice_clone_prompt)")
-        else:
-            if ref_audio is None:
-                raise ValueError(
-                    "Base voice cloning requires ref_audio or voice_clone_prompt "
-                    "(set tts.ref_audio)"
-                )
-            gen_kwargs["ref_audio"] = str(ref_audio)
-            gen_kwargs["ref_text"] = ref_text
-            gen_kwargs["x_vector_only_mode"] = x_vector_only
-            logger.info("TTS API: generate_voice_clone (ref_audio)")
-        wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
-    elif is_voice_design(model_id):
-        resolved_instruct = instruct
-        if not (resolved_instruct and str(resolved_instruct).strip()):
-            resolved_instruct = DEFAULT_TTS_INSTRUCT
-            logger.warning(
-                "VoiceDesign requires instruct; falling back to DEFAULT_TTS_INSTRUCT"
-            )
-        if not (resolved_instruct and str(resolved_instruct).strip()):
-            raise ValueError(
-                "VoiceDesign synthesis requires a non-empty instruct "
-                "(set tts.instruct or per-chunk direction)"
-            )
-        logger.info("TTS API: generate_voice_design (no speaker)")
-        wavs, sample_rate = model.generate_voice_design(
-            text=text,
-            language=language,
-            instruct=resolved_instruct,
-        )
-    else:
-        gen_kwargs = {
-            "text": text,
-            "language": language,
-            "speaker": voice,
-        }
-        if instruct and supports_instruct(model_id):
-            gen_kwargs["instruct"] = instruct
-        elif instruct and not supports_instruct(model_id):
-            logger.debug(
-                "Ignoring instruct for %s (no instruction control)",
-                model_id,
-            )
-        logger.info("TTS API: generate_custom_voice (speaker=%s)", voice)
-        wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
-
-    if not wavs:
-        raise RuntimeError(f"Qwen3-TTS produced no audio for: {wav_path}")
-
-    audio = np.asarray(wavs[0], dtype=np.float32)
-    merged = append_silence(audio, chunk_silence_ms, sample_rate=int(sample_rate))
-    tmp_path = wav_path.with_suffix(".tmp.wav")
-    sf.write(tmp_path, merged, int(sample_rate))
-    tmp_path.replace(wav_path)
+    """Synthesize one chunk to a WAV file (batch of size 1)."""
+    synthesize_batch_to_wavs(
+        model,
+        [(text, wav_path)],
+        voice=voice,
+        language=language,
+        instruct=instruct,
+        chunk_silence_ms=chunk_silence_ms,
+        model_id=model_id,
+        voice_clone_prompt=voice_clone_prompt,
+        ref_audio=ref_audio,
+        ref_text=ref_text,
+        x_vector_only=x_vector_only,
+    )
 
 
 def synthesize_chunks(
