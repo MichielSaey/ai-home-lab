@@ -57,15 +57,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--voice",
         default=None,
         help=(
-            "Qwen3-TTS CustomVoice speaker (e.g. Serena, Ryan, Aiden), or 'random' "
-            "to pick without replacement until the pool wraps. "
-            "Content language stays from config tts.lang (not the speaker's native)."
+            "CustomVoice speaker (e.g. Serena, Ryan, Aiden), 'random' for the "
+            "CustomVoice pool, or 'designed' for VoiceDesign (default; persona "
+            "from tts.instruct). Ignored when model_id is VoiceDesign except "
+            "as a label. Content language stays from config tts.lang."
         ),
     )
     parser.add_argument(
         "--list-voices",
         action="store_true",
-        help="Print Qwen3-TTS CustomVoice speakers and exit (no GPU / LLM load).",
+        help=(
+            "Print CustomVoice speakers plus a VoiceDesign note, then exit "
+            "(no GPU / LLM load)."
+        ),
     )
     cues = parser.add_mutually_exclusive_group()
     cues.add_argument(

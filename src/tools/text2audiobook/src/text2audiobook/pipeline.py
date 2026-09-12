@@ -72,11 +72,18 @@ from text2audiobook.stems import (
 )
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
+    compose_instruct,
+    is_voice_design,
     load_tts,
     synthesize_to_wav,
     unload_tts,
 )
-from text2audiobook.voices import lang_for_voice, resolve_voice
+from text2audiobook.voices import (
+    VOICE_DESIGN_LABEL,
+    is_voice_design_label,
+    lang_for_voice,
+    resolve_voice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +456,29 @@ def _resolve_tts(
     voice: str | None,
     staging_root: Path,
 ) -> TtsConfig:
+    lang = config.tts.lang
+    if is_voice_design(config.tts.model_id):
+        # VoiceDesign: no CustomVoice speaker; persona comes from tts.instruct.
+        # Keep config.lang as content language (do not map via speaker native).
+        requested = voice
+        if requested and requested.strip() and not is_voice_design_label(requested):
+            logger.info(
+                "VoiceDesign uses instruct persona; ignoring --voice=%s",
+                requested,
+            )
+            requested = None
+        chosen = resolve_voice(
+            requested,
+            default=config.tts.voice or VOICE_DESIGN_LABEL,
+            state_path=staging_root / "_voice_random.json",
+        )
+        logger.info(
+            "VoiceDesign voice=%s (lang=%s; persona from tts.instruct)",
+            chosen,
+            lang,
+        )
+        return replace(config.tts, voice=chosen, lang=lang)
+
     chosen = resolve_voice(
         voice,
         default=config.tts.voice,
@@ -456,7 +486,6 @@ def _resolve_tts(
     )
     # Content language stays from config (book text). Speaker native language is
     # only a quality hint — CustomVoice speakers can narrate any supported lang.
-    lang = config.tts.lang
     native = lang_for_voice(chosen)
     if chosen != config.tts.voice:
         logger.info("Voice %s (lang=%s, native=%s)", chosen, lang, native)
@@ -1048,8 +1077,9 @@ def _synthesize_and_encode(
                 wav_path,
                 voice=tts_config.voice,
                 language=tts_config.lang,
-                instruct=unit.instruct or tts_config.instruct,
+                instruct=compose_instruct(tts_config.instruct, unit.instruct),
                 chunk_silence_ms=config.output.chunk_silence_ms,
+                model_id=tts_config.model_id,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)
         logger.info(

@@ -165,14 +165,13 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
         record=record,
         stages=("speak",),
         tts_device="cpu",
-        voice="Aiden",
     )
     assert llm_calls["n"] == 0
     assert stems.speak_manifest.exists()
     speak = json.loads(stems.speak_manifest.read_text(encoding="utf-8"))
-    assert speak["voice"] == "Aiden"
+    assert speak["voice"] == "designed"
     assert speak["lang"] == "English"
-    assert speak["model_id"] == "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    assert speak["model_id"] == "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
     assert (config.paths.output_dir / f"{staging.name}.m4b").exists()
 
 
@@ -449,7 +448,9 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
     assert rows[0]["instruct"] == "CHUNK LOCAL: calm steady exposition"
     speak_rows = load_jsonl(stems.speak_units_jsonl)
     assert speak_rows[0]["instruct"] == "CHUNK LOCAL: calm steady exposition"
-    assert synth_instructs == ["CHUNK LOCAL: calm steady exposition"]
+    assert synth_instructs == [
+        "GLOBAL BASELINE INSTRUCT CHUNK LOCAL: calm steady exposition"
+    ]
 
 
 def test_direction_disabled_speak_falls_back_to_global_instruct(

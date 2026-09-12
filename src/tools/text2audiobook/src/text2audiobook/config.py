@@ -47,21 +47,23 @@ DEFAULT_CLEAN_PROMPT = (
 
 DEFAULT_DIRECTION_PROMPT = (
     "Write a short delivery instruction (1–2 sentences, English) for Qwen3-TTS "
-    "CustomVoice instruct for the narration chunk below. Return only the "
-    "instruction — no spoken narration text, no commentary, and no bracket tags "
-    "like [excited].\n\n"
+    "instruct for the narration chunk below. Return only the instruction — no "
+    "spoken narration text, no commentary, and no bracket tags like [excited].\n\n"
     "Rules:\n"
-    "- Describe pace, emotion, and emphasis suitable for this passage.\n"
+    "- Add only passage-level pace, emotion, and emphasis for this chunk.\n"
+    "- Do not invent a different accent, language, or speaker persona; the "
+    "global TTS instruct already sets a native English female audiobook narrator.\n"
     "- Stay restrained for audiobook narration; avoid theatrical overacting.\n"
     "- If the passage is neutral exposition, say so briefly (calm steady pace).\n\n"
     "Narration:\n{text}"
 )
 
 DEFAULT_TTS_INSTRUCT = (
-    "Young adult woman with a warm, gentle mid pitch and clear diction. "
-    "Use a slow, steady pace with restrained emotion for long-form nonfiction "
-    "audiobook narration. Keep delivery calm, precise, and easy to follow for "
-    "dense theory text."
+    "Young adult woman with a warm, gentle mid pitch. Speak with native American "
+    "or neutral US English pronunciation — clear native English vowels, consonants, "
+    "and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. "
+    "Deliver at a slow, steady, restrained audiobook pace suited to dense "
+    "nonfiction, remaining calm, precise, and easy to follow."
 )
 
 
@@ -114,9 +116,9 @@ class LlmConfig:
 
 @dataclass
 class TtsConfig:
-    model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
     lang: str = "English"
-    voice: str = "Serena"
+    voice: str = "designed"
     device: str = "auto"
     instruct: str | None = DEFAULT_TTS_INSTRUCT
 
@@ -234,7 +236,7 @@ def _normalize_raw_config(data: dict[str, Any]) -> dict[str, Any]:
         tts_data = dict(tts_data)
         if "speed" in tts_data:
             logger.warning(
-                "tts.speed is ignored (Qwen3-TTS CustomVoice); "
+                "tts.speed is ignored (Qwen3-TTS); "
                 "use tts.instruct for style/rate hints"
             )
             tts_data.pop("speed", None)
