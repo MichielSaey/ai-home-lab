@@ -14,7 +14,7 @@
     "opening_batch_size": 4
   },
   "llm": {
-    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "model_id": "Qwen/Qwen3-4B-Instruct-2507",
     "device": "cuda",
     "cleanup": true,
     "direction": true,
