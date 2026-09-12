@@ -634,8 +634,9 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "chapter_silence_ms": config.output.chapter_silence_ms,
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
+        # Packing/VRAM knobs (batch_max_*, reload_every) omit: they do not change
+        # per-unit audio, and must not wipe resume WAVs when tuning pad.
         "batch_max_chars": tts.batch_max_chars,
-        "batch_max_pad_chars": tts.batch_max_pad_chars,
         "batch_vram_overhead": tts.batch_vram_overhead,
         "batch_max_items": tts.batch_max_items,
     }
