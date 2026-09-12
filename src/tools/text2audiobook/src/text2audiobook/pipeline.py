@@ -1206,12 +1206,21 @@ def _synthesize_and_encode(
             )
         )
 
-    def log_unit_progress(item: _SpeakWork) -> None:
+    # Completion count is resume-aware and monotonic in synthesis order (packing
+    # may reorder units), not the original book-order unit_number.
+    completed = sum(1 for item in work if not item.needs_synth)
+    if completed > 0:
+        logger.info(
+            "%s",
+            progress.format("tts", unit_done=completed, total_chunks=total),
+        )
+
+    def log_unit_progress(item: _SpeakWork, *, unit_done: int) -> None:
         logger.info(
             "%s",
             progress.format(
                 "tts",
-                unit_done=item.unit_number,
+                unit_done=unit_done,
                 total_chunks=total,
                 chapter_idx=chapter_order[item.unit.chapter_slug],
                 total_chapters=total_chapters,
@@ -1248,11 +1257,10 @@ def _synthesize_and_encode(
         )
         tracker.add_duration(record, "tts", time.perf_counter() - start)
         for item in batch:
-            log_unit_progress(item)
+            completed += 1
+            log_unit_progress(item, unit_done=completed)
 
     for item in work:
-        if not item.needs_synth:
-            log_unit_progress(item)
         wavs_by_slug[item.unit.chapter_slug].append(item.wav_path)
         done[item.unit.chapter_slug] += 1
         if (
