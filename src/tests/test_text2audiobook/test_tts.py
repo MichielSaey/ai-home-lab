@@ -231,6 +231,16 @@ def test_synthesize_routes_to_voice_clone_with_ref(tmp_path: Path, monkeypatch) 
     model.generate_voice_design.assert_not_called()
 
 
+def test_format_batch_log_includes_per_chunk_sizes() -> None:
+    from text2audiobook.tts import _format_batch_log
+
+    assert (
+        _format_batch_log(n=3, texts=["aa", "bbbb", "c"], batch_max_chars=10, batch_max_items=4)
+        == "batch_size=3/4 chars=7/10 [2,4,1]"
+    )
+    assert _format_batch_log(n=1, texts=["hello"]) == "batch_size=1 chars=5 [5]"
+
+
 def test_iter_speak_batches_packing_boundaries() -> None:
     class Unit:
         def __init__(self, text: str, label: str) -> None:

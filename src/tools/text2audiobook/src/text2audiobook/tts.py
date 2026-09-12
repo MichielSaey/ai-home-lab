@@ -266,6 +266,27 @@ def _split_instruct_for_halves(
     return values[:mid], values[mid:]
 
 
+def _format_batch_log(
+    *,
+    n: int,
+    texts: Sequence[str],
+    batch_max_chars: int = 0,
+    batch_max_items: int = 0,
+) -> str:
+    """Human-readable batch size breakdown for TTS logs."""
+    sizes = [len(t) for t in texts]
+    total = sum(sizes)
+    parts = [f"batch_size={n}"]
+    if batch_max_items > 0:
+        parts[0] = f"batch_size={n}/{batch_max_items}"
+    if batch_max_chars > 0:
+        parts.append(f"chars={total}/{batch_max_chars}")
+    else:
+        parts.append(f"chars={total}")
+    parts.append("[" + ",".join(str(s) for s in sizes) + "]")
+    return " ".join(parts)
+
+
 def synthesize_batch_to_wavs(
     model: Any,
     items: list[tuple[str, Path]],
@@ -279,6 +300,8 @@ def synthesize_batch_to_wavs(
     ref_audio: Path | str | None = None,
     ref_text: str | None = None,
     x_vector_only: bool = False,
+    batch_max_chars: int = 0,
+    batch_max_items: int = 0,
 ) -> None:
     """Synthesize one or more chunks in a single generate_* call; write one WAV each.
 
@@ -292,7 +315,6 @@ def synthesize_batch_to_wavs(
     texts = [text for text, _ in items]
     paths = [path for _, path in items]
     n = len(items)
-    total_chars = sum(len(t) for t in texts)
     languages = [language] * n
     instruct_list = _normalize_instruct_list(instruct, n)
     common_kwargs: dict[str, Any] = {
@@ -304,7 +326,15 @@ def synthesize_batch_to_wavs(
         "ref_audio": ref_audio,
         "ref_text": ref_text,
         "x_vector_only": x_vector_only,
+        "batch_max_chars": batch_max_chars,
+        "batch_max_items": batch_max_items,
     }
+    batch_log = _format_batch_log(
+        n=n,
+        texts=texts,
+        batch_max_chars=batch_max_chars,
+        batch_max_items=batch_max_items,
+    )
 
     try:
         if is_base(model_id):
@@ -314,11 +344,7 @@ def synthesize_batch_to_wavs(
             }
             if voice_clone_prompt is not None:
                 gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
-                logger.info(
-                    "TTS API: generate_voice_clone batch_size=%d chars=%d",
-                    n,
-                    total_chars,
-                )
+                logger.info("TTS API: generate_voice_clone %s", batch_log)
             else:
                 if ref_audio is None:
                     raise ValueError(
@@ -328,19 +354,11 @@ def synthesize_batch_to_wavs(
                 gen_kwargs["ref_audio"] = str(ref_audio)
                 gen_kwargs["ref_text"] = ref_text
                 gen_kwargs["x_vector_only_mode"] = x_vector_only
-                logger.info(
-                    "TTS API: generate_voice_clone batch_size=%d chars=%d",
-                    n,
-                    total_chars,
-                )
+                logger.info("TTS API: generate_voice_clone %s", batch_log)
             wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
         elif is_voice_design(model_id):
             resolved = [_resolve_voice_design_instruct(value) for value in instruct_list]
-            logger.info(
-                "TTS API: generate_voice_design batch_size=%d chars=%d",
-                n,
-                total_chars,
-            )
+            logger.info("TTS API: generate_voice_design %s", batch_log)
             wavs, sample_rate = model.generate_voice_design(
                 text=texts,
                 language=languages,
@@ -361,9 +379,8 @@ def synthesize_batch_to_wavs(
                     model_id,
                 )
             logger.info(
-                "TTS API: generate_custom_voice batch_size=%d chars=%d speaker=%s",
-                n,
-                total_chars,
+                "TTS API: generate_custom_voice %s speaker=%s",
+                batch_log,
                 voice,
             )
             wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
@@ -378,9 +395,8 @@ def synthesize_batch_to_wavs(
             raise
         mid = n // 2
         logger.warning(
-            "CUDA OOM on TTS batch_size=%d chars=%d; splitting into %d + %d",
-            n,
-            total_chars,
+            "CUDA OOM on TTS %s; splitting into %d + %d",
+            batch_log,
             mid,
             n - mid,
         )
