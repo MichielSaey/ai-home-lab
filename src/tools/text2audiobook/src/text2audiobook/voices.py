@@ -1,4 +1,4 @@
-"""Qwen3-TTS CustomVoice catalog, VoiceDesign labels, CLI listing, random picks."""
+"""Qwen3-TTS CustomVoice catalog, VoiceDesign / Base clone labels, CLI listing."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 # Labels for VoiceDesign (no fixed speaker; timbre from instruct).
 VOICE_DESIGN_LABEL = "designed"
 VOICE_DESIGN_ALIASES = frozenset({"designed", "voicedesign"})
+
+# Labels for Base voice cloning (timbre from ref_audio + ref_text).
+VOICE_CLONE_LABEL = "cloned"
+VOICE_CLONE_ALIASES = frozenset({"cloned", "clone", "base"})
 
 
 @dataclass(frozen=True)
@@ -46,9 +50,15 @@ def is_voice_design_label(name: str | None) -> bool:
     return name.strip().lower() in VOICE_DESIGN_ALIASES
 
 
+def is_voice_clone_label(name: str | None) -> bool:
+    if name is None:
+        return False
+    return name.strip().lower() in VOICE_CLONE_ALIASES
+
+
 def lang_for_voice(name: str) -> str:
     """Return the speaker's recommended Qwen language string."""
-    if is_voice_design_label(name):
+    if is_voice_design_label(name) or is_voice_clone_label(name):
         return "English"
     known = _BY_NAME.get(name) or _BY_NAME_CI.get(name.lower())
     if known is not None:
@@ -72,8 +82,9 @@ def format_voice_table(voices: list[VoiceInfo] | None = None) -> str:
         lines.append(f"{voice.name:<12} {voice.language:<10} {voice.description}")
     lines.append("")
     lines.append(
-        "CustomVoice speakers are listed above. VoiceDesign models (default for "
-        "English female audiobooks) have no fixed speakers — timbre comes from "
+        "CustomVoice speakers are listed above. Base models clone from "
+        "tts.ref_audio (+ tts.ref_text); use voice label 'cloned'. "
+        "VoiceDesign models have no fixed speakers — timbre comes from "
         "tts.instruct; use voice label 'designed'."
     )
     return "\n".join(lines)
@@ -115,6 +126,7 @@ def resolve_voice(
 
     When ``allow_design_label`` is False (CustomVoice), ``designed`` /
     ``VoiceDesign`` are rejected so they never reach ``generate_custom_voice``.
+    Base clone labels are handled in the pipeline (``is_base``), not here.
     """
     if requested is None or requested.strip() == "":
         if not default or not str(default).strip() or is_voice_design_label(default):

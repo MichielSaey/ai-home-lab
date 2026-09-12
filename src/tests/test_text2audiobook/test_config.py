@@ -168,13 +168,16 @@ def test_resolve_book_config_merges_overlay(tmp_path: Path) -> None:
     assert resolved.paths.input_dir == tmp_path / "input"
 
 
-def test_load_config_defaults_direction_and_voicedesign(tmp_path: Path) -> None:
+def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text("{}", encoding="utf-8")
     cfg = load_config(config_path)
     assert cfg.tts.voice == "Serena"
     assert cfg.tts.model_id == "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
     assert cfg.tts.lang == "English"
+    assert cfg.tts.ref_audio is None
+    assert cfg.tts.ref_text is None
+    assert cfg.tts.x_vector_only is False
     assert cfg.tts.instruct is not None
     assert "warm" in cfg.tts.instruct.lower()
     assert "native" in cfg.tts.instruct.lower()
@@ -184,6 +187,33 @@ def test_load_config_defaults_direction_and_voicedesign(tmp_path: Path) -> None:
     assert "bracket" in cfg.llm.direction_prompt.lower()
     assert "accent" in cfg.llm.direction_prompt.lower()
     assert cfg.llm.direction_max_new_tokens == 128
+
+
+def test_load_config_resolves_ref_audio(tmp_path: Path) -> None:
+    from text2audiobook.config import resolve_ref_audio
+
+    wav = tmp_path / "voices" / "ref.wav"
+    wav.parent.mkdir()
+    wav.write_bytes(b"RIFF")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tts": {
+                    "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+                    "voice": "cloned",
+                    "ref_audio": "voices/ref.wav",
+                    "ref_text": "Hello.",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert Path(cfg.tts.ref_audio) == wav
+    assert resolve_ref_audio("voices/ref.wav", config_path=config_path) == wav
+    assert resolve_ref_audio(None, config_path=config_path) is None
+    assert resolve_ref_audio(str(wav), config_path=config_path) == wav
 
 
 def test_resolve_book_config_missing_keeps_default(tmp_path: Path) -> None:

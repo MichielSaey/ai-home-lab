@@ -59,11 +59,11 @@ text2audiobook --voice Aiden
 text2audiobook --voice random
 ```
 
-**Default is CustomVoice 0.6B** (`Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`) with speaker `Serena` (warm, gentle female — faster than the 1.7B models). The 0.6B CustomVoice build does **not** support `instruct` style control; `tts.instruct` / direction are kept for 1.7B VoiceDesign or 1.7B CustomVoice if you opt in.
+**Shipped default is Base 0.6B voice clone** (`Qwen/Qwen3-TTS-12Hz-0.6B-Base`) with `voice: cloned`, `tts.ref_audio` (reference WAV), and `tts.ref_text` (exact transcript of that clip). The Base model does **not** support `instruct` style control; keep `tts.instruct` / direction for CustomVoice 1.7B or VoiceDesign if you switch.
 
-Serena/Vivian are Chinese-native; Mandarin accent can slip on English. English-native CustomVoice speakers are male only (`Ryan`, `Aiden`). For a designed native-English female persona, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` and `voice` to `designed` (slower). `--voice random` picks from the nine CustomVoice speakers without replacement until the pool wraps.
+For a fixed catalog speaker instead, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` and `voice` to e.g. `Serena` (faster; no instruct on 0.6B). Serena/Vivian are Chinese-native; Mandarin accent can slip on English. English-native CustomVoice speakers are male only (`Ryan`, `Aiden`). For a designed native-English female persona without a reference clip, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` and `voice` to `designed` (slower). `--voice random` picks from the nine CustomVoice speakers without replacement until the pool wraps.
 
-`tts.lang` is the book/content language (default `English`). When the active model supports instruct, global `tts.instruct` is composed with optional per-chunk direction (base + direction). CustomVoice has no `speed` knob.
+`tts.lang` is the book/content language (default `English`). When the active model supports instruct, global `tts.instruct` is composed with optional per-chunk direction (base + direction). CustomVoice has no `speed` knob. Base cloning uses `tts.x_vector_only` (default `false`; ICL mode needs `ref_text`).
 
 ## Supported inputs
 
@@ -109,7 +109,7 @@ Each stage starts from the previous stem’s units and **further-splits only whe
 2. Drop citation-only notes; keep discursive notes as `kind=footnote` sections (optional spoken cues)
 3. Scrub URLs, inline citations, dates, abbreviations, tables/figures, and other print conventions
 
-**Format** further-splits clean sections by word budget (~1000), then optionally runs **two LLM passes** while the model is still loaded: (1) cleanup rewrites each window for spoken English; (2) direction writes a short Qwen3-TTS `instruct` string per window (passage-level pace/emotion/emphasis only — **not** bracket tags like `[excited]` inside the narration text, and **not** a new accent/persona). Direction can run even when cleanup is off (`llm.direction`). Per-chunk `instruct` is stored in `format/chunks.jsonl` and inherited by speak units; speak **composes** global `tts.instruct` + chunk direction (never replaces the baseline). Joined chapter scripts are written for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by character budget (target 400, cap 800) for Qwen3-TTS (0.6B CustomVoice by default).
+**Format** further-splits clean sections by word budget (~1000), then optionally runs **two LLM passes** while the model is still loaded: (1) cleanup rewrites each window for spoken English; (2) direction writes a short Qwen3-TTS `instruct` string per window (passage-level pace/emotion/emphasis only — **not** bracket tags like `[excited]` inside the narration text, and **not** a new accent/persona). Direction can run even when cleanup is off (`llm.direction`). Per-chunk `instruct` is stored in `format/chunks.jsonl` and inherited by speak units; speak **composes** global `tts.instruct` + chunk direction (never replaces the baseline). Joined chapter scripts are written for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by character budget (target 400, cap 800) for Qwen3-TTS (0.6B Base voice clone by default).
 
 After changing TTS model/voice/instruct, re-run `--speak` (and `--format` if direction settings changed) so stems pick up the new fingerprint.
 

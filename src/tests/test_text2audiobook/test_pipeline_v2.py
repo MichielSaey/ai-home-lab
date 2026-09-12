@@ -236,6 +236,86 @@ def test_customvoice_rejects_designed_voice(tmp_path: Path) -> None:
         raise AssertionError("--voice designed with CustomVoice should raise")
 
 
+def test_base_rejects_missing_ref_audio(tmp_path: Path) -> None:
+    from text2audiobook.pipeline import _resolve_tts
+
+    _, config = _write_book(tmp_path)
+    base_missing = replace(
+        config,
+        tts=replace(
+            config.tts,
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            voice="cloned",
+            ref_audio=None,
+            ref_text="Transcript.",
+        ),
+    )
+    try:
+        _resolve_tts(base_missing, voice=None, staging_root=tmp_path / "staging")
+    except ValueError as exc:
+        assert "ref_audio" in str(exc)
+    else:
+        raise AssertionError("Base without ref_audio should raise")
+
+    missing_file = replace(
+        base_missing,
+        tts=replace(base_missing.tts, ref_audio=str(tmp_path / "nope.wav")),
+    )
+    try:
+        _resolve_tts(missing_file, voice=None, staging_root=tmp_path / "staging")
+    except ValueError as exc:
+        assert "ref_audio" in str(exc) or "not found" in str(exc).lower()
+    else:
+        raise AssertionError("Base with missing ref_audio file should raise")
+
+    no_text = replace(
+        missing_file,
+        tts=replace(
+            missing_file.tts,
+            ref_audio=str(tmp_path / "ref.wav"),
+            ref_text="  ",
+            x_vector_only=False,
+        ),
+    )
+    (tmp_path / "ref.wav").write_bytes(b"RIFF")
+    try:
+        _resolve_tts(no_text, voice=None, staging_root=tmp_path / "staging")
+    except ValueError as exc:
+        assert "ref_text" in str(exc)
+    else:
+        raise AssertionError("Base without ref_text should raise when not x_vector_only")
+
+
+def test_base_speak_fingerprint_includes_ref_hash(tmp_path: Path) -> None:
+    from text2audiobook.pipeline import _resolve_tts, _speak_fingerprint
+    from text2audiobook.stems import file_sha256
+
+    _, config = _write_book(tmp_path)
+    ref = tmp_path / "ref_clone.wav"
+    ref.write_bytes(b"RIFFCLONE")
+    base_cfg = replace(
+        config,
+        tts=replace(
+            config.tts,
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            voice="cloned",
+            ref_audio=str(ref),
+            ref_text="Reference transcript.",
+            x_vector_only=False,
+            instruct="should be omitted from fingerprint",
+        ),
+    )
+    tts = _resolve_tts(base_cfg, voice=None, staging_root=tmp_path / "staging")
+    assert tts.voice == "cloned"
+    fp = _speak_fingerprint(base_cfg, tts, format_hash="abc")
+    assert fp["model_id"] == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    assert fp["voice"] == "cloned"
+    assert fp["ref_audio_sha256"] == file_sha256(ref)
+    assert fp["ref_text"] == "Reference transcript."
+    assert fp["x_vector_only"] is False
+    assert "instruct" not in fp
+
+
 def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     stems = _stems_after_extract_format(source, config, monkeypatch)

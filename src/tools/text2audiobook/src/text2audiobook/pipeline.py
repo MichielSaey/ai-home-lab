@@ -27,6 +27,7 @@ from text2audiobook.config import (
     AppConfig,
     TtsConfig,
     resolve_book_config,
+    resolve_ref_audio,
     with_speak_footnote_cues,
 )
 from text2audiobook.formatting import FORMATTER_VERSION
@@ -73,6 +74,8 @@ from text2audiobook.stems import (
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
     compose_instruct,
+    create_voice_clone_prompt,
+    is_base,
     is_voice_design,
     load_tts,
     supports_instruct,
@@ -80,7 +83,9 @@ from text2audiobook.tts import (
     unload_tts,
 )
 from text2audiobook.voices import (
+    VOICE_CLONE_LABEL,
     VOICE_DESIGN_LABEL,
+    is_voice_clone_label,
     is_voice_design_label,
     lang_for_voice,
     resolve_voice,
@@ -469,6 +474,40 @@ def _resolve_tts(
     staging_root: Path,
 ) -> TtsConfig:
     lang = config.tts.lang
+    if is_base(config.tts.model_id):
+        ref_path = resolve_ref_audio(config.tts.ref_audio, config_path=config.config_path)
+        if ref_path is None:
+            raise ValueError(
+                "Base voice cloning requires tts.ref_audio "
+                "(path to a reference WAV, relative to the config file or absolute)"
+            )
+        if not ref_path.is_file():
+            raise ValueError(f"tts.ref_audio not found: {ref_path}")
+        if not config.tts.x_vector_only and not (
+            config.tts.ref_text and str(config.tts.ref_text).strip()
+        ):
+            raise ValueError(
+                "Base voice cloning requires non-empty tts.ref_text "
+                "unless tts.x_vector_only is true"
+            )
+        if voice and voice.strip() and not is_voice_clone_label(voice):
+            logger.info(
+                "Base voice clone uses ref_audio; ignoring --voice=%s",
+                voice,
+            )
+        logger.info(
+            "Base voice=%s (lang=%s; clone from %s)",
+            VOICE_CLONE_LABEL,
+            lang,
+            ref_path,
+        )
+        return replace(
+            config.tts,
+            voice=VOICE_CLONE_LABEL,
+            lang=lang,
+            ref_audio=str(ref_path),
+        )
+
     if is_voice_design(config.tts.model_id):
         # VoiceDesign: no CustomVoice speaker; persona comes from tts.instruct.
         # Keep config.lang as content language (do not map via speaker native).
@@ -574,7 +613,12 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
     }
-    # 0.6B CustomVoice ignores instruct; omit so instruct edits do not force re-speak.
+    if is_base(tts.model_id):
+        if tts.ref_audio:
+            fingerprint["ref_audio_sha256"] = file_sha256(Path(tts.ref_audio))
+        fingerprint["ref_text"] = tts.ref_text
+        fingerprint["x_vector_only"] = tts.x_vector_only
+    # 0.6B CustomVoice / Base ignore instruct; omit so instruct edits do not force re-speak.
     if supports_instruct(tts.model_id):
         fingerprint["instruct"] = tts.instruct
     return fingerprint
@@ -1069,6 +1113,21 @@ def _synthesize_and_encode(
     }
     total_chapters = len(chapter_order)
 
+    voice_clone_prompt = None
+    ref_audio_path: Path | None = None
+    if is_base(tts_config.model_id):
+        if not tts_config.ref_audio:
+            raise ValueError("Base voice cloning requires tts.ref_audio")
+        ref_audio_path = Path(tts_config.ref_audio)
+        if not ref_audio_path.is_file():
+            raise ValueError(f"tts.ref_audio not found: {ref_audio_path}")
+        voice_clone_prompt = create_voice_clone_prompt(
+            tts_model,
+            ref_audio=ref_audio_path,
+            ref_text=tts_config.ref_text,
+            x_vector_only=tts_config.x_vector_only,
+        )
+
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
         start = time.perf_counter()
         encode_chapter_mp3(
@@ -1096,6 +1155,10 @@ def _synthesize_and_encode(
                 instruct=compose_instruct(tts_config.instruct, unit.instruct),
                 chunk_silence_ms=config.output.chunk_silence_ms,
                 model_id=tts_config.model_id,
+                voice_clone_prompt=voice_clone_prompt,
+                ref_audio=ref_audio_path,
+                ref_text=tts_config.ref_text,
+                x_vector_only=tts_config.x_vector_only,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)
         logger.info(

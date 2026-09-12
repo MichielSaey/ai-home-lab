@@ -2,6 +2,8 @@ from pathlib import Path
 
 from text2audiobook.voices import (
     RANDOM_POOL,
+    VOICE_CLONE_LABEL,
+    is_voice_clone_label,
     lang_for_voice,
     list_voices,
     pick_random_voice,
@@ -14,6 +16,16 @@ def test_lang_follows_speaker_native() -> None:
     assert lang_for_voice("Aiden") == "English"
     assert lang_for_voice("Vivian") == "Chinese"
     assert lang_for_voice("Ono_Anna") == "Japanese"
+    assert lang_for_voice("cloned") == "English"
+
+
+def test_is_voice_clone_label() -> None:
+    assert is_voice_clone_label("cloned")
+    assert is_voice_clone_label("Clone")
+    assert is_voice_clone_label("base")
+    assert not is_voice_clone_label("Serena")
+    assert not is_voice_clone_label(None)
+    assert VOICE_CLONE_LABEL == "cloned"
 
 
 def test_random_pool_is_all_custom_voices() -> None:
@@ -68,10 +80,12 @@ def test_resolve_voice_rejects_unknown_default(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError for unknown default voice")
 
 
-def test_format_voice_table_mentions_voicedesign() -> None:
+def test_format_voice_table_mentions_voicedesign_and_base() -> None:
     from text2audiobook.voices import format_voice_table
 
     table = format_voice_table()
     assert "Serena" in table
     assert "VoiceDesign" in table
     assert "designed" in table
+    assert "Base" in table or "cloned" in table
+    assert "ref_audio" in table

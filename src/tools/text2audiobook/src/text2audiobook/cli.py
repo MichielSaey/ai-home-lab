@@ -72,17 +72,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--voice",
         default=None,
         help=(
-            "CustomVoice speaker (e.g. Serena, Ryan, Aiden; default Serena), "
-            "'random' for the CustomVoice pool, or 'designed' for VoiceDesign. "
-            "Ignored when model_id is VoiceDesign except as a label. Content "
-            "language stays from config tts.lang."
+            "CustomVoice speaker (e.g. Serena, Ryan, Aiden), 'random' for the "
+            "CustomVoice pool, 'cloned' for Base voice clone (uses tts.ref_audio), "
+            "or 'designed' for VoiceDesign. Content language stays from config "
+            "tts.lang."
         ),
     )
     parser.add_argument(
         "--list-voices",
         action="store_true",
         help=(
-            "Print CustomVoice speakers plus a VoiceDesign note, then exit "
+            "Print CustomVoice speakers plus Base/VoiceDesign notes, then exit "
             "(no GPU / LLM load)."
         ),
     )

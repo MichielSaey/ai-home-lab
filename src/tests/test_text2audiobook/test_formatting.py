@@ -504,12 +504,16 @@ def test_default_clean_prompt_covers_new_rules() -> None:
     assert "[...]" in DEFAULT_CLEAN_PROMPT
     cfg = load_config()
     assert "in other words" in cfg.llm.clean_prompt
-    assert cfg.tts.voice == "Serena"
+    assert cfg.tts.voice == "cloned"
     assert cfg.tts.lang == "English"
     assert cfg.tts.instruct
     assert "audiobook" in cfg.tts.instruct.lower()
     assert "native" in cfg.tts.instruct.lower()
-    assert cfg.tts.model_id == "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    assert cfg.tts.model_id == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    assert cfg.tts.ref_audio is not None
+    assert cfg.tts.ref_audio.endswith("ref_clone.wav")
+    assert cfg.tts.ref_text and "Homer" in cfg.tts.ref_text
+    assert cfg.tts.x_vector_only is False
     assert cfg.llm.direction is True
     assert "{text}" in cfg.llm.direction_prompt
     assert cfg.llm.direction_max_new_tokens == 128
