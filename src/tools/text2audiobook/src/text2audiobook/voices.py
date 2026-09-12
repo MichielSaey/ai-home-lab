@@ -109,9 +109,21 @@ def resolve_voice(
     default: str,
     state_path: Path,
     rng: random.Random | None = None,
+    allow_design_label: bool = True,
 ) -> str:
+    """Resolve a voice name for VoiceDesign or CustomVoice.
+
+    When ``allow_design_label`` is False (CustomVoice), ``designed`` /
+    ``VoiceDesign`` are rejected so they never reach ``generate_custom_voice``.
+    """
     if requested is None or requested.strip() == "":
         if not default or not str(default).strip() or is_voice_design_label(default):
+            if not allow_design_label:
+                known_names = ", ".join(voice.name for voice in VOICES)
+                raise ValueError(
+                    f"CustomVoice requires a catalog speaker, not {default!r}. "
+                    f"Known voices: {known_names}"
+                )
             return VOICE_DESIGN_LABEL
         known = get_voice(default)
         if known is None:
@@ -123,6 +135,12 @@ def resolve_voice(
         return known.name
     name = requested.strip()
     if is_voice_design_label(name):
+        if not allow_design_label:
+            known_names = ", ".join(voice.name for voice in VOICES)
+            raise ValueError(
+                f"Voice {name!r} is for VoiceDesign only. "
+                f"Use a CustomVoice speaker: {known_names}"
+            )
         return VOICE_DESIGN_LABEL
     if name.lower() == "random":
         return pick_random_voice(state_path, rng=rng)
