@@ -183,7 +183,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert "native" in cfg.tts.instruct.lower()
     assert "chinese" in cfg.tts.instruct.lower() or "mandarin" in cfg.tts.instruct.lower()
     assert cfg.tts.batch_max_chars == 2800
-    assert cfg.tts.batch_max_items == 4
+    assert cfg.tts.batch_max_items == 10
     assert cfg.chunking.speak_target_chars == 800
     assert cfg.chunking.speak_max_chars == 1200
     assert cfg.llm.direction is True
