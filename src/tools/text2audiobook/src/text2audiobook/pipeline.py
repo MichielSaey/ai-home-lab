@@ -436,23 +436,27 @@ def process_source(
         if own_tts is None:
             own_tts = load_tts(tts_config, device=tts_device)
             loaded_here = True
+        # Mutable slot so periodic/OOM reloads stay visible to finally on failure.
+        tts_slot: list[Any] = [own_tts]
         try:
-            own_tts = _run_speak(
+            _run_speak(
                 format_units,
                 scripts=scripts,
                 metadata=metadata,
                 config=config,
                 tts_config=tts_config,
                 stems=stems,
-                tts_model=own_tts,
+                tts_slot=tts_slot,
                 tracker=tracker,
                 record=record,
                 progress=progress,
                 force=force,
             )
         finally:
+            own_tts = tts_slot[0]
             if loaded_here:
                 unload_tts(own_tts)
+                tts_slot[0] = None
                 own_tts = None
 
     handlers = {
@@ -1010,12 +1014,12 @@ def _run_speak(
     config: AppConfig,
     tts_config: TtsConfig,
     stems: BookStems,
-    tts_model: Any,
+    tts_slot: list[Any],
     tracker: RunTracker,
     record: BookRecord,
     progress: ProgressContext,
     force: bool,
-) -> Any:
+) -> None:
     format_hash = _live_format_hash(stems, config)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_in_progress = stems.speak_dir / "in_progress.json"
@@ -1078,9 +1082,9 @@ def _run_speak(
     )
 
     with ThreadPoolExecutor(max_workers=max(1, config.pipeline.ffmpeg_workers)) as executor:
-        wavs_by_slug, futures, tts_model = _synthesize_and_encode(
+        wavs_by_slug, futures = _synthesize_and_encode(
             units,
-            tts_model=tts_model,
+            tts_slot=tts_slot,
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -1128,13 +1132,12 @@ def _run_speak(
             logger.info("Removed MP3 directory: %s", mp3_root)
 
     tracker.finish_book(record, status="ok", output_path=metadata.m4b_path)
-    return tts_model
 
 
 def _synthesize_and_encode(
     units: list[TextChunk],
     *,
-    tts_model: Any,
+    tts_slot: list[Any],
     config: AppConfig,
     tts_config: TtsConfig,
     metadata: BookMetadata,
@@ -1145,7 +1148,7 @@ def _synthesize_and_encode(
     progress: ProgressContext,
     skip_wavs: bool,
     previous_text_hashes: dict[tuple[str, int], str] | None = None,
-) -> tuple[dict[str, list[Path]], list[Future], Any]:
+) -> tuple[dict[str, list[Path]], list[Future]]:
     expected = Counter(unit.chapter_slug for unit in units)
     done: Counter[str] = Counter()
     wavs_by_slug: dict[str, list[Path]] = defaultdict(list)
@@ -1157,7 +1160,6 @@ def _synthesize_and_encode(
     }
     total_chapters = len(chapter_order)
 
-    current_model = tts_model
     voice_clone_prompt = None
     ref_audio_path: Path | None = None
     if is_base(tts_config.model_id):
@@ -1167,7 +1169,7 @@ def _synthesize_and_encode(
         if not ref_audio_path.is_file():
             raise ValueError(f"tts.ref_audio not found: {ref_audio_path}")
         voice_clone_prompt = create_voice_clone_prompt(
-            current_model,
+            tts_slot[0],
             ref_audio=ref_audio_path,
             ref_text=tts_config.ref_text,
             x_vector_only=tts_config.x_vector_only,
@@ -1179,16 +1181,15 @@ def _synthesize_and_encode(
             voice_clone_prompt = None
             return
         voice_clone_prompt = create_voice_clone_prompt(
-            current_model,
+            tts_slot[0],
             ref_audio=ref_audio_path,
             ref_text=tts_config.ref_text,
             x_vector_only=tts_config.x_vector_only,
         )
 
     def reload_current_model(*, reason: str) -> None:
-        nonlocal current_model
         logger.info("%s", reason)
-        current_model = reload_tts(tts_config, current_model)
+        tts_slot[0] = reload_tts(tts_config, tts_slot[0])
         rebuild_voice_clone_prompt()
 
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
@@ -1283,7 +1284,7 @@ def _synthesize_and_encode(
         }
         start = time.perf_counter()
         try:
-            synthesize_batch_to_wavs(current_model, items, **synth_kwargs)
+            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
         except Exception as exc:
             if not is_cuda_oom(exc):
                 raise
@@ -1295,7 +1296,7 @@ def _synthesize_and_encode(
             )
             synthesized_since_reload = 0
             synth_kwargs["voice_clone_prompt"] = voice_clone_prompt
-            synthesize_batch_to_wavs(current_model, items, **synth_kwargs)
+            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
         tracker.add_duration(record, "tts", time.perf_counter() - start)
         synthesized_since_reload += len(batch)
         for item in batch:
@@ -1329,7 +1330,7 @@ def _synthesize_and_encode(
                 )
             )
 
-    return dict(wavs_by_slug), futures, current_model
+    return dict(wavs_by_slug), futures
 
 
 def _timed_persist_iter(

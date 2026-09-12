@@ -886,7 +886,7 @@ def test_speak_progress_unit_done_monotonic_when_packing_reorders(
     ):
         _synthesize_and_encode(
             units,
-            tts_model=object(),
+            tts_slot=[object()],
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -977,13 +977,14 @@ def test_synthesize_reloads_every_n_units(tmp_path: Path, monkeypatch, caplog) -
     monkeypatch.setattr("text2audiobook.pipeline.reload_tts", fake_reload)
 
     initial = models[0]
+    tts_slot = [initial]
     with (
         ThreadPoolExecutor(max_workers=1) as executor,
         caplog.at_level(logging.INFO, logger="text2audiobook.pipeline"),
     ):
-        _wavs, _futures, final_model = _synthesize_and_encode(
+        _synthesize_and_encode(
             units,
-            tts_model=initial,
+            tts_slot=tts_slot,
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -997,7 +998,7 @@ def test_synthesize_reloads_every_n_units(tmp_path: Path, monkeypatch, caplog) -
 
     assert len(reload_calls) == 1
     assert reload_calls[0] is initial
-    assert final_model is models[1]
+    assert tts_slot[0] is models[1]
     assert any("Reloading TTS model after 2 units" in r.getMessage() for r in caplog.records)
 
 
@@ -1027,9 +1028,10 @@ def test_synthesize_oom_reloads_and_retries_batch_once(tmp_path: Path, monkeypat
     )
 
     with ThreadPoolExecutor(max_workers=1) as executor:
-        _wavs, _futures, final_model = _synthesize_and_encode(
+        tts_slot = [initial]
+        _synthesize_and_encode(
             units,
-            tts_model=initial,
+            tts_slot=tts_slot,
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -1042,7 +1044,7 @@ def test_synthesize_oom_reloads_and_retries_batch_once(tmp_path: Path, monkeypat
         )
 
     assert attempts == [initial, reloaded]
-    assert final_model is reloaded
+    assert tts_slot[0] is reloaded
 
 
 def test_synthesize_oom_retry_still_oom_reraises(tmp_path: Path, monkeypatch) -> None:
@@ -1067,7 +1069,7 @@ def test_synthesize_oom_retry_still_oom_reraises(tmp_path: Path, monkeypatch) ->
         with pytest.raises(RuntimeError, match="out of memory"):
             _synthesize_and_encode(
                 units,
-                tts_model=object(),
+                tts_slot=[object()],
                 config=config,
                 tts_config=tts_config,
                 metadata=metadata,
