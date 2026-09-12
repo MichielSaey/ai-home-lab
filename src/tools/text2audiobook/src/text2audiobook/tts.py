@@ -151,45 +151,47 @@ def iter_speak_batches(
     *,
     max_chars: int,
     max_items: int,
+    max_pad: int = 0,
 ) -> Iterator[list[Any]]:
-    """Pack units with first-fit residual filling toward max_chars / max_items.
+    """Pack units by length-sorted contiguous prefixes under pad/chars/items.
 
-    Scans still-pending units in original order and pulls any unit that fits
-    remaining capacity (not only the next sequential unit). Never splits a
-    unit. ``max_chars`` / ``max_items`` <= 0 means no limit on that dimension.
-    A single oversized unit still forms its own batch.
+    Sorts by ``(len(text), original_index)`` ascending, then greedily cuts
+    contiguous prefixes that fit all active limits. Primary VRAM constraint is
+    pad cost ``len(batch) * max(char_lens)`` when ``max_pad > 0``. Never splits
+    a unit. ``max_chars`` / ``max_items`` / ``max_pad`` <= 0 means no limit on
+    that dimension. A single oversized unit still forms its own batch.
     """
-    pending = list(units)
-    while pending:
-        batch: list[Any] = []
-        rem_chars = max_chars if max_chars > 0 else None
-        rem_items = max_items if max_items > 0 else None
-        while True:
-            if rem_items is not None and rem_items <= 0:
+    ordered = [
+        unit
+        for _, unit in sorted(
+            enumerate(units),
+            key=lambda pair: (len(pair[1].text), pair[0]),
+        )
+    ]
+    i = 0
+    n = len(ordered)
+    while i < n:
+        batch: list[Any] = [ordered[i]]
+        batch_sum = len(ordered[i].text)
+        batch_max_len = batch_sum
+        i += 1
+        while i < n:
+            candidate = ordered[i]
+            cand_len = len(candidate.text)
+            new_n = len(batch) + 1
+            new_sum = batch_sum + cand_len
+            new_max = max(batch_max_len, cand_len)
+            if max_items > 0 and new_n > max_items:
                 break
-            idx: int | None = None
-            for i, unit in enumerate(pending):
-                n = len(unit.text)
-                if rem_chars is not None and n > rem_chars:
-                    if not batch:
-                        # Oversized alone when the batch is empty.
-                        idx = i
-                        break
-                    continue
-                idx = i
+            if max_chars > 0 and new_sum > max_chars:
                 break
-            if idx is None:
+            if max_pad > 0 and new_n * new_max > max_pad:
                 break
-            unit = pending.pop(idx)
-            batch.append(unit)
-            if rem_chars is not None:
-                rem_chars -= len(unit.text)
-            if rem_items is not None:
-                rem_items -= 1
-            if rem_chars is not None and rem_chars < 0:
-                break
-        if batch:
-            yield batch
+            batch.append(candidate)
+            batch_sum = new_sum
+            batch_max_len = new_max
+            i += 1
+        yield batch
 
 
 def _normalize_instruct_list(
@@ -272,6 +274,7 @@ def _format_batch_log(
     texts: Sequence[str],
     batch_max_chars: int = 0,
     batch_max_items: int = 0,
+    batch_max_pad_chars: int = 0,
 ) -> str:
     """Human-readable batch size breakdown for TTS logs."""
     sizes = [len(t) for t in texts]
@@ -283,6 +286,9 @@ def _format_batch_log(
         parts.append(f"chars={total}/{batch_max_chars}")
     else:
         parts.append(f"chars={total}")
+    if batch_max_pad_chars > 0:
+        pad_cost = n * max(sizes) if sizes else 0
+        parts.append(f"pad={pad_cost}/{batch_max_pad_chars}")
     parts.append("[" + ",".join(str(s) for s in sizes) + "]")
     return " ".join(parts)
 
@@ -302,6 +308,7 @@ def synthesize_batch_to_wavs(
     x_vector_only: bool = False,
     batch_max_chars: int = 0,
     batch_max_items: int = 0,
+    batch_max_pad_chars: int = 0,
 ) -> None:
     """Synthesize one or more chunks in a single generate_* call; write one WAV each.
 
@@ -328,12 +335,14 @@ def synthesize_batch_to_wavs(
         "x_vector_only": x_vector_only,
         "batch_max_chars": batch_max_chars,
         "batch_max_items": batch_max_items,
+        "batch_max_pad_chars": batch_max_pad_chars,
     }
     batch_log = _format_batch_log(
         n=n,
         texts=texts,
         batch_max_chars=batch_max_chars,
         batch_max_items=batch_max_items,
+        batch_max_pad_chars=batch_max_pad_chars,
     )
 
     try:

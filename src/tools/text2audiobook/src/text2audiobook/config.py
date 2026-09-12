@@ -125,7 +125,8 @@ class TtsConfig:
     x_vector_only: bool = False
     instruct: str | None = DEFAULT_TTS_INSTRUCT
     batch_max_chars: int = 2800
-    batch_max_items: int = 4
+    batch_max_pad_chars: int = 2800
+    batch_max_items: int = 32
 
 
 def resolve_ref_audio(

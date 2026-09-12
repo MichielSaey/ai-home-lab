@@ -32,7 +32,8 @@
     "x_vector_only": false,
     "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation \u2014 clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow.",
     "batch_max_chars": 2800,
-    "batch_max_items": 4
+    "batch_max_pad_chars": 2800,
+    "batch_max_items": 32
   },
   "output": {
     "chapter_mp3": false,
