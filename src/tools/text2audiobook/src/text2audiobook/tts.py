@@ -253,6 +253,21 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
 
 
+def _cuda_oom_cleanup() -> None:
+    """GC + synchronize + empty CUDA cache after OOM; swallow cleanup errors."""
+    try:
+        import gc
+
+        gc.collect()
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def _split_instruct_for_halves(
     instruct: str | None | Sequence[str | None],
     mid: int,
@@ -314,7 +329,8 @@ def synthesize_batch_to_wavs(
 
     Written via temp file + rename so an interrupted run never leaves a partial WAV.
     Sample rate comes from the model (do not assume 24 kHz).
-    On CUDA OOM with batch size > 1, halves the batch and retries recursively.
+    On CUDA OOM: GC + synchronize + empty_cache, then either retry once (n==1)
+    or halve the batch and recurse (n>1).
     """
     if not items:
         return
@@ -345,7 +361,7 @@ def synthesize_batch_to_wavs(
         batch_max_pad_chars=batch_max_pad_chars,
     )
 
-    try:
+    def _run_generate() -> tuple[Any, Any]:
         if is_base(model_id):
             gen_kwargs: dict[str, Any] = {
                 "text": texts,
@@ -364,65 +380,75 @@ def synthesize_batch_to_wavs(
                 gen_kwargs["ref_text"] = ref_text
                 gen_kwargs["x_vector_only_mode"] = x_vector_only
                 logger.info("TTS API: generate_voice_clone %s", batch_log)
-            wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
-        elif is_voice_design(model_id):
+            return model.generate_voice_clone(**gen_kwargs)
+        if is_voice_design(model_id):
             resolved = [_resolve_voice_design_instruct(value) for value in instruct_list]
             logger.info("TTS API: generate_voice_design %s", batch_log)
-            wavs, sample_rate = model.generate_voice_design(
+            return model.generate_voice_design(
                 text=texts,
                 language=languages,
                 instruct=resolved,
             )
-        else:
-            gen_kwargs = {
-                "text": texts,
-                "language": languages,
-                "speaker": voice,
-            }
-            if supports_instruct(model_id):
-                if any(value and str(value).strip() for value in instruct_list):
-                    gen_kwargs["instruct"] = instruct_list
-            elif any(value and str(value).strip() for value in instruct_list):
-                logger.debug(
-                    "Ignoring instruct for %s (no instruction control)",
-                    model_id,
-                )
-            logger.info(
-                "TTS API: generate_custom_voice %s speaker=%s",
-                batch_log,
-                voice,
+        gen_kwargs = {
+            "text": texts,
+            "language": languages,
+            "speaker": voice,
+        }
+        if supports_instruct(model_id):
+            if any(value and str(value).strip() for value in instruct_list):
+                gen_kwargs["instruct"] = instruct_list
+        elif any(value and str(value).strip() for value in instruct_list):
+            logger.debug(
+                "Ignoring instruct for %s (no instruction control)",
+                model_id,
             )
-            wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
+        logger.info(
+            "TTS API: generate_custom_voice %s speaker=%s",
+            batch_log,
+            voice,
+        )
+        return model.generate_custom_voice(**gen_kwargs)
+
+    try:
+        wavs, sample_rate = _run_generate()
     except Exception as exc:
         if not _is_cuda_oom(exc):
             raise
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        _cuda_oom_cleanup()
         if n == 1:
-            raise
-        mid = n // 2
-        logger.warning(
-            "CUDA OOM on TTS %s; splitting into %d + %d",
-            batch_log,
-            mid,
-            n - mid,
-        )
-        left_instruct, right_instruct = _split_instruct_for_halves(instruct, mid, n)
-        synthesize_batch_to_wavs(
-            model,
-            items[:mid],
-            instruct=left_instruct,
-            **common_kwargs,
-        )
-        synthesize_batch_to_wavs(
-            model,
-            items[mid:],
-            instruct=right_instruct,
-            **common_kwargs,
-        )
-        return
+            logger.warning(
+                "CUDA OOM on TTS %s; retrying once after cleanup",
+                batch_log,
+            )
+            try:
+                wavs, sample_rate = _run_generate()
+            except Exception as retry_exc:
+                if not _is_cuda_oom(retry_exc):
+                    raise
+                _cuda_oom_cleanup()
+                raise
+        else:
+            mid = n // 2
+            logger.warning(
+                "CUDA OOM on TTS %s; splitting into %d + %d",
+                batch_log,
+                mid,
+                n - mid,
+            )
+            left_instruct, right_instruct = _split_instruct_for_halves(instruct, mid, n)
+            synthesize_batch_to_wavs(
+                model,
+                items[:mid],
+                instruct=left_instruct,
+                **common_kwargs,
+            )
+            synthesize_batch_to_wavs(
+                model,
+                items[mid:],
+                instruct=right_instruct,
+                **common_kwargs,
+            )
+            return
 
     if wavs is None:
         raise RuntimeError(f"Qwen3-TTS produced no audio for batch of {n} texts")
