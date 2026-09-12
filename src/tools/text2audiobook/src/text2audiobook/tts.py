@@ -84,17 +84,30 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     if device == "cpu":
         model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
     else:
+        use_flash = False
         try:
-            model = Qwen3TTSModel.from_pretrained(
-                model_id,
-                attn_implementation="flash_attention_2",
-                **load_kwargs,
-            )
-        except Exception:
+            import flash_attn  # noqa: F401
+
+            use_flash = True
+        except ImportError:
+            pass
+        if use_flash:
+            try:
+                model = Qwen3TTSModel.from_pretrained(
+                    model_id,
+                    attn_implementation="flash_attention_2",
+                    **load_kwargs,
+                )
+            except Exception:
+                logger.info(
+                    "flash_attention_2 failed for %s; loading without it",
+                    model_id,
+                )
+                model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
+        else:
             logger.info(
-                "flash_attention_2 unavailable for %s; loading without it",
+                "flash_attn not installed; loading %s without flash_attention_2",
                 model_id,
-                exc_info=True,
             )
             model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
 
