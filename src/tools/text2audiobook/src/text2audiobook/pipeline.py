@@ -630,6 +630,7 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "speak_max_chars": config.chunking.speak_max_chars,
         "batch_max_chars": tts.batch_max_chars,
         "batch_max_pad_chars": tts.batch_max_pad_chars,
+        "batch_vram_overhead": tts.batch_vram_overhead,
         "batch_max_items": tts.batch_max_items,
     }
     if is_base(tts.model_id):
@@ -1235,6 +1236,7 @@ def _synthesize_and_encode(
         max_chars=tts_config.batch_max_chars,
         max_items=tts_config.batch_max_items,
         max_pad=tts_config.batch_max_pad_chars,
+        vram_overhead=tts_config.batch_vram_overhead,
     ):
         start = time.perf_counter()
         synthesize_batch_to_wavs(
@@ -1254,6 +1256,7 @@ def _synthesize_and_encode(
             batch_max_chars=tts_config.batch_max_chars,
             batch_max_items=tts_config.batch_max_items,
             batch_max_pad_chars=tts_config.batch_max_pad_chars,
+            batch_vram_overhead=tts_config.batch_vram_overhead,
         )
         tracker.add_duration(record, "tts", time.perf_counter() - start)
         for item in batch:

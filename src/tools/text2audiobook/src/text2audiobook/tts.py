@@ -5,11 +5,12 @@ import logging
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import soundfile as sf
 
+from text2audiobook.batch_vram import batch_fits_vram, batch_vram_cost
 from text2audiobook.config import DEFAULT_TTS_INSTRUCT, TtsConfig
 from text2audiobook.gpu import resolve_tts_device
 from text2audiobook.llm import CleanedChunk
@@ -119,7 +120,12 @@ def unload_tts(model: Any) -> None:
                 pass
     gc.collect()
     if torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            pass
         torch.cuda.empty_cache()
+    gc.collect()
 
 
 def append_silence(audio: np.ndarray, silence_ms: int, sample_rate: int) -> np.ndarray:
@@ -152,12 +158,14 @@ def iter_speak_batches(
     max_chars: int,
     max_items: int,
     max_pad: int = 0,
+    vram_overhead: int = 0,
 ) -> Iterator[list[Any]]:
-    """Pack units by length-sorted contiguous prefixes under pad/chars/items.
+    """Pack units by length-sorted contiguous prefixes under VRAM/chars/items.
 
     Sorts by ``(len(text), original_index)`` ascending, then greedily cuts
     contiguous prefixes that fit all active limits. Primary VRAM constraint is
-    pad cost ``len(batch) * max(char_lens)`` when ``max_pad > 0``. Never splits
+    ``n * (max(lens) + vram_overhead) <= max_pad`` when ``max_pad > 0``
+    (``max_pad`` is the calibrated ``batch_max_pad_chars`` budget). Never splits
     a unit. ``max_chars`` / ``max_items`` / ``max_pad`` <= 0 means no limit on
     that dimension. A single oversized unit still forms its own batch.
     """
@@ -172,24 +180,26 @@ def iter_speak_batches(
     n = len(ordered)
     while i < n:
         batch: list[Any] = [ordered[i]]
-        batch_sum = len(ordered[i].text)
-        batch_max_len = batch_sum
+        batch_lens = [len(ordered[i].text)]
+        batch_sum = batch_lens[0]
         i += 1
         while i < n:
             candidate = ordered[i]
             cand_len = len(candidate.text)
-            new_n = len(batch) + 1
+            new_lens = batch_lens + [cand_len]
             new_sum = batch_sum + cand_len
-            new_max = max(batch_max_len, cand_len)
-            if max_items > 0 and new_n > max_items:
-                break
             if max_chars > 0 and new_sum > max_chars:
                 break
-            if max_pad > 0 and new_n * new_max > max_pad:
+            if not batch_fits_vram(
+                new_lens,
+                budget_chars=max_pad,
+                overhead_chars=vram_overhead,
+                max_items=max_items,
+            ):
                 break
             batch.append(candidate)
+            batch_lens = new_lens
             batch_sum = new_sum
-            batch_max_len = new_max
             i += 1
         yield batch
 
@@ -290,6 +300,7 @@ def _format_batch_log(
     batch_max_chars: int = 0,
     batch_max_items: int = 0,
     batch_max_pad_chars: int = 0,
+    batch_vram_overhead: int = 0,
 ) -> str:
     """Human-readable batch size breakdown for TTS logs."""
     sizes = [len(t) for t in texts]
@@ -302,8 +313,10 @@ def _format_batch_log(
     else:
         parts.append(f"chars={total}")
     if batch_max_pad_chars > 0:
-        pad_cost = n * max(sizes) if sizes else 0
-        parts.append(f"pad={pad_cost}/{batch_max_pad_chars}")
+        vram_cost = batch_vram_cost(sizes, overhead_chars=batch_vram_overhead)
+        parts.append(f"vram={vram_cost}/{batch_max_pad_chars}")
+        if batch_vram_overhead:
+            parts.append(f"oh={batch_vram_overhead}")
     parts.append("[" + ",".join(str(s) for s in sizes) + "]")
     return " ".join(parts)
 
@@ -324,13 +337,16 @@ def synthesize_batch_to_wavs(
     batch_max_chars: int = 0,
     batch_max_items: int = 0,
     batch_max_pad_chars: int = 0,
+    batch_vram_overhead: int = 0,
+    on_oom: Literal["split", "raise"] = "split",
 ) -> None:
     """Synthesize one or more chunks in a single generate_* call; write one WAV each.
 
     Written via temp file + rename so an interrupted run never leaves a partial WAV.
     Sample rate comes from the model (do not assume 24 kHz).
-    On CUDA OOM: GC + synchronize + empty_cache, then either retry once (n==1)
-    or halve the batch and recurse (n>1).
+    On CUDA OOM with ``on_oom=\"split\"`` (default): GC + synchronize + empty_cache,
+    then either retry once (n==1) or halve the batch and recurse (n>1).
+    With ``on_oom=\"raise\"``: cleanup then re-raise (used by VRAM calibration).
     """
     if not items:
         return
@@ -352,6 +368,8 @@ def synthesize_batch_to_wavs(
         "batch_max_chars": batch_max_chars,
         "batch_max_items": batch_max_items,
         "batch_max_pad_chars": batch_max_pad_chars,
+        "batch_vram_overhead": batch_vram_overhead,
+        "on_oom": on_oom,
     }
     batch_log = _format_batch_log(
         n=n,
@@ -359,6 +377,7 @@ def synthesize_batch_to_wavs(
         batch_max_chars=batch_max_chars,
         batch_max_items=batch_max_items,
         batch_max_pad_chars=batch_max_pad_chars,
+        batch_vram_overhead=batch_vram_overhead,
     )
 
     def _run_generate() -> tuple[Any, Any]:
@@ -415,6 +434,8 @@ def synthesize_batch_to_wavs(
         if not _is_cuda_oom(exc):
             raise
         _cuda_oom_cleanup()
+        if on_oom == "raise":
+            raise
         if n == 1:
             logger.warning(
                 "CUDA OOM on TTS %s; retrying once after cleanup",
