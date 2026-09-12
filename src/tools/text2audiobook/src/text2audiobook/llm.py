@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = "You prepare book text for text-to-speech narration."
 DIRECTION_SYSTEM_PROMPT = (
-    "You write short delivery instructions for Qwen3-TTS CustomVoice narration."
+    "You write short passage-level delivery instructions for Qwen3-TTS "
+    "(VoiceDesign or CustomVoice) instruct. The global TTS instruct already sets "
+    "the native-English female narrator persona; only describe pace, emotion, "
+    "and emphasis for this passage."
 )
 
 # Cleanup output guard: reject empty replies or runaway generation (too long).
@@ -220,7 +223,7 @@ def direction_texts_batch(
     texts: list[str],
     config: LlmConfig,
 ) -> list[str | None]:
-    """Generate per-chunk CustomVoice instruct strings (or None when rejected)."""
+    """Generate per-chunk TTS instruct strings (or None when rejected)."""
     import torch
 
     tokenizer = llm.tokenizer
@@ -400,7 +403,7 @@ def apply_direction_pass(
     *,
     progress: ProgressContext | None = None,
 ) -> list[CleanedChunk]:
-    """Fill missing ``instruct`` fields via a second LLM pass (CustomVoice style).
+    """Fill missing ``instruct`` fields via a second LLM pass (passage delivery).
 
     Chunks that already have a non-empty instruct (e.g. from resume cache) are
     left unchanged. Rejected model output leaves instruct as None so speak falls

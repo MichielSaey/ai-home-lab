@@ -1,4 +1,4 @@
-"""Qwen3-TTS CustomVoice catalog, CLI listing, and random-without-replacement picks."""
+"""Qwen3-TTS CustomVoice catalog, VoiceDesign labels, CLI listing, random picks."""
 
 from __future__ import annotations
 
@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Labels for VoiceDesign (no fixed speaker; timbre from instruct).
+VOICE_DESIGN_LABEL = "designed"
+VOICE_DESIGN_ALIASES = frozenset({"designed", "voicedesign"})
 
 
 @dataclass(frozen=True)
@@ -36,8 +40,16 @@ _BY_NAME_CI = {voice.name.lower(): voice for voice in VOICES}
 RANDOM_POOL: tuple[str, ...] = tuple(voice.name for voice in VOICES)
 
 
+def is_voice_design_label(name: str | None) -> bool:
+    if name is None:
+        return False
+    return name.strip().lower() in VOICE_DESIGN_ALIASES
+
+
 def lang_for_voice(name: str) -> str:
     """Return the speaker's recommended Qwen language string."""
+    if is_voice_design_label(name):
+        return "English"
     known = _BY_NAME.get(name) or _BY_NAME_CI.get(name.lower())
     if known is not None:
         return known.language
@@ -58,6 +70,12 @@ def format_voice_table(voices: list[VoiceInfo] | None = None) -> str:
     lines = [f"{'name':<12} {'language':<10} description"]
     for voice in rows:
         lines.append(f"{voice.name:<12} {voice.language:<10} {voice.description}")
+    lines.append("")
+    lines.append(
+        "CustomVoice speakers are listed above. VoiceDesign models (default for "
+        "English female audiobooks) have no fixed speakers — timbre comes from "
+        "tts.instruct; use voice label 'designed'."
+    )
     return "\n".join(lines)
 
 
@@ -93,21 +111,29 @@ def resolve_voice(
     rng: random.Random | None = None,
 ) -> str:
     if requested is None or requested.strip() == "":
+        if not default or not str(default).strip() or is_voice_design_label(default):
+            return VOICE_DESIGN_LABEL
         known = get_voice(default)
         if known is None:
             known_names = ", ".join(voice.name for voice in VOICES)
             raise ValueError(
-                f"Unknown default voice {default!r}. Known voices: {known_names}"
+                f"Unknown default voice {default!r}. Known voices: {known_names} "
+                f"(or '{VOICE_DESIGN_LABEL}' for VoiceDesign)"
             )
         return known.name
     name = requested.strip()
+    if is_voice_design_label(name):
+        return VOICE_DESIGN_LABEL
     if name.lower() == "random":
         return pick_random_voice(state_path, rng=rng)
     known = get_voice(name)
     if known is not None:
         return known.name
     known_names = ", ".join(voice.name for voice in VOICES)
-    raise ValueError(f"Unknown voice {name!r}. Known voices: {known_names}")
+    raise ValueError(
+        f"Unknown voice {name!r}. Known voices: {known_names} "
+        f"(or '{VOICE_DESIGN_LABEL}' for VoiceDesign)"
+    )
 
 
 def _load_remaining(state_path: Path, pool: list[str]) -> list[str]:

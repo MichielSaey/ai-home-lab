@@ -1,4 +1,4 @@
-"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional --stage."""
+"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional stage flags."""
 
 from __future__ import annotations
 
@@ -72,11 +72,18 @@ from text2audiobook.stems import (
 )
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
+    compose_instruct,
+    is_voice_design,
     load_tts,
     synthesize_to_wav,
     unload_tts,
 )
-from text2audiobook.voices import lang_for_voice, resolve_voice
+from text2audiobook.voices import (
+    VOICE_DESIGN_LABEL,
+    is_voice_design_label,
+    lang_for_voice,
+    resolve_voice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +361,7 @@ def process_source(
             if not clean_ok:
                 raise FileNotFoundError(
                     f"Clean stem missing for {metadata.title!r}. "
-                    "Run --clean or --stage clean first."
+                    "Run --clean first."
                 )
             sections = load_clean_sections(stems)
             state.sections = sections
@@ -382,10 +389,21 @@ def process_source(
         scripts = state.scripts
         format_units = state.format_units
         if scripts is None or format_units is None:
-            format_hash_ok = stems.format_manifest.exists() and stems.format_chapters_index.exists()
-            if not format_hash_ok or not stems.format_chunks_jsonl.exists():
+            clean_hash = (
+                clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
+            )
+            format_fingerprint = _format_fingerprint(
+                config, clean_hash=clean_hash, source_kind=source_kind
+            )
+            format_ok = (
+                manifest_matches(stems.format_manifest, format_fingerprint)
+                and stems.format_chapters_index.exists()
+                and stems.format_chunks_jsonl.exists()
+            )
+            if not format_ok:
                 raise FileNotFoundError(
-                    f"Format stem missing for {metadata.title!r}. Run --stage format first."
+                    f"Format stem missing or stale for {metadata.title!r}. "
+                    "Run --format first."
                 )
             if scripts is None:
                 scripts = load_format_scripts(stems)
@@ -449,6 +467,29 @@ def _resolve_tts(
     voice: str | None,
     staging_root: Path,
 ) -> TtsConfig:
+    lang = config.tts.lang
+    if is_voice_design(config.tts.model_id):
+        # VoiceDesign: no CustomVoice speaker; persona comes from tts.instruct.
+        # Keep config.lang as content language (do not map via speaker native).
+        requested = voice
+        if requested and requested.strip() and not is_voice_design_label(requested):
+            logger.info(
+                "VoiceDesign uses instruct persona; ignoring --voice=%s",
+                requested,
+            )
+            requested = None
+        chosen = resolve_voice(
+            requested,
+            default=config.tts.voice or VOICE_DESIGN_LABEL,
+            state_path=staging_root / "_voice_random.json",
+        )
+        logger.info(
+            "VoiceDesign voice=%s (lang=%s; persona from tts.instruct)",
+            chosen,
+            lang,
+        )
+        return replace(config.tts, voice=chosen, lang=lang)
+
     chosen = resolve_voice(
         voice,
         default=config.tts.voice,
@@ -456,7 +497,6 @@ def _resolve_tts(
     )
     # Content language stays from config (book text). Speaker native language is
     # only a quality hint — CustomVoice speakers can narrate any supported lang.
-    lang = config.tts.lang
     native = lang_for_voice(chosen)
     if chosen != config.tts.voice:
         logger.info("Voice %s (lang=%s, native=%s)", chosen, lang, native)
@@ -600,7 +640,7 @@ def _run_extract(
     if "extract" not in selected:
         if not extract_ok:
             raise FileNotFoundError(
-                f"Extract stem missing for {metadata.title!r}. Run --stage extract first."
+                f"Extract stem missing for {metadata.title!r}. Run --extract first."
             )
         return load_extract_chapters(stems)
 
@@ -667,7 +707,7 @@ def _run_clean(
     if "clean" not in selected:
         if not clean_ok:
             raise FileNotFoundError(
-                f"Clean stem missing for {metadata.title!r}. Run --clean or --stage clean first."
+                f"Clean stem missing for {metadata.title!r}. Run --clean first."
             )
         return load_clean_sections(stems)
 
@@ -783,7 +823,7 @@ def _run_format(
     if "format" not in selected:
         if "speak" in selected and not format_ok:
             raise FileNotFoundError(
-                f"Format stem missing for {metadata.title!r}. Run --stage format first."
+                f"Format stem missing for {metadata.title!r}. Run --format first."
             )
         return load_format_scripts(stems), load_format_units(stems)
 
@@ -1048,8 +1088,9 @@ def _synthesize_and_encode(
                 wav_path,
                 voice=tts_config.voice,
                 language=tts_config.lang,
-                instruct=unit.instruct or tts_config.instruct,
+                instruct=compose_instruct(tts_config.instruct, unit.instruct),
                 chunk_silence_ms=config.output.chunk_silence_ms,
+                model_id=tts_config.model_id,
             )
             tracker.add_duration(record, "tts", time.perf_counter() - start)
         logger.info(

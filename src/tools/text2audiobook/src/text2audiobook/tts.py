@@ -1,4 +1,4 @@
-"""Qwen3-TTS (CustomVoice) loading and per-chunk WAV synthesis."""
+"""Qwen3-TTS (VoiceDesign / CustomVoice) loading and per-chunk WAV synthesis."""
 
 import gc
 import logging
@@ -10,14 +10,14 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
-from text2audiobook.config import TtsConfig
+from text2audiobook.config import DEFAULT_TTS_INSTRUCT, TtsConfig
 from text2audiobook.gpu import resolve_tts_device
 from text2audiobook.llm import CleanedChunk
 from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 
 
 @dataclass
@@ -29,8 +29,24 @@ class AudioChunk:
     wav_path: Path
 
 
+def is_voice_design(model_id: str | None) -> bool:
+    """True when model_id names a VoiceDesign checkpoint."""
+    return "VoiceDesign" in (model_id or "")
+
+
+def is_custom_voice(model_id: str | None) -> bool:
+    """True when model_id names a CustomVoice checkpoint."""
+    return "CustomVoice" in (model_id or "")
+
+
+def compose_instruct(base: str | None, direction: str | None) -> str | None:
+    """Join global TTS persona instruct with optional per-chunk direction."""
+    parts = [p.strip() for p in (base, direction) if p and str(p).strip()]
+    return " ".join(parts) if parts else None
+
+
 def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
-    """Load Qwen3-TTS CustomVoice; device defaults to resolve_tts_device(config.device)."""
+    """Load Qwen3-TTS; device defaults to resolve_tts_device(config.device)."""
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -67,10 +83,12 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
             )
             model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
 
+    mode = "VoiceDesign" if is_voice_design(model_id) else "CustomVoice"
     logger.info(
-        "Loaded Qwen3-TTS on %s (model=%s, lang=%s, voice=%s, instruct=%r)",
+        "Loaded Qwen3-TTS on %s (model=%s, mode=%s, lang=%s, voice=%s, instruct=%r)",
         device,
         model_id,
+        mode,
         config.lang,
         config.voice,
         config.instruct,
@@ -115,24 +133,48 @@ def synthesize_to_wav(
     language: str,
     instruct: str | None = None,
     chunk_silence_ms: int = 0,
+    model_id: str | None = None,
 ) -> None:
     """Synthesize one chunk to a WAV file.
 
     Written via a temp file + rename so an interrupted run never leaves a
     partial WAV that resume logic would mistake for a finished chunk.
     Sample rate comes from the model (do not assume 24 kHz).
+
+    VoiceDesign uses ``generate_voice_design`` (instruct required; no speaker).
+    CustomVoice uses ``generate_custom_voice`` with a catalog speaker.
     """
     wav_path.parent.mkdir(parents=True, exist_ok=True)
 
-    gen_kwargs: dict[str, Any] = {
-        "text": text,
-        "language": language,
-        "speaker": voice,
-    }
-    if instruct:
-        gen_kwargs["instruct"] = instruct
+    resolved_instruct = instruct
+    if is_voice_design(model_id):
+        if not (resolved_instruct and str(resolved_instruct).strip()):
+            resolved_instruct = DEFAULT_TTS_INSTRUCT
+            logger.warning(
+                "VoiceDesign requires instruct; falling back to DEFAULT_TTS_INSTRUCT"
+            )
+        if not (resolved_instruct and str(resolved_instruct).strip()):
+            raise ValueError(
+                "VoiceDesign synthesis requires a non-empty instruct "
+                "(set tts.instruct or per-chunk direction)"
+            )
+        logger.info("TTS API: generate_voice_design (no speaker)")
+        wavs, sample_rate = model.generate_voice_design(
+            text=text,
+            language=language,
+            instruct=resolved_instruct,
+        )
+    else:
+        gen_kwargs: dict[str, Any] = {
+            "text": text,
+            "language": language,
+            "speaker": voice,
+        }
+        if resolved_instruct:
+            gen_kwargs["instruct"] = resolved_instruct
+        logger.info("TTS API: generate_custom_voice (speaker=%s)", voice)
+        wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
 
-    wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
     if not wavs:
         raise RuntimeError(f"Qwen3-TTS produced no audio for: {wav_path}")
 
@@ -164,8 +206,9 @@ def synthesize_chunks(
             wav_path,
             voice=config.voice,
             language=config.lang,
-            instruct=chunk.instruct or config.instruct,
+            instruct=compose_instruct(config.instruct, chunk.instruct),
             chunk_silence_ms=chunk_silence_ms,
+            model_id=config.model_id,
         )
         audio_chunks.append(
             AudioChunk(
