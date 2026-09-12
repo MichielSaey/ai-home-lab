@@ -494,6 +494,7 @@ def _resolve_tts(
         voice,
         default=config.tts.voice,
         state_path=staging_root / "_voice_random.json",
+        allow_design_label=False,
     )
     # Content language stays from config (book text). Speaker native language is
     # only a quality hint — CustomVoice speakers can narrate any supported lang.

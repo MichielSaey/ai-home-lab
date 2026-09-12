@@ -42,6 +42,23 @@ def test_resolve_voice_default_and_named(tmp_path: Path) -> None:
     assert resolve_voice(None, default="", state_path=tmp_path / "s.json") == "designed"
 
 
+def test_resolve_voice_rejects_designed_for_customvoice(tmp_path: Path) -> None:
+    state = tmp_path / "s.json"
+    try:
+        resolve_voice("designed", default="Ryan", state_path=state, allow_design_label=False)
+    except ValueError as exc:
+        assert "VoiceDesign only" in str(exc) or "CustomVoice" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for designed on CustomVoice")
+
+    try:
+        resolve_voice(None, default="designed", state_path=state, allow_design_label=False)
+    except ValueError as exc:
+        assert "designed" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for designed default on CustomVoice")
+
+
 def test_resolve_voice_rejects_unknown_default(tmp_path: Path) -> None:
     try:
         resolve_voice(None, default="af_bella", state_path=tmp_path / "s.json")

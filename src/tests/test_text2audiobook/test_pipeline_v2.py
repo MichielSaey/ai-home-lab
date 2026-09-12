@@ -204,6 +204,37 @@ def test_speak_only_rejects_stale_format_stem(tmp_path: Path, monkeypatch) -> No
         raise AssertionError("speak-only should reject a stale format stem")
 
 
+def test_customvoice_rejects_designed_voice(tmp_path: Path) -> None:
+    from text2audiobook.pipeline import _resolve_tts
+
+    _, config = _write_book(tmp_path)
+    custom = replace(
+        config,
+        tts=replace(
+            config.tts,
+            model_id="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+            voice="designed",
+        ),
+    )
+    try:
+        _resolve_tts(custom, voice=None, staging_root=tmp_path / "staging")
+    except ValueError as exc:
+        assert "designed" in str(exc).lower() or "CustomVoice" in str(exc)
+    else:
+        raise AssertionError("CustomVoice + designed should raise before synthesis")
+
+    try:
+        _resolve_tts(
+            replace(custom, tts=replace(custom.tts, voice="Ryan")),
+            voice="designed",
+            staging_root=tmp_path / "staging",
+        )
+    except ValueError as exc:
+        assert "designed" in str(exc).lower() or "VoiceDesign" in str(exc)
+    else:
+        raise AssertionError("--voice designed with CustomVoice should raise")
+
+
 def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     stems = _stems_after_extract_format(source, config, monkeypatch)
