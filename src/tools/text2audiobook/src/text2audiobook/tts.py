@@ -81,35 +81,9 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     }
 
     model_id = config.model_id
-    if device == "cpu":
-        model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
-    else:
-        use_flash = False
-        try:
-            import flash_attn  # noqa: F401
-
-            use_flash = True
-        except ImportError:
-            pass
-        if use_flash:
-            try:
-                model = Qwen3TTSModel.from_pretrained(
-                    model_id,
-                    attn_implementation="flash_attention_2",
-                    **load_kwargs,
-                )
-            except Exception:
-                logger.info(
-                    "flash_attention_2 failed for %s; loading without it",
-                    model_id,
-                )
-                model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
-        else:
-            logger.info(
-                "flash_attn not installed; loading %s without flash_attention_2",
-                model_id,
-            )
-            model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
+    # Do not request flash_attention_2: when flash_attn is missing, transformers
+    # raises a loud ImportError that looks like a crash. Eager attention is fine.
+    model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
 
     if is_base(model_id):
         mode = "Base"
