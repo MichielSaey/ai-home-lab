@@ -153,6 +153,24 @@ def unload_tts(model: Any) -> None:
     gc.collect()
 
 
+def reload_tts(config: TtsConfig, old_model: Any, *, device: str | None = None) -> Any:
+    """Unload old model, hard-clear CUDA, load a fresh TTS model."""
+    unload_tts(old_model)
+    import torch
+
+    # Extra pass after unload (matches cli calibration _hard_unload) to nudge
+    # the allocator into releasing fragmented blocks before from_pretrained.
+    gc.collect()
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            pass
+        torch.cuda.empty_cache()
+    gc.collect()
+    return load_tts(config, device=device)
+
+
 def append_silence(audio: np.ndarray, silence_ms: int, sample_rate: int) -> np.ndarray:
     if silence_ms <= 0:
         return audio
@@ -277,7 +295,7 @@ def _write_wav_atomic(
     tmp_path.replace(wav_path)
 
 
-def _is_cuda_oom(exc: BaseException) -> bool:
+def is_cuda_oom(exc: BaseException) -> bool:
     """True for torch CUDA OOM or RuntimeError mentioning out of memory."""
     try:
         import torch
@@ -287,6 +305,10 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     except Exception:
         pass
     return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+# Backward-compatible alias for internal callers (batch_vram, synthesize retries).
+_is_cuda_oom = is_cuda_oom
 
 
 def _cuda_oom_cleanup() -> None:

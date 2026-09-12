@@ -463,6 +463,7 @@ def test_base_speak_fingerprint_includes_ref_hash(tmp_path: Path) -> None:
     assert fp["ref_text"] == "Reference transcript."
     assert fp["x_vector_only"] is False
     assert "instruct" not in fp
+    assert "reload_every_n_units" not in fp
 
 
 def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeypatch) -> None:
@@ -905,3 +906,175 @@ def test_speak_progress_unit_done_monotonic_when_packing_reorders(
     ]
     assert unit_dones == [1, 2, 3]
     assert unit_dones == sorted(unit_dones)
+
+
+def _speak_synth_fixture(tmp_path: Path, *, tts_overrides: dict | None = None):
+    staging = tmp_path / "staging" / "book"
+    (staging / "speak" / "wav").mkdir(parents=True)
+    (tmp_path / "runs").mkdir()
+    tts = {
+        "batch_max_chars": 0,
+        "batch_max_pad_chars": 0,
+        "batch_max_items": 1,
+        "reload_every_n_units": 0,
+    }
+    if tts_overrides:
+        tts.update(tts_overrides)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "tts": tts,
+                "output": {"chapter_mp3": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    units = [
+        TextChunk(0, "Ch A", "ch_a", 0, "unit one text"),
+        TextChunk(0, "Ch A", "ch_a", 1, "unit two text"),
+        TextChunk(0, "Ch A", "ch_a", 2, "unit three text"),
+    ]
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(tmp_path / "input" / "sample.md")
+    metadata = BookMetadata(
+        title="Book",
+        author="Author",
+        language="en",
+        cover_bytes=None,
+        slug="book",
+        staging_dir=staging,
+        m4b_path=tmp_path / "output" / "book.m4b",
+    )
+    return config, units, tracker, record, metadata, BookStems(staging)
+
+
+def test_synthesize_reloads_every_n_units(tmp_path: Path, monkeypatch, caplog) -> None:
+    config, units, tracker, record, metadata, stems = _speak_synth_fixture(
+        tmp_path, tts_overrides={"reload_every_n_units": 2}
+    )
+    tts_config = replace(config.tts)
+    models = [object(), object()]
+    reload_calls: list[object] = []
+
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    def fake_reload(_config, old_model, *, device=None):
+        reload_calls.append(old_model)
+        return models[len(reload_calls)]
+
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.reload_tts", fake_reload)
+
+    initial = models[0]
+    with (
+        ThreadPoolExecutor(max_workers=1) as executor,
+        caplog.at_level(logging.INFO, logger="text2audiobook.pipeline"),
+    ):
+        _wavs, _futures, final_model = _synthesize_and_encode(
+            units,
+            tts_model=initial,
+            config=config,
+            tts_config=tts_config,
+            metadata=metadata,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            executor=executor,
+            progress=ProgressContext(book_title="Book"),
+            skip_wavs=False,
+        )
+
+    assert len(reload_calls) == 1
+    assert reload_calls[0] is initial
+    assert final_model is models[1]
+    assert any("Reloading TTS model after 2 units" in r.getMessage() for r in caplog.records)
+
+
+def test_synthesize_oom_reloads_and_retries_batch_once(tmp_path: Path, monkeypatch) -> None:
+    config, units, tracker, record, metadata, stems = _speak_synth_fixture(
+        tmp_path, tts_overrides={"reload_every_n_units": 0, "batch_max_items": 2}
+    )
+    # Only synthesize the first unit so one OOM batch is enough.
+    units = units[:1]
+    tts_config = replace(config.tts)
+    initial = object()
+    reloaded = object()
+    attempts: list[object] = []
+
+    def fake_synth(model, items, **_kwargs) -> None:
+        attempts.append(model)
+        if len(attempts) == 1:
+            raise RuntimeError("CUDA out of memory")
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.reload_tts",
+        lambda *_a, **_k: reloaded,
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        _wavs, _futures, final_model = _synthesize_and_encode(
+            units,
+            tts_model=initial,
+            config=config,
+            tts_config=tts_config,
+            metadata=metadata,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            executor=executor,
+            progress=ProgressContext(book_title="Book"),
+            skip_wavs=False,
+        )
+
+    assert attempts == [initial, reloaded]
+    assert final_model is reloaded
+
+
+def test_synthesize_oom_retry_still_oom_reraises(tmp_path: Path, monkeypatch) -> None:
+    import pytest
+
+    config, units, tracker, record, metadata, stems = _speak_synth_fixture(
+        tmp_path, tts_overrides={"reload_every_n_units": 0}
+    )
+    units = units[:1]
+    tts_config = replace(config.tts)
+
+    def fake_synth(_model, _items, **_kwargs) -> None:
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.reload_tts",
+        lambda *_a, **_k: object(),
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with pytest.raises(RuntimeError, match="out of memory"):
+            _synthesize_and_encode(
+                units,
+                tts_model=object(),
+                config=config,
+                tts_config=tts_config,
+                metadata=metadata,
+                stems=stems,
+                tracker=tracker,
+                record=record,
+                executor=executor,
+                progress=ProgressContext(book_title="Book"),
+                skip_wavs=False,
+            )

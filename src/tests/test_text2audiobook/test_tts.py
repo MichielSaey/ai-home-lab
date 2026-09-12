@@ -652,3 +652,38 @@ def test_create_voice_clone_prompt_passes_x_vector_only_mode() -> None:
     assert kwargs["ref_audio"] == "/tmp/ref.wav"
     assert kwargs["ref_text"] == "Hi."
     assert kwargs["x_vector_only_mode"] is True
+
+
+def test_reload_tts_unloads_then_loads(monkeypatch) -> None:
+    from text2audiobook.config import TtsConfig
+    from text2audiobook.tts import reload_tts
+
+    old = object()
+    fresh = object()
+    calls: list[tuple[str, object | None]] = []
+
+    def fake_unload(model) -> None:
+        calls.append(("unload", model))
+
+    def fake_load(config, *, device=None):
+        calls.append(("load", config))
+        return fresh
+
+    monkeypatch.setattr("text2audiobook.tts.unload_tts", fake_unload)
+    monkeypatch.setattr("text2audiobook.tts.load_tts", fake_load)
+    # Avoid real torch in the hard-clear path between unload and load.
+    fake_torch = MagicMock()
+    fake_torch.cuda.is_available.return_value = False
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    cfg = TtsConfig()
+    assert reload_tts(cfg, old, device="cpu") is fresh
+    assert calls == [("unload", old), ("load", cfg)]
+
+
+def test_is_cuda_oom_public_alias() -> None:
+    from text2audiobook.tts import _is_cuda_oom, is_cuda_oom
+
+    assert is_cuda_oom is _is_cuda_oom
+    assert is_cuda_oom(RuntimeError("CUDA out of memory"))
+    assert not is_cuda_oom(RuntimeError("something else"))

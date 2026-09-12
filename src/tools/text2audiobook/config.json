@@ -40,7 +40,8 @@
     "batch_max_chars": 0,
     "batch_max_pad_chars": 2200,
     "batch_vram_overhead": 0,
-    "batch_max_items": 16
+    "batch_max_items": 16,
+    "reload_every_n_units": 100
   },
   "output": {
     "chapter_mp3": false,
