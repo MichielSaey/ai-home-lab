@@ -80,9 +80,10 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     tracker = RunTracker(config.paths.runs_dir, config.to_dict())
 
-    def fake_synth(_model, _text, wav_path, **_kwargs) -> None:
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
 
     def fake_units(format_units, **_kwargs):
         unit = format_units[0]
@@ -102,7 +103,7 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     )
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
@@ -184,13 +185,14 @@ def test_speak_only_uses_stale_format_stem(tmp_path: Path, monkeypatch) -> None:
     manifest["clean_hash"] = "stale"
     stems.format_manifest.write_text(json.dumps(manifest), encoding="utf-8")
 
-    def fake_synth(_model, _text, wav_path, **_kwargs) -> None:
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
 
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
@@ -429,16 +431,17 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
 
     synth_calls: list[str] = []
 
-    def fake_synth(_model, text, wav_path, **_kwargs) -> None:
-        synth_calls.append(text)
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for text, wav_path in items:
+            synth_calls.append(text)
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
 
     monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
     monkeypatch.setattr("text2audiobook.pipeline.iter_clean_chunks_batched", fake_clean)
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
@@ -494,15 +497,16 @@ def test_edited_format_unit_resynthesizes(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path, skip_existing=True)
     synth_calls: list[str] = []
 
-    def fake_synth(_model, text, wav_path, **_kwargs) -> None:
-        synth_calls.append(text)
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for text, wav_path in items:
+            synth_calls.append(text)
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
 
     monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
@@ -583,10 +587,18 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
 
     synth_instructs: list[str | None] = []
 
-    def fake_synth(_model, text, wav_path, **kwargs) -> None:
-        synth_instructs.append(kwargs.get("instruct"))
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **kwargs) -> None:
+        instruct = kwargs.get("instruct")
+        if isinstance(instruct, (list, tuple)):
+            for value, (_text, wav_path) in zip(instruct, items, strict=True):
+                synth_instructs.append(value)
+                wav_path.parent.mkdir(parents=True, exist_ok=True)
+                wav_path.write_bytes(b"RIFF")
+        else:
+            for _text, wav_path in items:
+                synth_instructs.append(instruct)
+                wav_path.parent.mkdir(parents=True, exist_ok=True)
+                wav_path.write_bytes(b"RIFF")
 
     monkeypatch.setattr("text2audiobook.pipeline.load_llm", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_llm", lambda *_a, **_k: None)
@@ -594,7 +606,7 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
     monkeypatch.setattr("text2audiobook.pipeline.apply_direction_pass", fake_direction)
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
@@ -646,15 +658,23 @@ def test_direction_disabled_speak_falls_back_to_global_instruct(
 
     synth_instructs: list[str | None] = []
 
-    def fake_synth(_model, text, wav_path, **kwargs) -> None:
-        synth_instructs.append(kwargs.get("instruct"))
-        wav_path.parent.mkdir(parents=True, exist_ok=True)
-        wav_path.write_bytes(b"RIFF")
+    def fake_synth(_model, items, **kwargs) -> None:
+        instruct = kwargs.get("instruct")
+        if isinstance(instruct, (list, tuple)):
+            for value, (_text, wav_path) in zip(instruct, items, strict=True):
+                synth_instructs.append(value)
+                wav_path.parent.mkdir(parents=True, exist_ok=True)
+                wav_path.write_bytes(b"RIFF")
+        else:
+            for _text, wav_path in items:
+                synth_instructs.append(instruct)
+                wav_path.parent.mkdir(parents=True, exist_ok=True)
+                wav_path.write_bytes(b"RIFF")
 
     monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
     monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
     monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
-    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
     monkeypatch.setattr(
         "text2audiobook.pipeline.build_m4b",
         lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),

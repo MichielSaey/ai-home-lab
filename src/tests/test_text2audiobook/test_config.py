@@ -40,7 +40,7 @@ def test_load_config_maps_legacy_words_per_chunk(tmp_path: Path) -> None:
     )
     cfg = load_config(config_path)
     assert cfg.chunking.format_words_per_chunk == 800
-    assert cfg.chunking.speak_target_chars == 400
+    assert cfg.chunking.speak_target_chars == 800
 
 
 def test_load_config_maps_legacy_phoneme_keys(tmp_path: Path) -> None:
@@ -57,8 +57,8 @@ def test_load_config_maps_legacy_phoneme_keys(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     cfg = load_config(config_path)
-    assert cfg.chunking.speak_target_chars == 400
-    assert cfg.chunking.speak_max_chars == 800
+    assert cfg.chunking.speak_target_chars == 800
+    assert cfg.chunking.speak_max_chars == 1200
 
 
 def test_load_config_ignores_legacy_tts_speed(tmp_path: Path) -> None:
@@ -182,6 +182,10 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert "warm" in cfg.tts.instruct.lower()
     assert "native" in cfg.tts.instruct.lower()
     assert "chinese" in cfg.tts.instruct.lower() or "mandarin" in cfg.tts.instruct.lower()
+    assert cfg.tts.batch_max_chars == 3200
+    assert cfg.tts.batch_max_items == 8
+    assert cfg.chunking.speak_target_chars == 800
+    assert cfg.chunking.speak_max_chars == 1200
     assert cfg.llm.direction is True
     assert "{text}" in cfg.llm.direction_prompt
     assert "bracket" in cfg.llm.direction_prompt.lower()

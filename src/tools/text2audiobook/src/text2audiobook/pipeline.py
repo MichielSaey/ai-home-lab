@@ -77,9 +77,10 @@ from text2audiobook.tts import (
     create_voice_clone_prompt,
     is_base,
     is_voice_design,
+    iter_speak_batches,
     load_tts,
     supports_instruct,
-    synthesize_to_wav,
+    synthesize_batch_to_wavs,
     unload_tts,
 )
 from text2audiobook.voices import (
@@ -627,6 +628,8 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "chapter_silence_ms": config.output.chapter_silence_ms,
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
+        "batch_max_chars": tts.batch_max_chars,
+        "batch_max_items": tts.batch_max_items,
     }
     if is_base(tts.model_id):
         if tts.ref_audio:
@@ -1163,48 +1166,89 @@ def _synthesize_and_encode(
         )
         tracker.add_duration(record, "encode", time.perf_counter() - start)
 
+    @dataclass
+    class _SpeakWork:
+        unit: TextChunk
+        wav_path: Path
+        unit_number: int
+        needs_synth: bool
+
+        @property
+        def text(self) -> str:
+            return self.unit.text
+
+    work: list[_SpeakWork] = []
     for unit_number, unit in enumerate(units, start=1):
         wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
         prior = (previous_text_hashes or {}).get((unit.chapter_slug, unit.chunk_index))
         hash_ok = prior == text_hash(unit.text)
-        if not (skip_wavs and wav_path.exists() and hash_ok):
-            start = time.perf_counter()
-            synthesize_to_wav(
-                tts_model,
-                unit.text,
-                wav_path,
-                voice=tts_config.voice,
-                language=tts_config.lang,
-                instruct=compose_instruct(tts_config.instruct, unit.instruct),
-                chunk_silence_ms=config.output.chunk_silence_ms,
-                model_id=tts_config.model_id,
-                voice_clone_prompt=voice_clone_prompt,
-                ref_audio=ref_audio_path,
-                ref_text=tts_config.ref_text,
-                x_vector_only=tts_config.x_vector_only,
+        needs_synth = not (skip_wavs and wav_path.exists() and hash_ok)
+        work.append(
+            _SpeakWork(
+                unit=unit,
+                wav_path=wav_path,
+                unit_number=unit_number,
+                needs_synth=needs_synth,
             )
-            tracker.add_duration(record, "tts", time.perf_counter() - start)
+        )
+
+    def log_unit_progress(item: _SpeakWork) -> None:
         logger.info(
             "%s",
             progress.format(
                 "tts",
-                unit_done=unit_number,
+                unit_done=item.unit_number,
                 total_chunks=total,
-                chapter_idx=chapter_order[unit.chapter_slug],
+                chapter_idx=chapter_order[item.unit.chapter_slug],
                 total_chapters=total_chapters,
-                chapter_title=unit.chapter_title,
-                chapter_unit=unit.chunk_index + 1,
-                chapter_units=expected[unit.chapter_slug],
+                chapter_title=item.unit.chapter_title,
+                chapter_unit=item.unit.chunk_index + 1,
+                chapter_units=expected[item.unit.chapter_slug],
             ),
         )
-        wavs_by_slug[unit.chapter_slug].append(wav_path)
-        done[unit.chapter_slug] += 1
-        if done[unit.chapter_slug] == expected[unit.chapter_slug] and config.output.chapter_mp3:
-            mp3_path = metadata.staging_dir / "mp3" / f"{unit.chapter_slug}.mp3"
-            chapter_title = slug_titles.get(unit.chapter_slug, unit.chapter_slug)
+
+    for batch in iter_speak_batches(
+        [item for item in work if item.needs_synth],
+        max_chars=tts_config.batch_max_chars,
+        max_items=tts_config.batch_max_items,
+    ):
+        start = time.perf_counter()
+        synthesize_batch_to_wavs(
+            tts_model,
+            [(item.unit.text, item.wav_path) for item in batch],
+            voice=tts_config.voice,
+            language=tts_config.lang,
+            instruct=[
+                compose_instruct(tts_config.instruct, item.unit.instruct) for item in batch
+            ],
+            chunk_silence_ms=config.output.chunk_silence_ms,
+            model_id=tts_config.model_id,
+            voice_clone_prompt=voice_clone_prompt,
+            ref_audio=ref_audio_path,
+            ref_text=tts_config.ref_text,
+            x_vector_only=tts_config.x_vector_only,
+        )
+        tracker.add_duration(record, "tts", time.perf_counter() - start)
+        for item in batch:
+            log_unit_progress(item)
+
+    for item in work:
+        if not item.needs_synth:
+            log_unit_progress(item)
+        wavs_by_slug[item.unit.chapter_slug].append(item.wav_path)
+        done[item.unit.chapter_slug] += 1
+        if (
+            done[item.unit.chapter_slug] == expected[item.unit.chapter_slug]
+            and config.output.chapter_mp3
+        ):
+            mp3_path = metadata.staging_dir / "mp3" / f"{item.unit.chapter_slug}.mp3"
+            chapter_title = slug_titles.get(item.unit.chapter_slug, item.unit.chapter_slug)
             futures.append(
                 executor.submit(
-                    encode_job, list(wavs_by_slug[unit.chapter_slug]), mp3_path, chapter_title
+                    encode_job,
+                    list(wavs_by_slug[item.unit.chapter_slug]),
+                    mp3_path,
+                    chapter_title,
                 )
             )
 
