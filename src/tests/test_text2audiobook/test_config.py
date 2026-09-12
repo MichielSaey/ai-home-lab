@@ -172,8 +172,8 @@ def test_load_config_defaults_direction_and_voicedesign(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text("{}", encoding="utf-8")
     cfg = load_config(config_path)
-    assert cfg.tts.voice == "designed"
-    assert cfg.tts.model_id == "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    assert cfg.tts.voice == "Serena"
+    assert cfg.tts.model_id == "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
     assert cfg.tts.lang == "English"
     assert cfg.tts.instruct is not None
     assert "warm" in cfg.tts.instruct.lower()
