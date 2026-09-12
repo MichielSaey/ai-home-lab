@@ -29,11 +29,14 @@
     "direction_max_new_tokens": 128
   },
   "tts": {
-    "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
     "lang": "English",
-    "voice": "Serena",
+    "voice": "cloned",
     "device": "auto",
-    "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation — clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow."
+    "ref_audio": "data/voices/ref_clone.wav",
+    "ref_text": "Homer himself in books five through 12. The poem cuts between far distant and diverse locations, from Olympus to Earth, from Calypso's Island to the palace at Ithaca, from the underworld to the cottage of the swine herd. Sometimes the setting feels entirely realistic, even mundane, a world where a mother packs a wholesome lunch of bread and cheese for her daughter, where there's a particular joy in taking a hot bath, where men listen to music and play checkers, and lively, pretty girls have fun playing ball games together. I don't.",
+    "x_vector_only": false,
+    "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation \u2014 clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow."
   },
   "output": {
     "chapter_mp3": false,

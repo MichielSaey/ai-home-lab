@@ -1,4 +1,4 @@
-"""Qwen3-TTS (VoiceDesign / CustomVoice) loading and per-chunk WAV synthesis."""
+"""Qwen3-TTS (Base / VoiceDesign / CustomVoice) loading and per-chunk WAV synthesis."""
 
 import gc
 import logging
@@ -39,8 +39,16 @@ def is_custom_voice(model_id: str | None) -> bool:
     return "CustomVoice" in (model_id or "")
 
 
+def is_base(model_id: str | None) -> bool:
+    """True when model_id names a Base (voice-clone) checkpoint."""
+    mid = model_id or ""
+    return "Base" in mid and not is_custom_voice(mid) and not is_voice_design(mid)
+
+
 def supports_instruct(model_id: str | None) -> bool:
-    """VoiceDesign and 1.7B CustomVoice accept instruct; 0.6B CustomVoice does not."""
+    """VoiceDesign and 1.7B CustomVoice accept instruct; Base and 0.6B CustomVoice do not."""
+    if is_base(model_id):
+        return False
     if is_voice_design(model_id):
         return True
     return is_custom_voice(model_id) and "0.6B" not in (model_id or "")
@@ -90,7 +98,12 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
             )
             model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
 
-    mode = "VoiceDesign" if is_voice_design(model_id) else "CustomVoice"
+    if is_base(model_id):
+        mode = "Base"
+    elif is_voice_design(model_id):
+        mode = "VoiceDesign"
+    else:
+        mode = "CustomVoice"
     logger.info(
         "Loaded Qwen3-TTS on %s (model=%s, mode=%s, lang=%s, voice=%s, instruct=%r)",
         device,
@@ -131,6 +144,21 @@ def append_silence(audio: np.ndarray, silence_ms: int, sample_rate: int) -> np.n
     return np.concatenate([audio, np.zeros(silence_frames, dtype=np.float32)])
 
 
+def create_voice_clone_prompt(
+    model: Any,
+    *,
+    ref_audio: Path,
+    ref_text: str | None,
+    x_vector_only: bool = False,
+) -> Any:
+    """Build a reusable Base-model voice-clone prompt from reference audio."""
+    return model.create_voice_clone_prompt(
+        ref_audio=str(ref_audio),
+        ref_text=ref_text,
+        x_vector_only_mode=x_vector_only,
+    )
+
+
 def synthesize_to_wav(
     model: Any,
     text: str,
@@ -141,6 +169,10 @@ def synthesize_to_wav(
     instruct: str | None = None,
     chunk_silence_ms: int = 0,
     model_id: str | None = None,
+    voice_clone_prompt: Any | None = None,
+    ref_audio: Path | str | None = None,
+    ref_text: str | None = None,
+    x_vector_only: bool = False,
 ) -> None:
     """Synthesize one chunk to a WAV file.
 
@@ -148,13 +180,33 @@ def synthesize_to_wav(
     partial WAV that resume logic would mistake for a finished chunk.
     Sample rate comes from the model (do not assume 24 kHz).
 
+    Base uses ``generate_voice_clone`` (ref audio + transcript, or a prompt).
     VoiceDesign uses ``generate_voice_design`` (instruct required; no speaker).
     CustomVoice uses ``generate_custom_voice`` with a catalog speaker.
     """
     wav_path.parent.mkdir(parents=True, exist_ok=True)
 
-    resolved_instruct = instruct
-    if is_voice_design(model_id):
+    if is_base(model_id):
+        gen_kwargs: dict[str, Any] = {
+            "text": text,
+            "language": language,
+        }
+        if voice_clone_prompt is not None:
+            gen_kwargs["voice_clone_prompt"] = voice_clone_prompt
+            logger.info("TTS API: generate_voice_clone (voice_clone_prompt)")
+        else:
+            if ref_audio is None:
+                raise ValueError(
+                    "Base voice cloning requires ref_audio or voice_clone_prompt "
+                    "(set tts.ref_audio)"
+                )
+            gen_kwargs["ref_audio"] = str(ref_audio)
+            gen_kwargs["ref_text"] = ref_text
+            gen_kwargs["x_vector_only_mode"] = x_vector_only
+            logger.info("TTS API: generate_voice_clone (ref_audio)")
+        wavs, sample_rate = model.generate_voice_clone(**gen_kwargs)
+    elif is_voice_design(model_id):
+        resolved_instruct = instruct
         if not (resolved_instruct and str(resolved_instruct).strip()):
             resolved_instruct = DEFAULT_TTS_INSTRUCT
             logger.warning(
@@ -172,14 +224,14 @@ def synthesize_to_wav(
             instruct=resolved_instruct,
         )
     else:
-        gen_kwargs: dict[str, Any] = {
+        gen_kwargs = {
             "text": text,
             "language": language,
             "speaker": voice,
         }
-        if resolved_instruct and supports_instruct(model_id):
-            gen_kwargs["instruct"] = resolved_instruct
-        elif resolved_instruct and not supports_instruct(model_id):
+        if instruct and supports_instruct(model_id):
+            gen_kwargs["instruct"] = instruct
+        elif instruct and not supports_instruct(model_id):
             logger.debug(
                 "Ignoring instruct for %s (no instruction control)",
                 model_id,
@@ -210,6 +262,26 @@ def synthesize_chunks(
     audio_chunks: list[AudioChunk] = []
     total = len(cleaned_chunks)
 
+    voice_clone_prompt = None
+    ref_audio_path: Path | None = None
+    if is_base(config.model_id):
+        if not config.ref_audio:
+            raise ValueError("Base voice cloning requires tts.ref_audio")
+        ref_audio_path = Path(config.ref_audio)
+        if not ref_audio_path.is_file():
+            raise ValueError(f"tts.ref_audio not found: {ref_audio_path}")
+        if not config.x_vector_only and not (config.ref_text and config.ref_text.strip()):
+            raise ValueError(
+                "Base voice cloning requires non-empty tts.ref_text "
+                "unless tts.x_vector_only is true"
+            )
+        voice_clone_prompt = create_voice_clone_prompt(
+            model,
+            ref_audio=ref_audio_path,
+            ref_text=config.ref_text,
+            x_vector_only=config.x_vector_only,
+        )
+
     for i, chunk in enumerate(cleaned_chunks):
         wav_path = staging_dir / "wav" / chunk.chapter_slug / f"{chunk.chunk_index:04d}.wav"
         synthesize_to_wav(
@@ -221,6 +293,10 @@ def synthesize_chunks(
             instruct=compose_instruct(config.instruct, chunk.instruct),
             chunk_silence_ms=chunk_silence_ms,
             model_id=config.model_id,
+            voice_clone_prompt=voice_clone_prompt,
+            ref_audio=ref_audio_path,
+            ref_text=config.ref_text,
+            x_vector_only=config.x_vector_only,
         )
         audio_chunks.append(
             AudioChunk(

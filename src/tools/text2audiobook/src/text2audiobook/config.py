@@ -120,7 +120,27 @@ class TtsConfig:
     lang: str = "English"
     voice: str = "Serena"
     device: str = "auto"
+    ref_audio: str | None = None
+    ref_text: str | None = None
+    x_vector_only: bool = False
     instruct: str | None = DEFAULT_TTS_INSTRUCT
+
+
+def resolve_ref_audio(
+    ref_audio: str | None,
+    *,
+    config_path: Path | None,
+) -> Path | None:
+    """Resolve ``tts.ref_audio`` against the config file directory when relative."""
+    if ref_audio is None:
+        return None
+    stripped = str(ref_audio).strip()
+    if not stripped:
+        return None
+    path = Path(stripped)
+    if not path.is_absolute() and config_path is not None:
+        path = config_path.parent / path
+    return path
 
 
 @dataclass
@@ -334,12 +354,17 @@ def app_config_from_dict(
     if config_path is not None:
         paths.resolve_against(config_path.parent)
 
+    tts = _build_section(TtsConfig, data.get("tts"), "tts")
+    resolved_ref = resolve_ref_audio(tts.ref_audio, config_path=config_path)
+    if resolved_ref is not None:
+        tts = replace(tts, ref_audio=str(resolved_ref))
+
     return AppConfig(
         paths=paths,
         chunking=_build_section(ChunkingConfig, data.get("chunking"), "chunking"),
         selection=_build_section(SelectionConfig, data.get("selection"), "selection"),
         llm=_build_section(LlmConfig, data.get("llm"), "llm"),
-        tts=_build_section(TtsConfig, data.get("tts"), "tts"),
+        tts=tts,
         output=_build_section(OutputConfig, data.get("output"), "output"),
         pipeline=_build_section(PipelineConfig, data.get("pipeline"), "pipeline"),
         config_path=config_path,
