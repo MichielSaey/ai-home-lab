@@ -1240,6 +1240,8 @@ def _synthesize_and_encode(
             ref_audio=ref_audio_path,
             ref_text=tts_config.ref_text,
             x_vector_only=tts_config.x_vector_only,
+            batch_max_chars=tts_config.batch_max_chars,
+            batch_max_items=tts_config.batch_max_items,
         )
         tracker.add_duration(record, "tts", time.perf_counter() - start)
         for item in batch:
