@@ -459,9 +459,11 @@ def test_synthesize_batch_oom_splits_and_retries(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr("text2audiobook.tts.sf.write", fake_write)
 
     empty_cache = MagicMock()
+    synchronize = MagicMock()
     fake_torch = MagicMock()
     fake_torch.cuda.is_available.return_value = True
     fake_torch.cuda.empty_cache = empty_cache
+    fake_torch.cuda.synchronize = synchronize
     # Not an OutOfMemoryError subclass — exercise the RuntimeError/"out of memory" path.
     fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
@@ -480,20 +482,69 @@ def test_synthesize_batch_oom_splits_and_retries(tmp_path: Path, monkeypatch) ->
     assert all(size < 3 for size in call_sizes[1:])
     assert sum(call_sizes[1:]) == 4
     empty_cache.assert_called()
+    synchronize.assert_called()
     for path in paths:
         assert path.exists()
 
 
-def test_synthesize_batch_oom_on_single_item_reraises(
+def test_synthesize_batch_oom_on_single_item_retries_once(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """Single-item OOM should cleanup, retry once, and succeed on the second generate."""
+    model = MagicMock()
+    calls = {"n": 0}
+
+    def generate_side_effect(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("CUDA out of memory")
+        return ([np.zeros(8, dtype=np.float32)], 24000)
+
+    model.generate_voice_clone.side_effect = generate_side_effect
+
+    def fake_write(path, *_a, **_k):
+        Path(path).write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.tts.sf.write", fake_write)
+
+    empty_cache = MagicMock()
+    synchronize = MagicMock()
+    fake_torch = MagicMock()
+    fake_torch.cuda.is_available.return_value = True
+    fake_torch.cuda.empty_cache = empty_cache
+    fake_torch.cuda.synchronize = synchronize
+    fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    wav_path = tmp_path / "only.wav"
+    synthesize_batch_to_wavs(
+        model,
+        [("only", wav_path)],
+        voice="cloned",
+        language="English",
+        model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+        voice_clone_prompt=object(),
+    )
+
+    assert calls["n"] == 2
+    empty_cache.assert_called_once()
+    synchronize.assert_called_once()
+    assert wav_path.exists()
+
+
+def test_synthesize_batch_oom_on_single_item_twice_reraises(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Single-item OOM on both the first attempt and the retry still raises."""
     model = MagicMock()
     model.generate_voice_clone.side_effect = RuntimeError("CUDA out of memory")
 
     empty_cache = MagicMock()
+    synchronize = MagicMock()
     fake_torch = MagicMock()
     fake_torch.cuda.is_available.return_value = True
     fake_torch.cuda.empty_cache = empty_cache
+    fake_torch.cuda.synchronize = synchronize
     fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
 
@@ -510,7 +561,9 @@ def test_synthesize_batch_oom_on_single_item_reraises(
         assert "out of memory" in str(exc).lower()
     else:
         raise AssertionError("expected RuntimeError")
-    empty_cache.assert_called_once()
+    assert model.generate_voice_clone.call_count == 2
+    assert empty_cache.call_count == 2
+    assert synchronize.call_count == 2
 
 
 def test_create_voice_clone_prompt_passes_x_vector_only_mode() -> None:
