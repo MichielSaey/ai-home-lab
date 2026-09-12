@@ -242,7 +242,16 @@ def test_format_batch_log_includes_per_chunk_sizes() -> None:
             batch_max_items=4,
             batch_max_pad_chars=20,
         )
-        == "batch_size=3/4 chars=7/10 pad=12/20 [2,4,1]"
+        == "batch_size=3/4 chars=7/10 vram=12/20 [2,4,1]"
+    )
+    assert (
+        _format_batch_log(
+            n=2,
+            texts=["aa", "bbbb"],
+            batch_max_pad_chars=20,
+            batch_vram_overhead=5,
+        )
+        == "batch_size=2 chars=6 vram=18/20 oh=5 [2,4]"
     )
     assert _format_batch_log(n=1, texts=["hello"]) == "batch_size=1 chars=5 [5]"
 
@@ -530,6 +539,40 @@ def test_synthesize_batch_oom_on_single_item_retries_once(
     empty_cache.assert_called_once()
     synchronize.assert_called_once()
     assert wav_path.exists()
+
+
+def test_synthesize_batch_oom_raise_does_not_split(tmp_path: Path, monkeypatch) -> None:
+    """on_oom='raise' should cleanup and re-raise without half-splitting."""
+    model = MagicMock()
+    model.generate_voice_clone.side_effect = RuntimeError("CUDA out of memory")
+
+    empty_cache = MagicMock()
+    synchronize = MagicMock()
+    fake_torch = MagicMock()
+    fake_torch.cuda.is_available.return_value = True
+    fake_torch.cuda.empty_cache = empty_cache
+    fake_torch.cuda.synchronize = synchronize
+    fake_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (RuntimeError,), {})
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    try:
+        synthesize_batch_to_wavs(
+            model,
+            [(f"t{i}", tmp_path / f"{i}.wav") for i in range(4)],
+            voice="cloned",
+            language="English",
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            voice_clone_prompt=object(),
+            on_oom="raise",
+        )
+    except RuntimeError as exc:
+        assert "out of memory" in str(exc).lower()
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert model.generate_voice_clone.call_count == 1
+    empty_cache.assert_called()
+    synchronize.assert_called()
 
 
 def test_synthesize_batch_oom_on_single_item_twice_reraises(

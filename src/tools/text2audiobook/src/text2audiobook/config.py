@@ -124,10 +124,13 @@ class TtsConfig:
     ref_text: str | None = None
     x_vector_only: bool = False
     instruct: str | None = DEFAULT_TTS_INSTRUCT
-    batch_max_chars: int = 2800
-    batch_max_pad_chars: int = 2800
-    # Hard ceiling: many short sequences still OOM on 10GB even when pad cost is low.
-    batch_max_items: int = 4
+    batch_max_chars: int = 0
+    # VRAM budget for n * (max(lens) + batch_vram_overhead); calibrated via --calibrate-tts-batch.
+    # Production default is below clean-GPU frontiers to leave mid-run fragmentation headroom.
+    batch_max_pad_chars: int = 2200
+    batch_vram_overhead: int = 0
+    # Hard ceiling for short units; pad budget limits long ones.
+    batch_max_items: int = 16
 
 
 def resolve_ref_audio(

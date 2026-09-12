@@ -3,6 +3,7 @@
 import argparse
 import sys
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from text2audiobook.config import DEFAULT_CONFIG_PATH
@@ -13,6 +14,100 @@ def _selected_stages(args: argparse.Namespace) -> list[str] | None:
     """Return requested stage names, or None for the full default pipeline."""
     selected = [name for name in PIPELINE_STAGES if getattr(args, name, False)]
     return selected or None
+
+
+def _run_batch_vram_calibration(config_path: Path | None) -> int:
+    """Load Base TTS, run VRAM batch calibration, print fitted knobs, exit."""
+    from text2audiobook.batch_vram import run_batch_vram_calibration
+    from text2audiobook.config import load_config
+    from text2audiobook.gpu import prepare_gpu_env
+    from text2audiobook.logging_setup import setup_logging
+    from text2audiobook.tts import (
+        is_base,
+        load_tts,
+        unload_tts,
+    )
+
+    prepare_gpu_env()
+    setup_logging()
+    config = load_config(config_path)
+    tts = config.tts
+
+    if not is_base(tts.model_id):
+        print(
+            "error: --calibrate-tts-batch requires a Base (voice-clone) model_id "
+            f"(got {tts.model_id!r})",
+            file=sys.stderr,
+        )
+        return 2
+    if not tts.ref_audio:
+        print("error: tts.ref_audio is required for batch VRAM calibration", file=sys.stderr)
+        return 2
+    ref_audio = Path(tts.ref_audio)
+    if not ref_audio.is_file():
+        print(f"error: tts.ref_audio not found: {ref_audio}", file=sys.stderr)
+        return 2
+    if not tts.x_vector_only and not (tts.ref_text and tts.ref_text.strip()):
+        print(
+            "error: tts.ref_text is required unless tts.x_vector_only is true",
+            file=sys.stderr,
+        )
+        return 2
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_dir = config.paths.runs_dir / f"{stamp}_batch_vram"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    model = load_tts(tts)
+
+    def _hard_unload(current) -> None:
+        unload_tts(current)
+        import gc
+
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    def reload_model():
+        """Fully drop the old model; return (model, None) and use ref_audio per trial."""
+        nonlocal model
+        _hard_unload(model)
+        model = None
+        model = load_tts(tts)
+        # Skip rebuild of voice_clone_prompt here — encoding the ref right after an
+        # OOM often OOMs again. synthesize uses ref_audio when prompt is None.
+        return model, None
+
+    try:
+        result = run_batch_vram_calibration(
+            model,
+            voice=tts.voice,
+            language=tts.lang,
+            model_id=tts.model_id,
+            voice_clone_prompt=None,
+            ref_audio=ref_audio,
+            ref_text=tts.ref_text,
+            x_vector_only=tts.x_vector_only,
+            out_dir=out_dir,
+            reload_model=reload_model,
+        )
+    finally:
+        if model is not None:
+            unload_tts(model)
+
+    print()
+    print("Suggested config.tts values:")
+    print(f'  "batch_max_pad_chars": {result["budget_chars"]},')
+    print(f'  "batch_vram_overhead": {result["overhead_chars"]},')
+    print(f'  "batch_max_items": {result["max_items_suggested"]},')
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -64,6 +159,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--calibrate-tts-batch",
+        action="store_true",
+        help=(
+            "Measure TTS batch VRAM frontiers on the voice-clone path, fit "
+            "batch_max_pad_chars / batch_vram_overhead, write calibration.json, "
+            "and exit (does not process books)."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Redo requested stages even when stems or the M4B already exist.",
@@ -107,6 +211,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(format_voice_table())
         return 0
+
+    if args.calibrate_tts_batch:
+        return _run_batch_vram_calibration(args.config)
 
     from text2audiobook.gpu import prepare_gpu_env
 
