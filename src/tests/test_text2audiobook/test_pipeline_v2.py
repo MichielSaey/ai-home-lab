@@ -848,7 +848,7 @@ def test_speak_progress_unit_done_monotonic_when_packing_reorders(
     config = load_config(config_path)
     tts_config = replace(config.tts)
 
-    # Book order: long, short, medium → packing (shortest first) synthesizes short→medium→long.
+    # Book order: long, short, medium → packing (longest first) synthesizes long→medium→short.
     units = [
         TextChunk(0, "Ch A", "ch_a", 0, "x" * 30),
         TextChunk(0, "Ch A", "ch_a", 1, "y" * 5),
@@ -897,7 +897,7 @@ def test_speak_progress_unit_done_monotonic_when_packing_reorders(
             skip_wavs=False,
         )
 
-    assert synth_order == ["y" * 5, "z" * 15, "x" * 30]
+    assert synth_order == ["x" * 30, "z" * 15, "y" * 5]
     unit_dones = [
         int(match.group(1))
         for record in caplog.records

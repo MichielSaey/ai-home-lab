@@ -278,26 +278,26 @@ def test_iter_speak_batches_packing_boundaries() -> None:
         Unit("ee", "e"),
         Unit("ff", "f"),
     ]
-    # Length-sorted: c(1), a(2), e(2), f(2), b(3), d(8)
+    # Length-sorted descending: d(8), b(3), a(2), e(2), f(2), c(1)
     batches = list(iter_speak_batches(units, max_chars=5, max_items=3))
     assert _labels(batches) == [
-        ["c", "a", "e"],  # 1+2+2=5, items=3
-        ["f", "b"],  # 2+3=5
-        ["d"],  # oversized alone
+        ["d"],  # oversized alone first
+        ["b", "a"],  # 3+2=5
+        ["e", "f", "c"],  # 2+2+1=5
     ]
     _assert_each_unit_once(units, batches)
 
     by_items = list(iter_speak_batches(units[:4], max_chars=0, max_items=2))
-    # Sorted: c(1), a(2), b(3), d(8)
+    # Sorted desc: d(8), b(3), a(2), c(1)
     assert _labels(by_items) == [
-        ["c", "a"],
-        ["b", "d"],
+        ["d", "b"],
+        ["a", "c"],
     ]
     _assert_each_unit_once(units[:4], by_items)
 
     unlimited = list(iter_speak_batches(units[:3], max_chars=0, max_items=0))
-    # Sorted: c(1), a(2), b(3)
-    assert _labels(unlimited) == [["c", "a", "b"]]
+    # Sorted desc: b(3), a(2), c(1)
+    assert _labels(unlimited) == [["b", "a", "c"]]
     _assert_each_unit_once(units[:3], unlimited)
 
     # Pad budget: contiguous prefixes after sort; no residual pull.
@@ -308,11 +308,11 @@ def test_iter_speak_batches_packing_boundaries() -> None:
         Unit("w", "w4"),
     ]
     residual = list(iter_speak_batches(residual_units, max_chars=4, max_items=8))
-    # Sorted: w4(1), x1(3), y2(3), z3(3) — contiguous, no skip-ahead
+    # Sorted desc: x1(3), y2(3), z3(3), w4(1)
     assert _labels(residual) == [
-        ["w4", "x1"],  # 1+3=4
+        ["x1"],
         ["y2"],
-        ["z3"],
+        ["z3", "w4"],  # 3+1=4
     ]
     _assert_each_unit_once(residual_units, residual)
 
@@ -381,10 +381,9 @@ def test_iter_speak_batches_pad_groups_similar_lengths() -> None:
         iter_speak_batches(mixed, max_chars=2800, max_items=32, max_pad=2800)
     )
     labels = [[u.label for u in batch] for batch in batches]
-    # 10 shorts first: pad 10*80=800; adding a 700 would be 11*700 > 2800
-    assert labels[0] == [f"s{i}" for i in range(10)]
-    # 4 longs: pad 4*700=2800
-    assert labels[1] == ["L0", "L1", "L2", "L3"]
+    # Longest first: 4 longs (pad 4*700=2800), then 10 shorts
+    assert labels[0] == ["L0", "L1", "L2", "L3"]
+    assert labels[1] == [f"s{i}" for i in range(10)]
     assert len(batches) == 2
 
 

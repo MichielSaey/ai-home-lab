@@ -162,9 +162,10 @@ def iter_speak_batches(
 ) -> Iterator[list[Any]]:
     """Pack units by length-sorted contiguous prefixes under VRAM/chars/items.
 
-    Sorts by ``(len(text), original_index)`` ascending, then greedily cuts
-    contiguous prefixes that fit all active limits. Primary VRAM constraint is
-    ``n * (max(lens) + vram_overhead) <= max_pad`` when ``max_pad > 0``
+    Sorts by length **descending** (then original index), then greedily cuts
+    contiguous prefixes that fit all active limits. Longest units run first so
+    hard batches hit a fresher GPU and OOM fails early. Primary VRAM constraint
+    is ``n * (max(lens) + vram_overhead) <= max_pad`` when ``max_pad > 0``
     (``max_pad`` is the calibrated ``batch_max_pad_chars`` budget). Never splits
     a unit. ``max_chars`` / ``max_items`` / ``max_pad`` <= 0 means no limit on
     that dimension. A single oversized unit still forms its own batch.
@@ -173,7 +174,7 @@ def iter_speak_batches(
         unit
         for _, unit in sorted(
             enumerate(units),
-            key=lambda pair: (len(pair[1].text), pair[0]),
+            key=lambda pair: (-len(pair[1].text), pair[0]),
         )
     ]
     i = 0
