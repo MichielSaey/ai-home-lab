@@ -1,4 +1,7 @@
 import json
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -6,7 +9,9 @@ from text2audiobook import formats  # noqa: F401
 from text2audiobook.chunking import TextChunk
 from text2audiobook.cli import main
 from text2audiobook.config import load_config
-from text2audiobook.pipeline import process_source
+from text2audiobook.io import BookMetadata
+from text2audiobook.logging_setup import ProgressContext
+from text2audiobook.pipeline import _synthesize_and_encode, process_source
 from text2audiobook.stems import BookStems, canonical_stages, load_jsonl
 from text2audiobook.tracking import RunTracker
 
@@ -809,3 +814,94 @@ def test_direction_disabled_speak_falls_back_to_global_instruct(
     rows = load_jsonl(stems.format_chunks_jsonl)
     assert rows[0].get("instruct") is None
     assert synth_instructs == ["GLOBAL BASELINE INSTRUCT"]
+
+
+def test_speak_progress_unit_done_monotonic_when_packing_reorders(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    """Length-sorted batch packing reorders units; unit_done must still rise."""
+    staging = tmp_path / "staging" / "book"
+    speak_wav = staging / "speak" / "wav"
+    speak_wav.mkdir(parents=True)
+    (tmp_path / "runs").mkdir()
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "tts": {
+                    "batch_max_chars": 0,
+                    "batch_max_pad_chars": 0,
+                    "batch_max_items": 1,
+                },
+                "output": {"chapter_mp3": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    tts_config = replace(config.tts)
+
+    # Book order: long, short, medium → packing (shortest first) synthesizes short→medium→long.
+    units = [
+        TextChunk(0, "Ch A", "ch_a", 0, "x" * 30),
+        TextChunk(0, "Ch A", "ch_a", 1, "y" * 5),
+        TextChunk(1, "Ch B", "ch_b", 0, "z" * 15),
+    ]
+
+    synth_order: list[str] = []
+
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for text, wav_path in items:
+            synth_order.append(text)
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(tmp_path / "input" / "sample.md")
+    metadata = BookMetadata(
+        title="Book",
+        author="Author",
+        language="en",
+        cover_bytes=None,
+        slug="book",
+        staging_dir=staging,
+        m4b_path=tmp_path / "output" / "book.m4b",
+    )
+    stems = BookStems(staging)
+    progress = ProgressContext(book_title="Book")
+
+    with (
+        ThreadPoolExecutor(max_workers=1) as executor,
+        caplog.at_level(logging.INFO, logger="text2audiobook.pipeline"),
+    ):
+        _synthesize_and_encode(
+            units,
+            tts_model=object(),
+            config=config,
+            tts_config=tts_config,
+            metadata=metadata,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            executor=executor,
+            progress=progress,
+            skip_wavs=False,
+        )
+
+    assert synth_order == ["y" * 5, "z" * 15, "x" * 30]
+    unit_dones = [
+        int(match.group(1))
+        for record in caplog.records
+        if (match := re.search(r"unit=(\d+)/3", record.getMessage()))
+    ]
+    assert unit_dones == [1, 2, 3]
+    assert unit_dones == sorted(unit_dones)
