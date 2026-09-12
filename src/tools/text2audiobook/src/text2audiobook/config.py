@@ -116,9 +116,9 @@ class LlmConfig:
 
 @dataclass
 class TtsConfig:
-    model_id: str = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+    model_id: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
     lang: str = "English"
-    voice: str = "designed"
+    voice: str = "Serena"
     device: str = "auto"
     instruct: str | None = DEFAULT_TTS_INSTRUCT
 

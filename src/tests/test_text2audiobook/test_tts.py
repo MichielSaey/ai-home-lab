@@ -10,6 +10,7 @@ from text2audiobook.tts import (
     compose_instruct,
     is_custom_voice,
     is_voice_design,
+    supports_instruct,
     synthesize_to_wav,
 )
 
@@ -32,6 +33,13 @@ def test_is_voice_design_and_custom_voice() -> None:
     assert is_custom_voice("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
     assert not is_custom_voice("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
     assert not is_voice_design(None)
+
+
+def test_supports_instruct() -> None:
+    assert supports_instruct("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
+    assert supports_instruct("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
+    assert not supports_instruct("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+    assert not supports_instruct(None)
 
 
 def test_synthesize_routes_to_voice_design(tmp_path: Path, monkeypatch) -> None:
@@ -114,3 +122,26 @@ def test_synthesize_routes_to_custom_voice(tmp_path: Path, monkeypatch) -> None:
     assert kwargs["speaker"] == "Ryan"
     assert kwargs["instruct"] == "Calm pace."
     model.generate_voice_design.assert_not_called()
+
+
+def test_synthesize_06b_omits_instruct(tmp_path: Path, monkeypatch) -> None:
+    model = MagicMock()
+    model.generate_custom_voice.return_value = ([np.zeros(8, dtype=np.float32)], 24000)
+
+    def fake_write(path, *_a, **_k):
+        Path(path).write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.tts.sf.write", fake_write)
+
+    synthesize_to_wav(
+        model,
+        "Hello.",
+        tmp_path / "cv06.wav",
+        voice="Serena",
+        language="English",
+        instruct="Should be ignored on 0.6B.",
+        model_id="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    )
+    kwargs = model.generate_custom_voice.call_args.kwargs
+    assert kwargs["speaker"] == "Serena"
+    assert "instruct" not in kwargs

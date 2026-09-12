@@ -23,11 +23,11 @@
     "direction_max_new_tokens": 128
   },
   "tts": {
-    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "lang": "English",
-    "voice": "designed",
+    "voice": "Serena",
     "device": "auto",
-    "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation \u2014 clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow."
+    "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation — clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow."
   },
   "output": {
     "chapter_mp3": false,

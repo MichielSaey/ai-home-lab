@@ -17,7 +17,7 @@ from text2audiobook.logging_setup import ProgressContext
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 
 
 @dataclass
@@ -37,6 +37,13 @@ def is_voice_design(model_id: str | None) -> bool:
 def is_custom_voice(model_id: str | None) -> bool:
     """True when model_id names a CustomVoice checkpoint."""
     return "CustomVoice" in (model_id or "")
+
+
+def supports_instruct(model_id: str | None) -> bool:
+    """VoiceDesign and 1.7B CustomVoice accept instruct; 0.6B CustomVoice does not."""
+    if is_voice_design(model_id):
+        return True
+    return is_custom_voice(model_id) and "0.6B" not in (model_id or "")
 
 
 def compose_instruct(base: str | None, direction: str | None) -> str | None:
@@ -170,8 +177,13 @@ def synthesize_to_wav(
             "language": language,
             "speaker": voice,
         }
-        if resolved_instruct:
+        if resolved_instruct and supports_instruct(model_id):
             gen_kwargs["instruct"] = resolved_instruct
+        elif resolved_instruct and not supports_instruct(model_id):
+            logger.debug(
+                "Ignoring instruct for %s (no instruction control)",
+                model_id,
+            )
         logger.info("TTS API: generate_custom_voice (speaker=%s)", voice)
         wavs, sample_rate = model.generate_custom_voice(**gen_kwargs)
 

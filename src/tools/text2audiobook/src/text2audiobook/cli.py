@@ -72,10 +72,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--voice",
         default=None,
         help=(
-            "CustomVoice speaker (e.g. Serena, Ryan, Aiden), 'random' for the "
-            "CustomVoice pool, or 'designed' for VoiceDesign (default; persona "
-            "from tts.instruct). Ignored when model_id is VoiceDesign except "
-            "as a label. Content language stays from config tts.lang."
+            "CustomVoice speaker (e.g. Serena, Ryan, Aiden; default Serena), "
+            "'random' for the CustomVoice pool, or 'designed' for VoiceDesign. "
+            "Ignored when model_id is VoiceDesign except as a label. Content "
+            "language stays from config tts.lang."
         ),
     )
     parser.add_argument(
