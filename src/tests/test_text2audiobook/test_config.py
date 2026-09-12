@@ -186,6 +186,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert cfg.tts.batch_max_pad_chars == 2200
     assert cfg.tts.batch_vram_overhead == 0
     assert cfg.tts.batch_max_items == 16
+    assert cfg.tts.reload_every_n_units == 100
     assert cfg.chunking.speak_target_chars == 800
     assert cfg.chunking.speak_max_chars == 1200
     assert cfg.llm.direction is True
@@ -242,3 +243,13 @@ def test_resolve_book_config_missing_keeps_default(tmp_path: Path) -> None:
     resolved = resolve_book_config(base, "unknown_book")
     assert resolved.chunking.format_words_per_chunk == 1000
     assert resolved is base
+
+
+def test_load_config_accepts_reload_every_n_units(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tts": {"reload_every_n_units": 50}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(config_path)
+    assert cfg.tts.reload_every_n_units == 50

@@ -76,9 +76,11 @@ from text2audiobook.tts import (
     compose_instruct,
     create_voice_clone_prompt,
     is_base,
+    is_cuda_oom,
     is_voice_design,
     iter_speak_batches,
     load_tts,
+    reload_tts,
     supports_instruct,
     synthesize_batch_to_wavs,
     unload_tts,
@@ -434,6 +436,8 @@ def process_source(
         if own_tts is None:
             own_tts = load_tts(tts_config, device=tts_device)
             loaded_here = True
+        # Mutable slot so periodic/OOM reloads stay visible to finally on failure.
+        tts_slot: list[Any] = [own_tts]
         try:
             _run_speak(
                 format_units,
@@ -442,15 +446,17 @@ def process_source(
                 config=config,
                 tts_config=tts_config,
                 stems=stems,
-                tts_model=own_tts,
+                tts_slot=tts_slot,
                 tracker=tracker,
                 record=record,
                 progress=progress,
                 force=force,
             )
         finally:
+            own_tts = tts_slot[0]
             if loaded_here:
                 unload_tts(own_tts)
+                tts_slot[0] = None
                 own_tts = None
 
     handlers = {
@@ -1008,7 +1014,7 @@ def _run_speak(
     config: AppConfig,
     tts_config: TtsConfig,
     stems: BookStems,
-    tts_model: Any,
+    tts_slot: list[Any],
     tracker: RunTracker,
     record: BookRecord,
     progress: ProgressContext,
@@ -1078,7 +1084,7 @@ def _run_speak(
     with ThreadPoolExecutor(max_workers=max(1, config.pipeline.ffmpeg_workers)) as executor:
         wavs_by_slug, futures = _synthesize_and_encode(
             units,
-            tts_model=tts_model,
+            tts_slot=tts_slot,
             config=config,
             tts_config=tts_config,
             metadata=metadata,
@@ -1131,7 +1137,7 @@ def _run_speak(
 def _synthesize_and_encode(
     units: list[TextChunk],
     *,
-    tts_model: Any,
+    tts_slot: list[Any],
     config: AppConfig,
     tts_config: TtsConfig,
     metadata: BookMetadata,
@@ -1163,11 +1169,37 @@ def _synthesize_and_encode(
         if not ref_audio_path.is_file():
             raise ValueError(f"tts.ref_audio not found: {ref_audio_path}")
         voice_clone_prompt = create_voice_clone_prompt(
-            tts_model,
+            tts_slot[0],
             ref_audio=ref_audio_path,
             ref_text=tts_config.ref_text,
             x_vector_only=tts_config.x_vector_only,
         )
+
+    def rebuild_voice_clone_prompt() -> None:
+        nonlocal voice_clone_prompt
+        if ref_audio_path is None:
+            voice_clone_prompt = None
+            return
+        voice_clone_prompt = create_voice_clone_prompt(
+            tts_slot[0],
+            ref_audio=ref_audio_path,
+            ref_text=tts_config.ref_text,
+            x_vector_only=tts_config.x_vector_only,
+        )
+
+    def reload_current_model(*, reason: str, rebuild_prompt: bool = True) -> None:
+        """Unload+reload TTS. After OOM, skip rebuilding the clone prompt.
+
+        Encoding ``ref_audio`` right after an OOM often OOMs again (same reason
+        calibration returns ``prompt=None`` and falls back to ``ref_audio``).
+        """
+        nonlocal voice_clone_prompt
+        logger.info("%s", reason)
+        tts_slot[0] = reload_tts(tts_config, tts_slot[0])
+        if rebuild_prompt:
+            rebuild_voice_clone_prompt()
+        else:
+            voice_clone_prompt = None
 
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
         start = time.perf_counter()
@@ -1231,6 +1263,9 @@ def _synthesize_and_encode(
             ),
         )
 
+    synthesized_since_reload = 0
+    reload_every = tts_config.reload_every_n_units
+
     for batch in iter_speak_batches(
         [item for item in work if item.needs_synth],
         max_chars=tts_config.batch_max_chars,
@@ -1238,30 +1273,54 @@ def _synthesize_and_encode(
         max_pad=tts_config.batch_max_pad_chars,
         vram_overhead=tts_config.batch_vram_overhead,
     ):
-        start = time.perf_counter()
-        synthesize_batch_to_wavs(
-            tts_model,
-            [(item.unit.text, item.wav_path) for item in batch],
-            voice=tts_config.voice,
-            language=tts_config.lang,
-            instruct=[
+        items = [(item.unit.text, item.wav_path) for item in batch]
+        synth_kwargs: dict[str, Any] = {
+            "voice": tts_config.voice,
+            "language": tts_config.lang,
+            "instruct": [
                 compose_instruct(tts_config.instruct, item.unit.instruct) for item in batch
             ],
-            chunk_silence_ms=config.output.chunk_silence_ms,
-            model_id=tts_config.model_id,
-            voice_clone_prompt=voice_clone_prompt,
-            ref_audio=ref_audio_path,
-            ref_text=tts_config.ref_text,
-            x_vector_only=tts_config.x_vector_only,
-            batch_max_chars=tts_config.batch_max_chars,
-            batch_max_items=tts_config.batch_max_items,
-            batch_max_pad_chars=tts_config.batch_max_pad_chars,
-            batch_vram_overhead=tts_config.batch_vram_overhead,
-        )
+            "chunk_silence_ms": config.output.chunk_silence_ms,
+            "model_id": tts_config.model_id,
+            "voice_clone_prompt": voice_clone_prompt,
+            "ref_audio": ref_audio_path,
+            "ref_text": tts_config.ref_text,
+            "x_vector_only": tts_config.x_vector_only,
+            "batch_max_chars": tts_config.batch_max_chars,
+            "batch_max_items": tts_config.batch_max_items,
+            "batch_max_pad_chars": tts_config.batch_max_pad_chars,
+            "batch_vram_overhead": tts_config.batch_vram_overhead,
+        }
+        start = time.perf_counter()
+        try:
+            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
+        except Exception as exc:
+            if not is_cuda_oom(exc):
+                raise
+            reload_current_model(
+                reason=(
+                    "CUDA OOM after split/retry; reloading TTS model and "
+                    "retrying batch once to defrag VRAM"
+                ),
+                rebuild_prompt=False,
+            )
+            synthesized_since_reload = 0
+            synth_kwargs["voice_clone_prompt"] = voice_clone_prompt
+            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
         tracker.add_duration(record, "tts", time.perf_counter() - start)
+        synthesized_since_reload += len(batch)
         for item in batch:
             completed += 1
             log_unit_progress(item, unit_done=completed)
+
+        if reload_every > 0 and synthesized_since_reload >= reload_every:
+            reload_current_model(
+                reason=(
+                    f"Reloading TTS model after {synthesized_since_reload} units "
+                    "to defrag VRAM"
+                ),
+            )
+            synthesized_since_reload = 0
 
     for item in work:
         wavs_by_slug[item.unit.chapter_slug].append(item.wav_path)
