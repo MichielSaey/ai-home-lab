@@ -176,13 +176,43 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     assert (config.paths.output_dir / f"{staging.name}.m4b").exists()
 
 
-def test_speak_only_rejects_stale_format_stem(tmp_path: Path, monkeypatch) -> None:
+def test_speak_only_uses_stale_format_stem(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     stems = _stems_after_extract_format(source, config, monkeypatch)
     # Make format fingerprint stale while leaving chunk files on disk.
     manifest = json.loads(stems.format_manifest.read_text(encoding="utf-8"))
     manifest["clean_hash"] = "stale"
     stems.format_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def fake_synth(_model, _text, wav_path, **_kwargs) -> None:
+        wav_path.parent.mkdir(parents=True, exist_ok=True)
+        wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_to_wav", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("speak",),
+        tts_device="cpu",
+    )
+    assert stems.speak_manifest.exists()
+    assert (config.paths.output_dir / f"{stems.root.name}.m4b").exists()
+
+
+def test_speak_only_rejects_missing_format_stem(tmp_path: Path, monkeypatch) -> None:
+    source, config = _write_book(tmp_path)
+    stems = _stems_after_extract_format(source, config, monkeypatch)
+    stems.format_chunks_jsonl.unlink()
 
     monkeypatch.setattr(
         "text2audiobook.pipeline.load_tts",
@@ -200,9 +230,9 @@ def test_speak_only_rejects_stale_format_stem(tmp_path: Path, monkeypatch) -> No
             tts_device="cpu",
         )
     except FileNotFoundError as exc:
-        assert "stale" in str(exc).lower() or "format" in str(exc).lower()
+        assert "format" in str(exc).lower()
     else:
-        raise AssertionError("speak-only should reject a stale format stem")
+        raise AssertionError("speak-only should reject a missing format stem")
 
 
 def test_customvoice_rejects_designed_voice(tmp_path: Path) -> None:
