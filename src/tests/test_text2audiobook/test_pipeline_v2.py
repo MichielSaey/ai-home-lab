@@ -175,6 +175,35 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     assert (config.paths.output_dir / f"{staging.name}.m4b").exists()
 
 
+def test_speak_only_rejects_stale_format_stem(tmp_path: Path, monkeypatch) -> None:
+    source, config = _write_book(tmp_path)
+    stems = _stems_after_extract_format(source, config, monkeypatch)
+    # Make format fingerprint stale while leaving chunk files on disk.
+    manifest = json.loads(stems.format_manifest.read_text(encoding="utf-8"))
+    manifest["clean_hash"] = "stale"
+    stems.format_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.load_tts",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not load tts")),
+    )
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    try:
+        process_source(
+            source,
+            config,
+            tracker=tracker,
+            record=record,
+            stages=("speak",),
+            tts_device="cpu",
+        )
+    except FileNotFoundError as exc:
+        assert "stale" in str(exc).lower() or "format" in str(exc).lower()
+    else:
+        raise AssertionError("speak-only should reject a stale format stem")
+
+
 def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeypatch) -> None:
     source, config = _write_book(tmp_path)
     stems = _stems_after_extract_format(source, config, monkeypatch)

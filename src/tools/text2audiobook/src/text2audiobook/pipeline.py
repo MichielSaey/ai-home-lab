@@ -389,10 +389,21 @@ def process_source(
         scripts = state.scripts
         format_units = state.format_units
         if scripts is None or format_units is None:
-            format_hash_ok = stems.format_manifest.exists() and stems.format_chapters_index.exists()
-            if not format_hash_ok or not stems.format_chunks_jsonl.exists():
+            clean_hash = (
+                clean_sections_hash(stems) if stems.clean_sections_jsonl.exists() else ""
+            )
+            format_fingerprint = _format_fingerprint(
+                config, clean_hash=clean_hash, source_kind=source_kind
+            )
+            format_ok = (
+                manifest_matches(stems.format_manifest, format_fingerprint)
+                and stems.format_chapters_index.exists()
+                and stems.format_chunks_jsonl.exists()
+            )
+            if not format_ok:
                 raise FileNotFoundError(
-                    f"Format stem missing for {metadata.title!r}. Run --format first."
+                    f"Format stem missing or stale for {metadata.title!r}. "
+                    "Run --format first."
                 )
             if scripts is None:
                 scripts = load_format_scripts(stems)
