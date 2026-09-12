@@ -635,10 +635,7 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
         # Packing/VRAM knobs (batch_max_*, reload_every) omit: they do not change
-        # per-unit audio, and must not wipe resume WAVs when tuning pad.
-        "batch_max_chars": tts.batch_max_chars,
-        "batch_vram_overhead": tts.batch_vram_overhead,
-        "batch_max_items": tts.batch_max_items,
+        # per-unit audio, and must not wipe resume WAVs when tuning pad/items.
     }
     if is_base(tts.model_id):
         if tts.ref_audio:
@@ -1299,20 +1296,26 @@ def _synthesize_and_encode(
         }
         start = time.perf_counter()
         try:
-            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
+            # Raise on first OOM so we reload *before* split/retry runs on a
+            # fragmented heap (cascade-to-n=1 was poisoning VRAM so reload failed).
+            synthesize_batch_to_wavs(
+                tts_slot[0], items, on_oom="raise", **synth_kwargs
+            )
         except Exception as exc:
             if not is_cuda_oom(exc):
                 raise
             reload_current_model(
                 reason=(
-                    "CUDA OOM after split/retry; reloading TTS model and "
-                    "retrying batch once to defrag VRAM"
+                    "CUDA OOM; reloading TTS model to defrag VRAM, "
+                    "then retrying batch with split"
                 ),
                 rebuild_prompt=False,
             )
             synthesized_since_reload = 0
             synth_kwargs["voice_clone_prompt"] = voice_clone_prompt
-            synthesize_batch_to_wavs(tts_slot[0], items, **synth_kwargs)
+            synthesize_batch_to_wavs(
+                tts_slot[0], items, on_oom="split", **synth_kwargs
+            )
         tracker.add_duration(record, "tts", time.perf_counter() - start)
         synthesized_since_reload += len(batch)
         for item in batch:

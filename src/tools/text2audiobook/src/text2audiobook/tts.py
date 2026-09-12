@@ -137,6 +137,12 @@ def unload_tts(model: Any) -> None:
         return
     import torch
 
+    inner = getattr(model, "model", None)
+    if inner is not None:
+        try:
+            inner.to("cpu")
+        except Exception:
+            pass
     for attr in ("model", "processor", "tokenizer"):
         if getattr(model, attr, None) is not None:
             try:
