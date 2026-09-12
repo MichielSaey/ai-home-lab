@@ -235,8 +235,14 @@ def test_format_batch_log_includes_per_chunk_sizes() -> None:
     from text2audiobook.tts import _format_batch_log
 
     assert (
-        _format_batch_log(n=3, texts=["aa", "bbbb", "c"], batch_max_chars=10, batch_max_items=4)
-        == "batch_size=3/4 chars=7/10 [2,4,1]"
+        _format_batch_log(
+            n=3,
+            texts=["aa", "bbbb", "c"],
+            batch_max_chars=10,
+            batch_max_items=4,
+            batch_max_pad_chars=20,
+        )
+        == "batch_size=3/4 chars=7/10 pad=12/20 [2,4,1]"
     )
     assert _format_batch_log(n=1, texts=["hello"]) == "batch_size=1 chars=5 [5]"
 
@@ -259,31 +265,33 @@ def test_iter_speak_batches_packing_boundaries() -> None:
         Unit("aa", "a"),
         Unit("bbb", "b"),
         Unit("c", "c"),
-        Unit("dddddddd", "d"),  # oversized alone
+        Unit("dddddddd", "d"),  # oversized alone under max_chars=5
         Unit("ee", "e"),
         Unit("ff", "f"),
     ]
+    # Length-sorted: c(1), a(2), e(2), f(2), b(3), d(8)
     batches = list(iter_speak_batches(units, max_chars=5, max_items=3))
-    # First-fit: after [a,b], residual pulls e/f past oversized d.
     assert _labels(batches) == [
-        ["a", "b"],  # 2+3=5
-        ["c", "e", "f"],  # 1 + residual 2+2; d skipped until alone
+        ["c", "a", "e"],  # 1+2+2=5, items=3
+        ["f", "b"],  # 2+3=5
         ["d"],  # oversized alone
     ]
     _assert_each_unit_once(units, batches)
 
     by_items = list(iter_speak_batches(units[:4], max_chars=0, max_items=2))
+    # Sorted: c(1), a(2), b(3), d(8)
     assert _labels(by_items) == [
-        ["a", "b"],
-        ["c", "d"],
+        ["c", "a"],
+        ["b", "d"],
     ]
     _assert_each_unit_once(units[:4], by_items)
 
     unlimited = list(iter_speak_batches(units[:3], max_chars=0, max_items=0))
-    assert _labels(unlimited) == [["a", "b", "c"]]
+    # Sorted: c(1), a(2), b(3)
+    assert _labels(unlimited) == [["c", "a", "b"]]
     _assert_each_unit_once(units[:3], unlimited)
 
-    # Residual fill: after first 3, remaining 1 pulls the trailing 1-char unit.
+    # Pad budget: contiguous prefixes after sort; no residual pull.
     residual_units = [
         Unit("xxx", "x1"),
         Unit("yyy", "y2"),
@@ -291,12 +299,84 @@ def test_iter_speak_batches_packing_boundaries() -> None:
         Unit("w", "w4"),
     ]
     residual = list(iter_speak_batches(residual_units, max_chars=4, max_items=8))
+    # Sorted: w4(1), x1(3), y2(3), z3(3) — contiguous, no skip-ahead
     assert _labels(residual) == [
-        ["x1", "w4"],  # 3+1; skips later 3s that do not fit rem=1
+        ["w4", "x1"],  # 1+3=4
         ["y2"],
         ["z3"],
     ]
     _assert_each_unit_once(residual_units, residual)
+
+
+def test_iter_speak_batches_pad_packs_many_shorts() -> None:
+    class Unit:
+        def __init__(self, text: str, label: str) -> None:
+            self.text = text
+            self.label = label
+
+    shorts = [Unit("x" * 80, f"s{i}") for i in range(10)]
+    batches = list(
+        iter_speak_batches(shorts, max_chars=2800, max_items=32, max_pad=2800)
+    )
+    # 10 * 80 = 800 pad cost; old item cap of 4 would have forced split
+    assert len(batches) == 1
+    assert len(batches[0]) == 10
+
+
+def test_iter_speak_batches_pad_limits_long_units() -> None:
+    class Unit:
+        def __init__(self, text: str, label: str) -> None:
+            self.text = text
+            self.label = label
+
+    longs = [Unit("y" * 700, f"l{i}") for i in range(4)]
+    batches = list(
+        iter_speak_batches(longs, max_chars=2800, max_items=32, max_pad=2800)
+    )
+    # 4 * 700 = 2800 exactly
+    assert len(batches) == 1
+    assert len(batches[0]) == 4
+
+    five = longs + [Unit("y" * 700, "l4")]
+    five_batches = list(
+        iter_speak_batches(five, max_chars=2800, max_items=32, max_pad=2800)
+    )
+    # 5 * 700 = 3500 > 2800 → split into 4 + 1
+    assert [len(b) for b in five_batches] == [4, 1]
+
+
+def test_iter_speak_batches_pad_groups_similar_lengths() -> None:
+    class Unit:
+        def __init__(self, text: str, label: str) -> None:
+            self.text = text
+            self.label = label
+
+    # Arrival order: long, short, long, short — sort groups similar sizes
+    mixed = [
+        Unit("L" * 700, "L0"),
+        Unit("s" * 80, "s0"),
+        Unit("L" * 700, "L1"),
+        Unit("s" * 80, "s1"),
+        Unit("s" * 80, "s2"),
+        Unit("s" * 80, "s3"),
+        Unit("s" * 80, "s4"),
+        Unit("s" * 80, "s5"),
+        Unit("s" * 80, "s6"),
+        Unit("s" * 80, "s7"),
+        Unit("s" * 80, "s8"),
+        Unit("s" * 80, "s9"),
+        Unit("L" * 700, "L2"),
+        Unit("L" * 700, "L3"),
+    ]
+    batches = list(
+        iter_speak_batches(mixed, max_chars=2800, max_items=32, max_pad=2800)
+    )
+    labels = [[u.label for u in batch] for batch in batches]
+    # 10 shorts first: pad 10*80=800; adding a 700 would be 11*700 > 2800
+    assert labels[0] == [f"s{i}" for i in range(10)]
+    # 4 longs: pad 4*700=2800
+    assert labels[1] == ["L0", "L1", "L2", "L3"]
+    assert len(batches) == 2
 
 
 def test_synthesize_batch_voice_clone_writes_each_wav(tmp_path: Path, monkeypatch) -> None:
