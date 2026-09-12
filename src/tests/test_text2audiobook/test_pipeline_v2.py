@@ -1012,11 +1012,13 @@ def test_synthesize_oom_reloads_and_retries_batch_once(tmp_path: Path, monkeypat
     initial = object()
     reloaded = object()
     attempts: list[object] = []
+    retry_kwargs: list[dict] = []
 
-    def fake_synth(model, items, **_kwargs) -> None:
+    def fake_synth(model, items, **kwargs) -> None:
         attempts.append(model)
         if len(attempts) == 1:
             raise RuntimeError("CUDA out of memory")
+        retry_kwargs.append(kwargs)
         for _text, wav_path in items:
             wav_path.parent.mkdir(parents=True, exist_ok=True)
             wav_path.write_bytes(b"RIFF")
@@ -1045,7 +1047,69 @@ def test_synthesize_oom_reloads_and_retries_batch_once(tmp_path: Path, monkeypat
 
     assert attempts == [initial, reloaded]
     assert tts_slot[0] is reloaded
+    assert retry_kwargs[0]["voice_clone_prompt"] is None
 
+
+def test_synthesize_oom_reload_skips_clone_prompt_rebuild(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """After OOM, Base runs must not re-encode ref_audio; use ref_audio fallback."""
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"RIFF")
+    config, units, tracker, record, metadata, stems = _speak_synth_fixture(
+        tmp_path,
+        tts_overrides={
+            "reload_every_n_units": 0,
+            "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            "ref_audio": str(ref),
+            "ref_text": "clone me",
+            "voice": "cloned",
+        },
+    )
+    units = units[:1]
+    tts_config = replace(config.tts)
+    prompt_calls = {"n": 0}
+    synth_calls = {"n": 0}
+    retry_kwargs: list[dict] = []
+
+    def fake_prompt(*_a, **_k):
+        prompt_calls["n"] += 1
+        return object()
+
+    def fake_synth(_model, items, **kwargs) -> None:
+        synth_calls["n"] += 1
+        if synth_calls["n"] == 1:
+            raise RuntimeError("CUDA out of memory")
+        retry_kwargs.append(kwargs)
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.create_voice_clone_prompt", fake_prompt)
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.reload_tts",
+        lambda *_a, **_k: object(),
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        _synthesize_and_encode(
+            units,
+            tts_slot=[object()],
+            config=config,
+            tts_config=tts_config,
+            metadata=metadata,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            executor=executor,
+            progress=ProgressContext(book_title="Book"),
+            skip_wavs=False,
+        )
+
+    assert prompt_calls["n"] == 1  # initial only; no rebuild after OOM
+    assert retry_kwargs[-1]["voice_clone_prompt"] is None
+    assert retry_kwargs[-1]["ref_audio"] == Path(tts_config.ref_audio)
 
 def test_synthesize_oom_retry_still_oom_reraises(tmp_path: Path, monkeypatch) -> None:
     import pytest

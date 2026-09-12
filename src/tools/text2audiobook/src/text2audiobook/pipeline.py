@@ -1187,10 +1187,19 @@ def _synthesize_and_encode(
             x_vector_only=tts_config.x_vector_only,
         )
 
-    def reload_current_model(*, reason: str) -> None:
+    def reload_current_model(*, reason: str, rebuild_prompt: bool = True) -> None:
+        """Unload+reload TTS. After OOM, skip rebuilding the clone prompt.
+
+        Encoding ``ref_audio`` right after an OOM often OOMs again (same reason
+        calibration returns ``prompt=None`` and falls back to ``ref_audio``).
+        """
+        nonlocal voice_clone_prompt
         logger.info("%s", reason)
         tts_slot[0] = reload_tts(tts_config, tts_slot[0])
-        rebuild_voice_clone_prompt()
+        if rebuild_prompt:
+            rebuild_voice_clone_prompt()
+        else:
+            voice_clone_prompt = None
 
     def encode_job(wav_paths: list[Path], mp3_path: Path, chapter_title: str) -> None:
         start = time.perf_counter()
@@ -1293,6 +1302,7 @@ def _synthesize_and_encode(
                     "CUDA OOM after split/retry; reloading TTS model and "
                     "retrying batch once to defrag VRAM"
                 ),
+                rebuild_prompt=False,
             )
             synthesized_since_reload = 0
             synth_kwargs["voice_clone_prompt"] = voice_clone_prompt
