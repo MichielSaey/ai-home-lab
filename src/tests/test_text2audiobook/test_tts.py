@@ -7,6 +7,7 @@ import numpy as np
 
 from text2audiobook.config import DEFAULT_TTS_INSTRUCT
 from text2audiobook.tts import (
+    _ensure_tts_pad_token_id,
     compose_instruct,
     create_voice_clone_prompt,
     is_base,
@@ -17,6 +18,35 @@ from text2audiobook.tts import (
     synthesize_batch_to_wavs,
     synthesize_to_wav,
 )
+
+
+def test_ensure_tts_pad_token_id_copies_eos() -> None:
+    gen_cfg = MagicMock()
+    gen_cfg.pad_token_id = None
+    gen_cfg.eos_token_id = 2150
+    inner = MagicMock()
+    inner.generation_config = gen_cfg
+    wrapper = MagicMock()
+    wrapper.model = inner
+
+    _ensure_tts_pad_token_id(wrapper)
+    assert gen_cfg.pad_token_id == 2150
+
+    gen_cfg.pad_token_id = 99
+    _ensure_tts_pad_token_id(wrapper)
+    assert gen_cfg.pad_token_id == 99
+
+
+def test_ensure_tts_pad_token_id_uses_first_eos_when_list() -> None:
+    gen_cfg = MagicMock()
+    gen_cfg.pad_token_id = None
+    gen_cfg.eos_token_id = [2150, 2151]
+    inner = MagicMock()
+    inner.generation_config = gen_cfg
+    wrapper = MagicMock()
+    wrapper.model = inner
+    _ensure_tts_pad_token_id(wrapper)
+    assert gen_cfg.pad_token_id == 2150
 
 
 def test_compose_instruct_joins_base_and_direction() -> None:

@@ -61,6 +61,30 @@ def compose_instruct(base: str | None, direction: str | None) -> str | None:
     return " ".join(parts) if parts else None
 
 
+def _ensure_tts_pad_token_id(model: Any) -> None:
+    """Set generation_config.pad_token_id from eos when missing.
+
+    Without this, Hugging Face logs
+    ``Setting pad_token_id to eos_token_id:… for open-end generation.``
+    on every generate call.
+    """
+    inner = getattr(model, "model", model)
+    gen_cfg = getattr(inner, "generation_config", None)
+    if gen_cfg is None:
+        return
+    if getattr(gen_cfg, "pad_token_id", None) is not None:
+        return
+    eos = getattr(gen_cfg, "eos_token_id", None)
+    if eos is None:
+        return
+    if isinstance(eos, (list, tuple)):
+        if not eos:
+            return
+        gen_cfg.pad_token_id = int(eos[0])
+    else:
+        gen_cfg.pad_token_id = int(eos)
+
+
 def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     """Load Qwen3-TTS; device defaults to resolve_tts_device(config.device)."""
     import torch
@@ -85,6 +109,7 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     # Do not request flash_attention_2: when flash_attn is missing, transformers
     # raises a loud ImportError that looks like a crash. Eager attention is fine.
     model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
+    _ensure_tts_pad_token_id(model)
 
     if is_base(model_id):
         mode = "Base"
