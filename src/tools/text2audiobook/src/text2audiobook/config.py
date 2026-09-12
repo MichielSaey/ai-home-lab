@@ -103,7 +103,7 @@ class SelectionConfig:
 
 @dataclass
 class LlmConfig:
-    model_id: str = "Qwen/Qwen2.5-7B-Instruct"
+    model_id: str = "Qwen/Qwen3-4B-Instruct-2507"
     device: str = "cuda"
     cleanup: bool = True
     direction: bool = True
