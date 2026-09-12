@@ -9,6 +9,12 @@ from text2audiobook.config import DEFAULT_CONFIG_PATH
 from text2audiobook.stems import PIPELINE_STAGES
 
 
+def _selected_stages(args: argparse.Namespace) -> list[str] | None:
+    """Return requested stage names, or None for the full default pipeline."""
+    selected = [name for name in PIPELINE_STAGES if getattr(args, name, False)]
+    return selected or None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="text2audiobook",
@@ -34,19 +40,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--stage",
-        action="append",
-        choices=PIPELINE_STAGES,
-        dest="stages",
-        help=(
-            "Run only this stage (repeatable). Default: extract, clean, format, and speak. "
-            "Speak-only does not load the LLM."
-        ),
+        "--extract",
+        action="store_true",
+        help="Run the extract stage (combinable with other stage flags).",
     )
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Run only the clean stage (alias for --stage clean). Requires extract stem.",
+        help="Run the clean stage (combinable; requires extract stem if extract is skipped).",
+    )
+    parser.add_argument(
+        "--format",
+        action="store_true",
+        dest="format",
+        help="Run the format stage (combinable; requires clean stem if clean is skipped).",
+    )
+    parser.add_argument(
+        "--speak",
+        action="store_true",
+        help=(
+            "Run the speak stage (combinable; requires format stem if format is skipped). "
+            "Speak-only does not load the LLM."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -105,12 +120,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     setup_logging()
     config = load_config(args.config)
 
-    stages = list(args.stages or [])
-    if args.clean and not args.stages:
-        stages = ["clean"]
-    elif args.clean:
-        stages.append("clean")
-
     source_paths: list[Path] | None = None
     if args.url:
         url_dir = config.paths.staging_dir / "_cli_urls"
@@ -122,7 +131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run(
         config,
         source_paths=source_paths,
-        stages=stages or None,
+        stages=_selected_stages(args),
         force=args.force,
         voice=args.voice,
         speak_footnote_cues=args.footnote_cues,

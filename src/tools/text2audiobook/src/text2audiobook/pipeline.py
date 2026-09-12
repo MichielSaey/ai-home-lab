@@ -1,4 +1,4 @@
-"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional --stage."""
+"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional stage flags."""
 
 from __future__ import annotations
 
@@ -361,7 +361,7 @@ def process_source(
             if not clean_ok:
                 raise FileNotFoundError(
                     f"Clean stem missing for {metadata.title!r}. "
-                    "Run --clean or --stage clean first."
+                    "Run --clean first."
                 )
             sections = load_clean_sections(stems)
             state.sections = sections
@@ -392,7 +392,7 @@ def process_source(
             format_hash_ok = stems.format_manifest.exists() and stems.format_chapters_index.exists()
             if not format_hash_ok or not stems.format_chunks_jsonl.exists():
                 raise FileNotFoundError(
-                    f"Format stem missing for {metadata.title!r}. Run --stage format first."
+                    f"Format stem missing for {metadata.title!r}. Run --format first."
                 )
             if scripts is None:
                 scripts = load_format_scripts(stems)
@@ -629,7 +629,7 @@ def _run_extract(
     if "extract" not in selected:
         if not extract_ok:
             raise FileNotFoundError(
-                f"Extract stem missing for {metadata.title!r}. Run --stage extract first."
+                f"Extract stem missing for {metadata.title!r}. Run --extract first."
             )
         return load_extract_chapters(stems)
 
@@ -696,7 +696,7 @@ def _run_clean(
     if "clean" not in selected:
         if not clean_ok:
             raise FileNotFoundError(
-                f"Clean stem missing for {metadata.title!r}. Run --clean or --stage clean first."
+                f"Clean stem missing for {metadata.title!r}. Run --clean first."
             )
         return load_clean_sections(stems)
 
@@ -812,7 +812,7 @@ def _run_format(
     if "format" not in selected:
         if "speak" in selected and not format_ok:
             raise FileNotFoundError(
-                f"Format stem missing for {metadata.title!r}. Run --stage format first."
+                f"Format stem missing for {metadata.title!r}. Run --format first."
             )
         return load_format_scripts(stems), load_format_units(stems)
 

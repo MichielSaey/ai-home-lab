@@ -35,18 +35,18 @@ text2audiobook --url https://retrochronic.com
 A full run is the default. Re-run a layer without repeating the others:
 
 ```bash
-text2audiobook --stage extract
+text2audiobook --extract
 text2audiobook --clean
-text2audiobook --stage clean
-text2audiobook --stage format
-text2audiobook --stage speak
-text2audiobook --stage speak --voice Aiden
+text2audiobook --format
+text2audiobook --speak
+text2audiobook --format --speak
+text2audiobook --speak --voice Aiden
 text2audiobook --force
 text2audiobook --footnote-cues
 text2audiobook --no-footnote-cues
 ```
 
-`--clean` is an alias for `--stage clean` (clean-only). `--stage speak` loads Qwen3-TTS only (no LLM). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
+Stage flags are combinable (`--format --speak`). With none set, all four stages run. `--speak` alone loads Qwen3-TTS only (no LLM). `--force` invalidates skip for the requested stages, and on extract also refetches cached `.url` HTML. There is no v1 migrator: delete `data/staging/<book_slug>/` to rebuild.
 
 Spoken `Footnote.` / `End of footnote.` cues are **off** by default (`output.speak_footnote_cues`). Enable per book in `config.books/<slug>.json` or with `--footnote-cues`.
 
@@ -111,7 +111,7 @@ Each stage starts from the previous stem’s units and **further-splits only whe
 
 **Format** further-splits clean sections by word budget (~1000), then optionally runs **two LLM passes** while the model is still loaded: (1) cleanup rewrites each window for spoken English; (2) direction writes a short Qwen3-TTS `instruct` string per window (passage-level pace/emotion/emphasis only — **not** bracket tags like `[excited]` inside the narration text, and **not** a new accent/persona). Direction can run even when cleanup is off (`llm.direction`). Per-chunk `instruct` is stored in `format/chunks.jsonl` and inherited by speak units; speak **composes** global `tts.instruct` + chunk direction (never replaces the baseline). Joined chapter scripts are written for inspection/M4B titles. The default LLM cleanup prompt (and a deterministic post-pass) shrink bibliographic dumps to a short author/work credit, drop page numbers / publishers / stacked “see also” lists, and remove `[...]` ellipses. **Speak** further-splits those format windows by character budget (target 400, cap 800) for Qwen3-TTS (VoiceDesign by default).
 
-After switching to VoiceDesign + composed instructs, re-run `--stage speak` (and `--stage format` if the direction prompt fingerprint changed) so stems pick up the new model and composed persona.
+After switching to VoiceDesign + composed instructs, re-run `--speak` (and `--format` if the direction prompt fingerprint changed) so stems pick up the new model and composed persona.
 
 Deterministic rules (also in the LLM prompt):
 
