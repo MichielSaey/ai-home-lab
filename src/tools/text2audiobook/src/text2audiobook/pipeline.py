@@ -65,6 +65,7 @@ from text2audiobook.stems import (
     load_format_units,
     load_jsonl,
     manifest_matches,
+    read_json,
     save_clean_sections,
     save_extract_chapters,
     save_format_script,
@@ -666,6 +667,20 @@ def _format_units_hash(stems: BookStems) -> str:
     )
 
 
+def _speak_format_content_hash(stems: BookStems) -> str:
+    """Hash on-disk format outputs only (not which LLM would regenerate them).
+
+    Speak audio depends on the cleaned/instruct text, not ``llm.model_id``. Using
+    ``_live_format_hash`` here wiped resume WAVs when switching format models.
+    """
+    return stable_hash(
+        {
+            "scripts_hash": format_scripts_hash(stems) if stems.format_dir.exists() else "",
+            "units_hash": _format_units_hash(stems),
+        }
+    )
+
+
 def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
     """Hash formatter inputs plus on-disk scripts/units (not only the manifest)."""
     source_kind = "ebook"
@@ -686,7 +701,7 @@ def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
 def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
     if not stems.format_manifest.exists() or not stems.speak_manifest.exists():
         return False
-    format_hash = _live_format_hash(stems, config)
+    format_hash = _speak_format_content_hash(stems)
     return manifest_matches(stems.speak_manifest, _speak_fingerprint(config, tts, format_hash=format_hash))
 
 
@@ -1018,19 +1033,32 @@ def _run_speak(
     progress: ProgressContext,
     force: bool,
 ) -> None:
-    format_hash = _live_format_hash(stems, config)
+    format_hash = _speak_format_content_hash(stems)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_in_progress = stems.speak_dir / "in_progress.json"
-    # Mid-run resume trusts only the in-progress marker. If settings changed,
-    # drop any WAVs from the previous fingerprint so a later resume cannot skip
-    # stale audio that still matches text hashes.
+    # Mid-run resume trusts the in-progress marker. Wipe WAVs only when
+    # audio-identity settings change — not when format_hash alone moves (e.g.
+    # LLM model switch). Per-unit text_hash skip still resynthesizes edited text.
+    previous = read_json(speak_in_progress) if speak_in_progress.exists() else None
     resume_wavs = manifest_matches(speak_in_progress, fingerprint)
     if not resume_wavs and stems.speak_wav_dir.exists():
-        shutil.rmtree(stems.speak_wav_dir)
-        logger.info(
-            "Dropped speak WAVs at %s (speak fingerprint changed)",
-            stems.speak_wav_dir,
+        identity_keys = [k for k in fingerprint if k != "format_hash"]
+        same_audio_identity = isinstance(previous, dict) and all(
+            previous.get(key) == fingerprint[key] for key in identity_keys
         )
+        if same_audio_identity:
+            logger.info(
+                "Speak format_hash updated at %s; keeping existing WAVs "
+                "(TTS identity unchanged; unit text-hash skip still applies)",
+                stems.speak_wav_dir,
+            )
+            resume_wavs = True
+        else:
+            shutil.rmtree(stems.speak_wav_dir)
+            logger.info(
+                "Dropped speak WAVs at %s (speak fingerprint changed)",
+                stems.speak_wav_dir,
+            )
     write_json(speak_in_progress, fingerprint)
 
     units = build_speak_units_from_chunks(
