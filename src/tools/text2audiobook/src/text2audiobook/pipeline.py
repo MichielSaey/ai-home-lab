@@ -65,6 +65,7 @@ from text2audiobook.stems import (
     load_format_units,
     load_jsonl,
     manifest_matches,
+    read_json,
     save_clean_sections,
     save_extract_chapters,
     save_format_script,
@@ -666,6 +667,20 @@ def _format_units_hash(stems: BookStems) -> str:
     )
 
 
+def _speak_format_content_hash(stems: BookStems) -> str:
+    """Hash on-disk format outputs only (not which LLM would regenerate them).
+
+    Speak audio depends on the cleaned/instruct text, not ``llm.model_id``. Using
+    ``_live_format_hash`` here wiped resume WAVs when switching format models.
+    """
+    return stable_hash(
+        {
+            "scripts_hash": format_scripts_hash(stems) if stems.format_dir.exists() else "",
+            "units_hash": _format_units_hash(stems),
+        }
+    )
+
+
 def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
     """Hash formatter inputs plus on-disk scripts/units (not only the manifest)."""
     source_kind = "ebook"
@@ -683,11 +698,34 @@ def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
     )
 
 
+def _speak_fingerprint_matches(
+    path: Path, fingerprint: dict[str, Any]
+) -> bool:
+    """True if speak manifest/in_progress matches, allowing format_hash drift.
+
+    ``format_hash`` is content-oriented and its scheme changed; TTS identity
+    keys still must match. Unit text/instruct hashes gate resynthesis.
+    """
+    if manifest_matches(path, fingerprint):
+        return True
+    previous = read_json(path)
+    if not isinstance(previous, dict):
+        return False
+    identity_keys = [key for key in fingerprint if key != "format_hash"]
+    return all(previous.get(key) == fingerprint[key] for key in identity_keys)
+
+
 def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
     if not stems.format_manifest.exists() or not stems.speak_manifest.exists():
         return False
-    format_hash = _live_format_hash(stems, config)
-    return manifest_matches(stems.speak_manifest, _speak_fingerprint(config, tts, format_hash=format_hash))
+    format_hash = _speak_format_content_hash(stems)
+    # Exact match only: format_hash drift must not skip a finished book after
+    # re-format changed on-disk scripts/units (mid-run resume uses the looser
+    # helper so LLM-model fingerprint churn does not wipe WAVs).
+    return manifest_matches(
+        stems.speak_manifest,
+        _speak_fingerprint(config, tts, format_hash=format_hash),
+    )
 
 
 def _run_extract(
@@ -1018,17 +1056,23 @@ def _run_speak(
     progress: ProgressContext,
     force: bool,
 ) -> None:
-    format_hash = _live_format_hash(stems, config)
+    format_hash = _speak_format_content_hash(stems)
     fingerprint = _speak_fingerprint(config, tts_config, format_hash=format_hash)
     speak_in_progress = stems.speak_dir / "in_progress.json"
-    # Mid-run resume trusts only the in-progress marker. If settings changed,
-    # drop any WAVs from the previous fingerprint so a later resume cannot skip
-    # stale audio that still matches text hashes.
-    resume_wavs = manifest_matches(speak_in_progress, fingerprint)
+    # Mid-run resume trusts the in-progress marker. Wipe WAVs only when
+    # audio-identity settings change — not when format_hash alone moves (e.g.
+    # LLM model switch). Per-unit text_hash skip still resynthesizes edited text.
+    resume_wavs = _speak_fingerprint_matches(speak_in_progress, fingerprint)
     if not resume_wavs and stems.speak_wav_dir.exists():
         shutil.rmtree(stems.speak_wav_dir)
         logger.info(
             "Dropped speak WAVs at %s (speak fingerprint changed)",
+            stems.speak_wav_dir,
+        )
+    elif resume_wavs and not manifest_matches(speak_in_progress, fingerprint):
+        logger.info(
+            "Speak format_hash updated at %s; keeping existing WAVs "
+            "(TTS identity unchanged; unit text/instruct skip still applies)",
             stems.speak_wav_dir,
         )
     write_json(speak_in_progress, fingerprint)
@@ -1052,11 +1096,18 @@ def _run_speak(
     if force and stems.speak_wav_dir.exists():
         shutil.rmtree(stems.speak_wav_dir)
 
-    previous_hashes: dict[tuple[str, int], str] = {}
+    previous_hashes: dict[tuple[str, int], tuple[str, str | None]] = {}
     for row in load_jsonl(stems.speak_units_jsonl):
         try:
-            previous_hashes[(str(row["chapter_slug"]), int(row["chunk_index"]))] = str(
-                row["text_hash"]
+            instruct_raw = row.get("instruct")
+            instruct = (
+                None
+                if instruct_raw is None
+                else str(instruct_raw).strip() or None
+            )
+            previous_hashes[(str(row["chapter_slug"]), int(row["chunk_index"]))] = (
+                str(row["text_hash"]),
+                instruct,
             )
         except (KeyError, TypeError, ValueError):
             continue
@@ -1094,7 +1145,7 @@ def _run_speak(
             # Skip existing WAVs when text hash matches and speak/in_progress.json
             # still matches this fingerprint (interrupted run with same TTS settings).
             skip_wavs=config.output.skip_existing and not force and resume_wavs,
-            previous_text_hashes=previous_hashes,
+            previous_unit_fingerprints=previous_hashes,
         )
         for future in futures:
             future.result()
@@ -1145,7 +1196,7 @@ def _synthesize_and_encode(
     executor: ThreadPoolExecutor,
     progress: ProgressContext,
     skip_wavs: bool,
-    previous_text_hashes: dict[tuple[str, int], str] | None = None,
+    previous_unit_fingerprints: dict[tuple[str, int], tuple[str, str | None]] | None = None,
 ) -> tuple[dict[str, list[Path]], list[Future]]:
     expected = Counter(unit.chapter_slug for unit in units)
     done: Counter[str] = Counter()
@@ -1230,8 +1281,13 @@ def _synthesize_and_encode(
     work: list[_SpeakWork] = []
     for unit_number, unit in enumerate(units, start=1):
         wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
-        prior = (previous_text_hashes or {}).get((unit.chapter_slug, unit.chunk_index))
-        hash_ok = prior == text_hash(unit.text)
+        prior = (previous_unit_fingerprints or {}).get(
+            (unit.chapter_slug, unit.chunk_index)
+        )
+        prior_text, prior_instruct = prior if prior is not None else (None, None)
+        hash_ok = (
+            prior_text == text_hash(unit.text) and prior_instruct == unit.instruct
+        )
         needs_synth = not (skip_wavs and wav_path.exists() and hash_ok)
         work.append(
             _SpeakWork(
