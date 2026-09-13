@@ -1080,11 +1080,18 @@ def _run_speak(
     if force and stems.speak_wav_dir.exists():
         shutil.rmtree(stems.speak_wav_dir)
 
-    previous_hashes: dict[tuple[str, int], str] = {}
+    previous_hashes: dict[tuple[str, int], tuple[str, str | None]] = {}
     for row in load_jsonl(stems.speak_units_jsonl):
         try:
-            previous_hashes[(str(row["chapter_slug"]), int(row["chunk_index"]))] = str(
-                row["text_hash"]
+            instruct_raw = row.get("instruct")
+            instruct = (
+                None
+                if instruct_raw is None
+                else str(instruct_raw).strip() or None
+            )
+            previous_hashes[(str(row["chapter_slug"]), int(row["chunk_index"]))] = (
+                str(row["text_hash"]),
+                instruct,
             )
         except (KeyError, TypeError, ValueError):
             continue
@@ -1122,7 +1129,7 @@ def _run_speak(
             # Skip existing WAVs when text hash matches and speak/in_progress.json
             # still matches this fingerprint (interrupted run with same TTS settings).
             skip_wavs=config.output.skip_existing and not force and resume_wavs,
-            previous_text_hashes=previous_hashes,
+            previous_unit_fingerprints=previous_hashes,
         )
         for future in futures:
             future.result()
@@ -1173,7 +1180,7 @@ def _synthesize_and_encode(
     executor: ThreadPoolExecutor,
     progress: ProgressContext,
     skip_wavs: bool,
-    previous_text_hashes: dict[tuple[str, int], str] | None = None,
+    previous_unit_fingerprints: dict[tuple[str, int], tuple[str, str | None]] | None = None,
 ) -> tuple[dict[str, list[Path]], list[Future]]:
     expected = Counter(unit.chapter_slug for unit in units)
     done: Counter[str] = Counter()
@@ -1258,8 +1265,13 @@ def _synthesize_and_encode(
     work: list[_SpeakWork] = []
     for unit_number, unit in enumerate(units, start=1):
         wav_path = stems.speak_wav_dir / unit.chapter_slug / f"{unit.chunk_index:04d}.wav"
-        prior = (previous_text_hashes or {}).get((unit.chapter_slug, unit.chunk_index))
-        hash_ok = prior == text_hash(unit.text)
+        prior = (previous_unit_fingerprints or {}).get(
+            (unit.chapter_slug, unit.chunk_index)
+        )
+        prior_text, prior_instruct = prior if prior is not None else (None, None)
+        hash_ok = (
+            prior_text == text_hash(unit.text) and prior_instruct == unit.instruct
+        )
         needs_synth = not (skip_wavs and wav_path.exists() and hash_ok)
         work.append(
             _SpeakWork(
