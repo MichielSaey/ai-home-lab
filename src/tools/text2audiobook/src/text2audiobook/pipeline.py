@@ -719,7 +719,10 @@ def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
     if not stems.format_manifest.exists() or not stems.speak_manifest.exists():
         return False
     format_hash = _speak_format_content_hash(stems)
-    return _speak_fingerprint_matches(
+    # Exact match only: format_hash drift must not skip a finished book after
+    # re-format changed on-disk scripts/units (mid-run resume uses the looser
+    # helper so LLM-model fingerprint churn does not wipe WAVs).
+    return manifest_matches(
         stems.speak_manifest,
         _speak_fingerprint(config, tts, format_hash=format_hash),
     )
