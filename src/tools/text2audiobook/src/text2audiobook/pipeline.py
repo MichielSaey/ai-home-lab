@@ -698,11 +698,31 @@ def _live_format_hash(stems: BookStems, config: AppConfig) -> str:
     )
 
 
+def _speak_fingerprint_matches(
+    path: Path, fingerprint: dict[str, Any]
+) -> bool:
+    """True if speak manifest/in_progress matches, allowing format_hash drift.
+
+    ``format_hash`` is content-oriented and its scheme changed; TTS identity
+    keys still must match. Unit text/instruct hashes gate resynthesis.
+    """
+    if manifest_matches(path, fingerprint):
+        return True
+    previous = read_json(path)
+    if not isinstance(previous, dict):
+        return False
+    identity_keys = [key for key in fingerprint if key != "format_hash"]
+    return all(previous.get(key) == fingerprint[key] for key in identity_keys)
+
+
 def _speak_current(stems: BookStems, config: AppConfig, tts: TtsConfig) -> bool:
     if not stems.format_manifest.exists() or not stems.speak_manifest.exists():
         return False
     format_hash = _speak_format_content_hash(stems)
-    return manifest_matches(stems.speak_manifest, _speak_fingerprint(config, tts, format_hash=format_hash))
+    return _speak_fingerprint_matches(
+        stems.speak_manifest,
+        _speak_fingerprint(config, tts, format_hash=format_hash),
+    )
 
 
 def _run_extract(
@@ -1039,26 +1059,19 @@ def _run_speak(
     # Mid-run resume trusts the in-progress marker. Wipe WAVs only when
     # audio-identity settings change — not when format_hash alone moves (e.g.
     # LLM model switch). Per-unit text_hash skip still resynthesizes edited text.
-    previous = read_json(speak_in_progress) if speak_in_progress.exists() else None
-    resume_wavs = manifest_matches(speak_in_progress, fingerprint)
+    resume_wavs = _speak_fingerprint_matches(speak_in_progress, fingerprint)
     if not resume_wavs and stems.speak_wav_dir.exists():
-        identity_keys = [k for k in fingerprint if k != "format_hash"]
-        same_audio_identity = isinstance(previous, dict) and all(
-            previous.get(key) == fingerprint[key] for key in identity_keys
+        shutil.rmtree(stems.speak_wav_dir)
+        logger.info(
+            "Dropped speak WAVs at %s (speak fingerprint changed)",
+            stems.speak_wav_dir,
         )
-        if same_audio_identity:
-            logger.info(
-                "Speak format_hash updated at %s; keeping existing WAVs "
-                "(TTS identity unchanged; unit text-hash skip still applies)",
-                stems.speak_wav_dir,
-            )
-            resume_wavs = True
-        else:
-            shutil.rmtree(stems.speak_wav_dir)
-            logger.info(
-                "Dropped speak WAVs at %s (speak fingerprint changed)",
-                stems.speak_wav_dir,
-            )
+    elif resume_wavs and not manifest_matches(speak_in_progress, fingerprint):
+        logger.info(
+            "Speak format_hash updated at %s; keeping existing WAVs "
+            "(TTS identity unchanged; unit text/instruct skip still applies)",
+            stems.speak_wav_dir,
+        )
     write_json(speak_in_progress, fingerprint)
 
     units = build_speak_units_from_chunks(
