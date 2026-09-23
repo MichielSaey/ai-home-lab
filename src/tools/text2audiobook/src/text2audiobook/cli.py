@@ -204,6 +204,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Omit spoken footnote markers (overrides config).",
     )
     parser.set_defaults(footnote_cues=None)
+
+    clone = parser.add_mutually_exclusive_group()
+    clone.add_argument(
+        "--x-vector-only",
+        action="store_true",
+        dest="x_vector_only",
+        help=(
+            "Base voice clone: speaker embedding only (no ICL ref_text). "
+            "Use to suppress <|im_end|>/ref-tail onset artifacts; may reduce "
+            "prosody match vs full ICL (overrides config)."
+        ),
+    )
+    clone.add_argument(
+        "--icl",
+        action="store_false",
+        dest="x_vector_only",
+        help="Base voice clone: full ICL with ref_text (overrides config).",
+    )
+    parser.set_defaults(x_vector_only=None)
     args = parser.parse_args(argv)
 
     if args.list_voices:
@@ -242,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         force=args.force,
         voice=args.voice,
         speak_footnote_cues=args.footnote_cues,
+        x_vector_only=args.x_vector_only,
     )
 
 

@@ -115,3 +115,24 @@ def test_char_packer_splits_semicolon_before_comma() -> None:
     )
     assert len(units) >= 2
     assert all(len(unit) <= 20 for unit in units)
+
+
+def test_build_speak_units_collapses_newlines() -> None:
+    from text2audiobook.chunking import TextChunk, build_speak_units_from_chunks
+
+    units = build_speak_units_from_chunks(
+        [
+            TextChunk(
+                chapter_index=0,
+                chapter_title="T",
+                chapter_slug="t",
+                chunk_index=0,
+                text="First line.\nSecond line.",
+            )
+        ],
+        target_chars=800,
+        max_chars=1200,
+    )
+    assert len(units) == 1
+    assert units[0].text == "First line. Second line."
+    assert "\n" not in units[0].text

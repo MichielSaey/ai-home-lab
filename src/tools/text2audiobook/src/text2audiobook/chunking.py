@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
+from text2audiobook.formatting import normalize_speak_text
 
 logger = logging.getLogger(__name__)
 
@@ -193,20 +194,8 @@ def further_split(
     out: list[TextChunk] = []
     for unit in units:
         if not over_budget(unit.text):
-            out.append(
-                TextChunk(
-                    chapter_index=unit.chapter_index,
-                    chapter_title=unit.chapter_title,
-                    chapter_slug=unit.chapter_slug,
-                    chunk_index=len(out),
-                    text=unit.text,
-                    source_kind=unit.source_kind,
-                    instruct=unit.instruct,
-                )
-            )
-            continue
-        for piece in split_text(unit.text):
-            if not piece.strip():
+            text = normalize_speak_text(unit.text)
+            if not text:
                 continue
             out.append(
                 TextChunk(
@@ -214,7 +203,23 @@ def further_split(
                     chapter_title=unit.chapter_title,
                     chapter_slug=unit.chapter_slug,
                     chunk_index=len(out),
-                    text=piece,
+                    text=text,
+                    source_kind=unit.source_kind,
+                    instruct=unit.instruct,
+                )
+            )
+            continue
+        for piece in split_text(unit.text):
+            text = normalize_speak_text(piece)
+            if not text:
+                continue
+            out.append(
+                TextChunk(
+                    chapter_index=unit.chapter_index,
+                    chapter_title=unit.chapter_title,
+                    chapter_slug=unit.chapter_slug,
+                    chunk_index=len(out),
+                    text=text,
                     source_kind=unit.source_kind,
                     instruct=unit.instruct,
                 )

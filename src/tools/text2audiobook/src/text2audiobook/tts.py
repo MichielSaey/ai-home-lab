@@ -12,6 +12,7 @@ import soundfile as sf
 
 from text2audiobook.batch_vram import batch_fits_vram, batch_vram_cost
 from text2audiobook.config import DEFAULT_TTS_INSTRUCT, TtsConfig
+from text2audiobook.formatting import normalize_speak_text
 from text2audiobook.gpu import resolve_tts_device
 from text2audiobook.llm import CleanedChunk
 from text2audiobook.logging_setup import ProgressContext
@@ -19,6 +20,9 @@ from text2audiobook.logging_setup import ProgressContext
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+
+# Bump when speak-text prep changes so stem fingerprints invalidate resume WAVs.
+SPEAK_TEXT_NORM_VERSION = 1
 
 
 @dataclass
@@ -411,8 +415,10 @@ def synthesize_batch_to_wavs(
     if not items:
         return
 
-    texts = [text for text, _ in items]
+    texts = [normalize_speak_text(text) for text, _ in items]
     paths = [path for _, path in items]
+    if any(not text for text in texts):
+        raise ValueError("TTS batch contains empty text after normalize_speak_text")
     n = len(items)
     languages = [language] * n
     instruct_list = _normalize_instruct_list(instruct, n)

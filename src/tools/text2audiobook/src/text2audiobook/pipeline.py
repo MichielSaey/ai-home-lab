@@ -29,6 +29,7 @@ from text2audiobook.config import (
     resolve_book_config,
     resolve_ref_audio,
     with_speak_footnote_cues,
+    with_x_vector_only,
 )
 from text2audiobook.formatting import FORMATTER_VERSION
 from text2audiobook.gpu import resolve_tts_device
@@ -74,6 +75,7 @@ from text2audiobook.stems import (
 )
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
+    SPEAK_TEXT_NORM_VERSION,
     compose_instruct,
     create_voice_clone_prompt,
     is_base,
@@ -116,6 +118,7 @@ def run(
     force: bool = False,
     voice: str | None = None,
     speak_footnote_cues: bool | None = None,
+    x_vector_only: bool | None = None,
 ) -> int:
     """Process supported sources. Returns a process exit code.
 
@@ -188,6 +191,7 @@ def run(
                     force=force,
                     voice=voice,
                     speak_footnote_cues=speak_footnote_cues,
+                    x_vector_only=x_vector_only,
                 )
             except KeyboardInterrupt:
                 tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
@@ -230,6 +234,7 @@ def process_source(
     force: bool = False,
     voice: str | None = None,
     speak_footnote_cues: bool | None = None,
+    x_vector_only: bool | None = None,
 ) -> None:
     """Convert one source through the requested extract / format / speak stages."""
     selected = canonical_stages(stages)
@@ -250,6 +255,8 @@ def process_source(
     config = resolve_book_config(config, metadata.slug)
     if speak_footnote_cues is not None:
         config = with_speak_footnote_cues(config, speak_footnote_cues)
+    if x_vector_only is not None:
+        config = with_x_vector_only(config, x_vector_only)
 
     book_idx, total_books = position if position is not None else (1, 1)
     progress = ProgressContext(
@@ -624,7 +631,7 @@ def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str)
 
 def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -> dict[str, Any]:
     fingerprint: dict[str, Any] = {
-        "version": 2,
+        "version": 3,
         "format_hash": format_hash,
         "model_id": tts.model_id,
         "voice": tts.voice,
@@ -635,6 +642,7 @@ def _speak_fingerprint(config: AppConfig, tts: TtsConfig, *, format_hash: str) -
         "chapter_silence_ms": config.output.chapter_silence_ms,
         "speak_target_chars": config.chunking.speak_target_chars,
         "speak_max_chars": config.chunking.speak_max_chars,
+        "speak_text_norm": SPEAK_TEXT_NORM_VERSION,
         # Packing/VRAM knobs (batch_max_*, reload_every) omit: they do not change
         # per-unit audio, and must not wipe resume WAVs when tuning pad/items.
     }

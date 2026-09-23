@@ -462,6 +462,8 @@ def test_base_speak_fingerprint_includes_ref_hash(tmp_path: Path) -> None:
     assert fp["ref_audio_sha256"] == file_sha256(ref)
     assert fp["ref_text"] == "Reference transcript."
     assert fp["x_vector_only"] is False
+    assert fp["version"] == 3
+    assert fp["speak_text_norm"] == 1
     assert "instruct" not in fp
     assert "reload_every_n_units" not in fp
 
