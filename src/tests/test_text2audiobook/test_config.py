@@ -253,3 +253,15 @@ def test_load_config_accepts_reload_every_n_units(tmp_path: Path) -> None:
     )
     cfg = load_config(config_path)
     assert cfg.tts.reload_every_n_units == 50
+
+
+def test_with_x_vector_only() -> None:
+    from text2audiobook.config import load_config, with_x_vector_only
+
+    cfg = load_config()
+    assert cfg.tts.x_vector_only is False
+    enabled = with_x_vector_only(cfg, True)
+    assert enabled.tts.x_vector_only is True
+    assert cfg.tts.x_vector_only is False
+    disabled = with_x_vector_only(enabled, False)
+    assert disabled.tts.x_vector_only is False

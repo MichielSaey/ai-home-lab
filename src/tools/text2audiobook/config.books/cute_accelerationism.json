@@ -29,7 +29,7 @@
     "device": "auto",
     "ref_audio": "data/voices/ref_clone.wav",
     "ref_text": "Homer himself in books five through 12. The poem cuts between far distant and diverse locations, from Olympus to Earth, from Calypso's Island.",
-    "x_vector_only": false,
+    "x_vector_only": true,
     "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation \u2014 clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow.",
     "batch_max_chars": 0,
     "batch_max_pad_chars": 3000,

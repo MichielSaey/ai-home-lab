@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
+from text2audiobook.formatting import normalize_speak_text
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +347,12 @@ def build_speak_units_from_chunks(
     max_chars: int,
     count_fn: Callable[[str], int] | None = None,
 ) -> list[TextChunk]:
-    """Further-split prior format units by character budget; never rematch."""
+    """Further-split prior format units by character budget; never rematch.
+
+    Speak units are whitespace-normalized (newlines → spaces) so TTS never
+    sees paragraph breaks. Format windows must keep newlines — do not call
+    ``normalize_speak_text`` from shared ``further_split``.
+    """
     count = count_fn or char_count
 
     def split_text(text: str) -> list[str]:
@@ -357,8 +363,42 @@ def build_speak_units_from_chunks(
             count_fn=count,
         )
 
-    return further_split(
+    units = further_split(
         format_units,
         over_budget=lambda text: count(text) > max_chars,
         split_text=split_text,
     )
+    normalized: list[TextChunk] = []
+    for unit in units:
+        text = normalize_speak_text(unit.text)
+        if not text:
+            continue
+        normalized.append(
+            TextChunk(
+                chapter_index=unit.chapter_index,
+                chapter_title=unit.chapter_title,
+                chapter_slug=unit.chapter_slug,
+                chunk_index=unit.chunk_index,
+                text=text,
+                source_kind=unit.source_kind,
+                instruct=unit.instruct,
+            )
+        )
+    # Re-number after dropping empties so chunk_index stays dense per chapter.
+    by_chapter: dict[int, int] = {}
+    renumbered: list[TextChunk] = []
+    for unit in normalized:
+        index = by_chapter.get(unit.chapter_index, 0)
+        by_chapter[unit.chapter_index] = index + 1
+        renumbered.append(
+            TextChunk(
+                chapter_index=unit.chapter_index,
+                chapter_title=unit.chapter_title,
+                chapter_slug=unit.chapter_slug,
+                chunk_index=index,
+                text=unit.text,
+                source_kind=unit.source_kind,
+                instruct=unit.instruct,
+            )
+        )
+    return renumbered

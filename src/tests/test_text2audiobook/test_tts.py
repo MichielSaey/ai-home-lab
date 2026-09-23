@@ -687,3 +687,24 @@ def test_is_cuda_oom_public_alias() -> None:
     assert is_cuda_oom is _is_cuda_oom
     assert is_cuda_oom(RuntimeError("CUDA out of memory"))
     assert not is_cuda_oom(RuntimeError("something else"))
+
+
+def test_synthesize_batch_normalizes_newlines(tmp_path: Path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeModel:
+        def generate_custom_voice(self, **kwargs):
+            captured.update(kwargs)
+            n = len(kwargs["text"])
+            return [np.zeros(100, dtype=np.float32) for _ in range(n)], 24000
+
+    paths = [tmp_path / "a.wav", tmp_path / "b.wav"]
+    synthesize_batch_to_wavs(
+        FakeModel(),
+        [("Hello.\n\nWorld.", paths[0]), ("One.\nTwo.", paths[1])],
+        voice="Serena",
+        language="English",
+        model_id="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    )
+    assert captured["text"] == ["Hello. World.", "One. Two."]
+    assert all(path.is_file() for path in paths)

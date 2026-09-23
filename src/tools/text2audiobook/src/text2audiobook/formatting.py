@@ -276,6 +276,16 @@ _CITE_SUBJECT_PRONOUNS = frozenset(
 
 _WHITESPACE_RE = re.compile(r"[ \t]{2,}")
 _BLANK_LINES_RE = re.compile(r"\n{3,}")
+_SPEAK_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_speak_text(text: str) -> str:
+    """Collapse newlines/tabs/runs of space to single spaces for TTS input.
+
+    Qwen3-TTS can vocalize invisible whitespace as a stray syllable at block
+    boundaries; paragraph breaks belong in format stems, not in generate_*.
+    """
+    return _SPEAK_WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _two_digit_words(value: int, *, hyphen: bool = True) -> str:

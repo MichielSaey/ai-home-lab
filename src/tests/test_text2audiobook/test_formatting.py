@@ -546,3 +546,11 @@ def test_markdown_figure_uses_alt_text() -> None:
     cleaned = format_for_tts("Look ![Growth chart](chart.png) here.")
     assert "See the figure Growth chart in this chapter of the ebook." in cleaned
     assert "chart.png" not in cleaned
+
+
+def test_normalize_speak_text_collapses_newlines() -> None:
+    from text2audiobook.formatting import normalize_speak_text
+
+    assert normalize_speak_text("A.\n\nB.\t C.") == "A. B. C."
+    assert normalize_speak_text("  padded  \n") == "padded"
+    assert normalize_speak_text("") == ""

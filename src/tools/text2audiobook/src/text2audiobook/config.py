@@ -439,3 +439,8 @@ def resolve_book_config(base: AppConfig, slug: str) -> AppConfig:
 def with_speak_footnote_cues(config: AppConfig, enabled: bool) -> AppConfig:
     """Return a copy with output.speak_footnote_cues set."""
     return replace(config, output=replace(config.output, speak_footnote_cues=enabled))
+
+
+def with_x_vector_only(config: AppConfig, enabled: bool) -> AppConfig:
+    """Return a copy with tts.x_vector_only set (Base clone speaker-emb only)."""
+    return replace(config, tts=replace(config.tts, x_vector_only=enabled))
