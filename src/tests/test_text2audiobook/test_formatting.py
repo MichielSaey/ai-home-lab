@@ -513,7 +513,7 @@ def test_default_clean_prompt_covers_new_rules() -> None:
     assert cfg.tts.ref_audio is not None
     assert cfg.tts.ref_audio.endswith("ref_clone.wav")
     assert cfg.tts.ref_text and "Homer" in cfg.tts.ref_text
-    assert cfg.tts.x_vector_only is False
+    assert cfg.tts.x_vector_only is True
     assert cfg.llm.direction is True
     assert "{text}" in cfg.llm.direction_prompt
     assert cfg.llm.direction_max_new_tokens == 128

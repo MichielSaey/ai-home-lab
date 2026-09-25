@@ -122,7 +122,8 @@ class TtsConfig:
     device: str = "auto"
     ref_audio: str | None = None
     ref_text: str | None = None
-    x_vector_only: bool = False
+    # Default True: Base ICL (ref_text) often prepends a stray "and"/"eNd" at chunk onsets.
+    x_vector_only: bool = True
     instruct: str | None = DEFAULT_TTS_INSTRUCT
     batch_max_chars: int = 0
     # VRAM budget for n * (max(lens) + batch_vram_overhead); calibrated via --calibrate-tts-batch.

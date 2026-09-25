@@ -177,7 +177,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert cfg.tts.lang == "English"
     assert cfg.tts.ref_audio is None
     assert cfg.tts.ref_text is None
-    assert cfg.tts.x_vector_only is False
+    assert cfg.tts.x_vector_only is True
     assert cfg.tts.instruct is not None
     assert "warm" in cfg.tts.instruct.lower()
     assert "native" in cfg.tts.instruct.lower()
@@ -186,7 +186,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert cfg.tts.batch_max_pad_chars == 2200
     assert cfg.tts.batch_vram_overhead == 0
     assert cfg.tts.batch_max_items == 16
-    assert cfg.tts.reload_every_n_units == 100
+    assert cfg.tts.reload_every_n_units == 50
     assert cfg.chunking.speak_target_chars == 800
     assert cfg.chunking.speak_max_chars == 1200
     assert cfg.llm.direction is True
@@ -259,9 +259,9 @@ def test_with_x_vector_only() -> None:
     from text2audiobook.config import load_config, with_x_vector_only
 
     cfg = load_config()
-    assert cfg.tts.x_vector_only is False
-    enabled = with_x_vector_only(cfg, True)
-    assert enabled.tts.x_vector_only is True
-    assert cfg.tts.x_vector_only is False
-    disabled = with_x_vector_only(enabled, False)
+    assert cfg.tts.x_vector_only is True
+    disabled = with_x_vector_only(cfg, False)
     assert disabled.tts.x_vector_only is False
+    assert cfg.tts.x_vector_only is True
+    enabled = with_x_vector_only(disabled, True)
+    assert enabled.tts.x_vector_only is True

@@ -51,4 +51,4 @@ def test_x_vector_only_cli_flags(monkeypatch, tmp_path) -> None:
     assert captured.get("x_vector_only") is None
 
     # Sanity: empty config still loads.
-    assert load_config(config_path).tts.x_vector_only is False
+    assert load_config(config_path).tts.x_vector_only is True

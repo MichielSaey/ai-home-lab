@@ -22,4 +22,4 @@ Drop `.epub`, `.md`, `.html`, or `.url` files into `data/input/`. A `.url` file 
 Qwen3-TTS Base ICL (`x_vector_only: false`) can prepend a short “and”/“eNd” syllable at chunk onsets (chat-template `<|im_end|>` / ref-tail bleed). Mitigations:
 
 - Speak text is whitespace-normalized (newlines → spaces) before synthesis.
-- Prefer `tts.x_vector_only: true` in the book overlay, or CLI `--x-vector-only` for a speak re-run (`--icl` restores full ICL).
+- Default is `tts.x_vector_only: true` (speaker embedding only). Use CLI `--icl` when you want full ICL ref_text conditioning; `--x-vector-only` forces the safe default.
