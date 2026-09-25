@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from text2audiobook.io import Chapter
 
-FORMATTER_VERSION = "8"
+FORMATTER_VERSION = "9"
 
 _MONTHS = (
     "January",
@@ -104,7 +104,6 @@ _REFERENCES_HEADING_RE = re.compile(
         | literature\s+cited
         | notes\s+and\s+references
         | notes\s+and\s+bibliography
-        | endnotes
         | citations
         | further\s+reading
         | sources
@@ -190,7 +189,7 @@ _NOTES_APPARATUS_HEADING_RE = re.compile(
     ^
     (?:\#{1,6}\s+)?
     [\*"'_]*
-    (?:notes|footnotes)
+    (?:notes|footnotes|endnotes)
     [\*"'_]*
     \s*[:.]?
     \s*
@@ -225,6 +224,17 @@ _ABBREVIATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\be\.i\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "in other words"),
     (re.compile(r"\bi\.e\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "in other words"),
     (re.compile(r"\be\.g\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "for example"),
+    (re.compile(r"\betc\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "et cetera"),
+    (re.compile(r"\bcf\.(?=\s|,|:|;|\)|$)", re.IGNORECASE), "compare"),
+    # pp. before p. so the shorter form cannot eat the first letter.
+    (re.compile(r"(?<![A-Za-z])pp\.\s*(?=\d)"), "pages "),
+    (re.compile(r"(?<![A-Za-z])p\.\s*(?=\d)"), "page "),
+)
+
+# Hint the format model may see. Never pass it through to speech.
+BIBLIOGRAPHIC_HINT_LINE = "This note looks bibliographic."
+_BIBLIOGRAPHIC_HINT_RE = re.compile(
+    rf"(?m)^{re.escape(BIBLIOGRAPHIC_HINT_LINE)}\s*\n?"
 )
 
 # §0.21 / §3.741 → "section 0.21" so TTS does not say "section sign".
@@ -865,6 +875,7 @@ def format_for_tts(
     speak_footnote_cues: bool = False,
 ) -> str:
     """Rewrite a chunk so TTS hears spoken forms instead of print conventions."""
+    text = _BIBLIOGRAPHIC_HINT_RE.sub("", text)
     text = strip_reference_sections(text)
     text = scrub_citations_for_tts(text, speak_footnote_cues=speak_footnote_cues)
     text = replace_tables_and_figures(

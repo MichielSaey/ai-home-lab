@@ -8,7 +8,6 @@ from pathlib import Path
 from urllib.parse import unquote
 
 import ebooklib
-from bs4 import BeautifulSoup
 from ebooklib import epub
 
 from text2audiobook.io import (
@@ -18,20 +17,12 @@ from text2audiobook.io import (
     assign_chapter_slugs,
     finalize_metadata,
 )
+from text2audiobook.structure import parse_html_blocks, render_blocks
 
 
 def html_to_text(content: bytes | str) -> str:
-    # EPUB chapter files are XHTML (XML), not plain HTML.
-    try:
-        soup = BeautifulSoup(content, features="xml")
-    except Exception:
-        soup = BeautifulSoup(content, "lxml")
-
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    text = soup.get_text(separator="\n")
-    lines = [line.strip() for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)
+    """Flat text for inspection. Structure lives on the chapter blocks."""
+    return render_blocks(parse_html_blocks(content))
 
 
 def _normalize_href(href: str) -> str:
@@ -79,13 +70,15 @@ def extract_chapters(epub_book: epub.EpubBook) -> list[Chapter]:
     """All readable document sections, titled from the TOC when possible."""
     toc_titles = toc_title_map(epub_book)
     sections: list[tuple[str, str]] = []
+    block_lists: list = []
     chapter_idx = 0
 
     for item in epub_book.get_items():
         if item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
 
-        text = html_to_text(item.get_content())
+        blocks = parse_html_blocks(item.get_content())
+        text = render_blocks(blocks)
         if len(text.split()) < MIN_SECTION_WORDS:
             continue
 
@@ -96,12 +89,16 @@ def extract_chapters(epub_book: epub.EpubBook) -> list[Chapter]:
             title = stem.title() if stem else f"Chapter {chapter_idx + 1}"
 
         sections.append((title, text))
+        block_lists.append(blocks)
         chapter_idx += 1
 
     if not sections:
         raise ValueError("No readable chapters found in EPUB")
 
-    return assign_chapter_slugs(sections)
+    chapters = assign_chapter_slugs(sections)
+    for chapter, blocks in zip(chapters, block_lists):
+        chapter.blocks = blocks
+    return chapters
 
 
 def metadata_from_epub(

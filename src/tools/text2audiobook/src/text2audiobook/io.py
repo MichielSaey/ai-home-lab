@@ -37,11 +37,59 @@ class BookMetadata:
 
 
 @dataclass
+class Block:
+    """One structural unit inside a chapter.
+
+    ``note_refs`` on a paragraph lists footnote block ids. A footnote block
+    points back through ``parent_id`` and keeps its printed ``note_number``.
+    """
+
+    id: str
+    kind: str
+    text: str
+    note_refs: list[str] | None = None
+    note_number: str | None = None
+    parent_id: str | None = None
+    bibliographic_hint: bool = False
+
+    def __post_init__(self) -> None:
+        if self.note_refs is None:
+            self.note_refs = []
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "text": self.text,
+            "note_refs": list(self.note_refs or []),
+            "note_number": self.note_number,
+            "parent_id": self.parent_id,
+            "bibliographic_hint": self.bibliographic_hint,
+        }
+
+
+def block_from_json(payload: dict[str, object]) -> Block:
+    refs = payload.get("note_refs") or []
+    return Block(
+        id=str(payload["id"]),
+        kind=str(payload["kind"]),
+        text=str(payload.get("text") or ""),
+        note_refs=[str(item) for item in refs] if isinstance(refs, list) else [],
+        note_number=(
+            None if payload.get("note_number") is None else str(payload["note_number"])
+        ),
+        parent_id=None if payload.get("parent_id") is None else str(payload["parent_id"]),
+        bibliographic_hint=bool(payload.get("bibliographic_hint")),
+    )
+
+
+@dataclass
 class Chapter:
     index: int
     title: str
     text: str
     slug: str
+    blocks: list[Block] | None = None
 
 
 def finalize_metadata(

@@ -15,33 +15,24 @@ BOOKS_CONFIG_DIRNAME = "config.books"
 EXPERIMENT_CONFIG_PATH = _TOOL_ROOT.parent / "epub-to-audiobook/config.json"
 
 DEFAULT_CLEAN_PROMPT = (
-    "Clean this text for text-to-speech narration. Return only the cleaned text, "
-    "no commentary.\n\n"
+    "Rewrite the passage so it can be read aloud. Return only the spoken text.\n\n"
+    "The passage is one paragraph, then any notes that belong to it. "
+    "Each note starts with a line \"Footnote N.\" "
+    "A line that says \"This note looks bibliographic.\" is a hint for you, not speech. "
+    "Never say that line.\n\n"
     "Rules:\n"
-    "- Remove URLs.\n"
-    "- Spell dates like 03/09/2026 as \"the third of September, twenty twenty-six\".\n"
-    "- Expand i.e. and e.i. to \"in other words\", and e.g. to \"for example\".\n"
-    "- Delete bibliography, references, works cited, and endnotes sections entirely.\n"
-    "- Citations for listening: never read page numbers, translators, publishers, "
-    "cities, or stacked \"see also\" lists. When a source is woven into the sentence, "
-    "keep one short spoken credit (author and work title only). Example: "
-    "\"(M. Eliade, Rites and Symbols of Initiation, tr. W.R. Trask "
-    "[New York: Harper Colophon, 1958], 53–58; see also C. Kerslake, …)\" becomes "
-    "\"(Eliade in Rites and Symbols of Initiation)\". "
-    "Example: \"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The "
-    "Accelerationist Reader, Urbanomic, p. 342.\" becomes "
-    "\"Wrote Mark Fisher in twenty twelve.\". "
-    "If a parenthesis or clause is only a citation dump and not needed for the "
-    "spoken argument, delete it.\n"
-    "- Remove editorial ellipses in brackets such as [...] or […].\n"
-    "- Do not read tables or figures cell by cell. Replace them with a short "
-    "reference to the ebook or the original page.\n"
-    "- Speak section marks: §0.21 becomes \"section 0.21\".\n"
-    "- Title lists in parentheses such as (Cyberpunk, Elysium) become "
-    "\"for example Cyberpunk, Elysium\".\n"
-    "- Drop leading # from tags (#Accelerate → Accelerate); expand & to and "
-    "and % to percent.\n"
-    "- Improve phonetic readability otherwise.\n\n"
+    "- Do not summarize, explain, or replace the author's terms with simpler ones.\n"
+    "- Do not invent citations, facts, or what a figure shows.\n"
+    "- Bibliographic notes: speak a short credit, author and title, and the page "
+    "only when the page number matters. Do not speak the city, publisher, translator, or ISBN.\n"
+    "- Substantive notes: keep the argument. Begin them with \"Footnote.\" "
+    "A short note may follow its sentence. A long note follows the paragraph. "
+    "Keep several notes in their original order.\n"
+    "- Mixed notes: shorten the citation and keep the argument.\n"
+    "- Speak headings, lists, symbols, and simple math. "
+    "If an equation is too dense to read safely, use the least assumptive wording.\n"
+    "- Do not speak page numbers, running headers, or the layout of a table or figure.\n"
+    "- No JSON, Markdown, labels, or commentary.\n\n"
     "Text:\n{text}"
 )
 
@@ -107,7 +98,7 @@ class LlmConfig:
     device: str = "cuda"
     cleanup: bool = True
     direction: bool = True
-    cleanup_batch_size: int = 1
+    cleanup_batch_size: int = 4
     max_new_tokens: int = 2048
     direction_max_new_tokens: int = 128
     clean_prompt: str = DEFAULT_CLEAN_PROMPT

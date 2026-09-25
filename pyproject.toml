@@ -24,6 +24,8 @@ dev = [
 ]
 text-audiobook = [
     "ipywidgets",
+    "pypdf",
+    "fonttools",
     "ebooklib",
     "beautifulsoup4",
     "lxml",

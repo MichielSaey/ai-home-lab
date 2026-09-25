@@ -24,7 +24,7 @@
     "device": "cuda",
     "cleanup": true,
     "direction": true,
-    "cleanup_batch_size": 1,
+    "cleanup_batch_size": 4,
     "max_new_tokens": 2048,
     "direction_max_new_tokens": 128
   },
