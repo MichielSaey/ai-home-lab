@@ -66,6 +66,73 @@ def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
     return BookStems(staging)
 
 
+def test_extract_skips_llm_load_when_decisions_cache_hits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from text2audiobook.catalog import (
+        ChapterDecision,
+        OpeningAnalysis,
+        save_decisions_cache,
+    )
+    from text2audiobook.config import SelectionConfig
+
+    source = tmp_path / "input" / "sample.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        f"# Intro\n\n{_BODY}\n\n# Body\n\n{_BODY}\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "keep_wav": True, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    from text2audiobook.io import parse_source
+    from text2audiobook.stems import BookStems
+
+    metadata, chapters = parse_source(
+        source,
+        staging_root=config.paths.staging_dir,
+        output_root=config.paths.output_dir,
+    )
+    save_decisions_cache(
+        metadata.staging_dir,
+        book_title=metadata.title,
+        chapter_count=len(chapters),
+        selection=SelectionConfig(),
+        analyses=[
+            OpeningAnalysis(ch.index, "chapter", True, "keep") for ch in chapters
+        ],
+        decisions=[ChapterDecision(ch.index, True, "keep") for ch in chapters],
+    )
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract",),
+        tts_device="cpu",
+    )
+    stems = BookStems(metadata.staging_dir)
+    assert stems.chapters_json.is_file()
+
+
 def test_canonical_stages_orders_and_rejects() -> None:
     assert canonical_stages(["speak", "extract"]) == ("extract", "speak")
     assert canonical_stages(["format", "clean"]) == ("clean", "format")
@@ -674,7 +741,12 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
     config = replace(
         config,
         llm=replace(config.llm, cleanup=False, direction=True),
-        tts=replace(config.tts, instruct="GLOBAL BASELINE INSTRUCT"),
+        # Direction only runs when the TTS model accepts instruct (not Base / 0.6B CV).
+        tts=replace(
+            config.tts,
+            model_id="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+            instruct="GLOBAL BASELINE INSTRUCT",
+        ),
     )
 
     def fake_clean(llm, chunks, llm_config, **_kwargs):
@@ -754,6 +826,57 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
     assert synth_instructs == [
         "GLOBAL BASELINE INSTRUCT CHUNK LOCAL: calm steady exposition"
     ]
+
+
+def test_direction_auto_skipped_when_tts_lacks_instruct(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Base / 0.6B CustomVoice ignore instruct — do not burn a direction LLM pass."""
+    source, config = _write_book(tmp_path)
+    config = replace(
+        config,
+        llm=replace(config.llm, cleanup=False, direction=True),
+        tts=replace(
+            config.tts,
+            model_id="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+            voice="Serena",
+            instruct="GLOBAL BASELINE INSTRUCT",
+        ),
+    )
+
+    def boom_direction(*_a, **_k):
+        raise AssertionError("direction pass should be skipped for 0.6B TTS")
+
+    monkeypatch.setattr("text2audiobook.pipeline.load_llm", _forbid_llm)
+    monkeypatch.setattr("text2audiobook.pipeline.apply_direction_pass", boom_direction)
+    monkeypatch.setattr("text2audiobook.pipeline.load_tts", lambda *_a, **_k: object())
+    monkeypatch.setattr("text2audiobook.pipeline.unload_tts", lambda *_a, **_k: None)
+
+    def fake_synth(_model, items, **_kwargs) -> None:
+        for _text, wav_path in items:
+            wav_path.parent.mkdir(parents=True, exist_ok=True)
+            wav_path.write_bytes(b"RIFF")
+
+    monkeypatch.setattr("text2audiobook.pipeline.synthesize_batch_to_wavs", fake_synth)
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.build_m4b",
+        lambda output_path, *_a, **_k: Path(output_path).write_bytes(b"m4b"),
+    )
+
+    tracker = RunTracker(config.paths.runs_dir, config.to_dict())
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("extract", "clean", "format", "speak"),
+        tts_device="cpu",
+    )
+    stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
+    rows = load_jsonl(stems.format_chunks_jsonl)
+    assert rows
+    assert rows[0].get("instruct") in (None, "")
 
 
 def test_direction_disabled_speak_falls_back_to_global_instruct(

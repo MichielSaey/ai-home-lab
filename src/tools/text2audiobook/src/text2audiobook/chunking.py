@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from text2audiobook.formatting import BIBLIOGRAPHIC_HINT_LINE, FOOTNOTE_SPOKEN_MARKER
 from text2audiobook.io import Chapter
 from text2audiobook.formatting import normalize_speak_text
 
@@ -276,6 +277,105 @@ def build_chunks(
     return capped
 
 
+def _render_note(note: object) -> str:
+    text = str(getattr(note, "text", "") or "").strip()
+    lines: list[str] = []
+    if FOOTNOTE_SPOKEN_MARKER not in text:
+        number = getattr(note, "note_number", None)
+        lines.append(f"Footnote {number}." if number else "Footnote.")
+    if getattr(note, "bibliographic_hint", False):
+        lines.append(BIBLIOGRAPHIC_HINT_LINE)
+    if text:
+        lines.append(text)
+    return "\n".join(lines)
+
+
+def _window_pieces(body: str, notes: list, words_per_chunk: int) -> list[str]:
+    """Keep each note on the last piece of its paragraph, even if that runs long."""
+    note_text = "\n\n".join(_render_note(note) for note in notes).strip()
+    body = body.strip()
+    if not body and note_text:
+        return [note_text]
+    if not note_text:
+        if len(body.split()) > words_per_chunk:
+            return chunk_sentences(body, words_per_chunk)
+        return [body] if body else []
+    pieces = (
+        chunk_sentences(body, words_per_chunk)
+        if len(body.split()) > words_per_chunk
+        else [body]
+    )
+    if not pieces:
+        return [note_text]
+    pieces[-1] = f"{pieces[-1].rstrip()}\n\n{note_text}"
+    return pieces
+
+
+def _renumber_chunks(chunks: list[TextChunk]) -> list[TextChunk]:
+    by_chapter: dict[int, int] = {}
+    renumbered: list[TextChunk] = []
+    for unit in chunks:
+        index = by_chapter.get(unit.chapter_index, 0)
+        by_chapter[unit.chapter_index] = index + 1
+        renumbered.append(
+            TextChunk(
+                chapter_index=unit.chapter_index,
+                chapter_title=unit.chapter_title,
+                chapter_slug=unit.chapter_slug,
+                chunk_index=index,
+                text=unit.text,
+                source_kind=unit.source_kind,
+                instruct=unit.instruct,
+            )
+        )
+    return renumbered
+
+
+def _linked_format_windows(
+    sections: list,
+    words_per_chunk: int,
+    *,
+    source_kind: str,
+) -> list[TextChunk]:
+    """One window per paragraph plus the footnotes that cite it."""
+    notes_for: dict[str, list] = {}
+    for section in sections:
+        parent = getattr(section, "parent_id", None)
+        if getattr(section, "kind", "") == "footnote" and parent:
+            notes_for.setdefault(parent, []).append(section)
+
+    body_ids = {
+        section.block_id
+        for section in sections
+        if getattr(section, "kind", "") != "footnote" and getattr(section, "block_id", None)
+    }
+    windows: list[TextChunk] = []
+    for section in sections:
+        parent = getattr(section, "parent_id", None)
+        if getattr(section, "kind", "") == "footnote" and parent in body_ids:
+            continue
+        if getattr(section, "kind", "") == "footnote":
+            pieces = _window_pieces("", [section], words_per_chunk)
+        else:
+            block_id = getattr(section, "block_id", None)
+            notes = notes_for.get(block_id, []) if block_id else []
+            pieces = _window_pieces(section.text, notes, words_per_chunk)
+        for piece in pieces:
+            if not piece.strip():
+                continue
+            windows.append(
+                TextChunk(
+                    chapter_index=section.chapter_index,
+                    chapter_title=section.chapter_title,
+                    chapter_slug=section.chapter_slug,
+                    chunk_index=0,
+                    text=piece,
+                    source_kind=source_kind,
+                )
+            )
+    return _renumber_chunks(windows)
+
+
 def build_chunks_from_sections(
     sections: list,
     words_per_chunk: int,
@@ -283,7 +383,27 @@ def build_chunks_from_sections(
     max_chunks_per_chapter: int | None = None,
     source_kind: str = "ebook",
 ) -> list[TextChunk]:
-    """Further-split clean sections by word budget without rematching chapters."""
+    """Further-split clean sections by word budget without rematching chapters.
+
+    When footnotes record ``parent_id``, a window is the paragraph plus those
+    notes. The note is not split onto its own chunk.
+    """
+    if any(getattr(section, "parent_id", None) for section in sections):
+        chunks = _linked_format_windows(
+            sections, words_per_chunk, source_kind=source_kind
+        )
+        if max_chunks_per_chapter is None:
+            return chunks
+        capped: list[TextChunk] = []
+        counts: dict[int, int] = {}
+        for chunk in chunks:
+            used = counts.get(chunk.chapter_index, 0)
+            if used >= max_chunks_per_chapter:
+                continue
+            counts[chunk.chapter_index] = used + 1
+            capped.append(chunk)
+        return capped
+
     seeds = [
         TextChunk(
             chapter_index=section.chapter_index,

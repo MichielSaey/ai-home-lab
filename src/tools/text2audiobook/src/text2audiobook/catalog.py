@@ -471,6 +471,7 @@ def select_chapters(
     """Notebook steps 6+7: opening analysis, then the final keep/skip catalog.
 
     A manual selection.keep_chapter_indices override skips the LLM entirely.
+    A matching decisions.json cache also skips the LLM (model/tokenizer may be None).
     """
     def log_step(step: str, *, chapter_title: str | None = None) -> None:
         if progress is not None:
@@ -492,9 +493,8 @@ def select_chapters(
         decision_map: dict[int, ChapterDecision] = {}
         log_step(f"manual selection: {len(chapters)} section(s)")
     else:
-        if model is None or tokenizer is None:
-            raise RuntimeError("LLM model and tokenizer are required for chapter selection")
-
+        # Prefer the decisions cache before requiring a loaded LLM so extract can
+        # skip GPU load when staging already has a matching classify result.
         cached = (
             load_decisions_cache(
                 staging_dir,
@@ -509,6 +509,10 @@ def select_chapters(
             analyses, decisions = cached
             log_step(f"classify cache hit ({len(analyses)} sections)")
         else:
+            if model is None or tokenizer is None:
+                raise RuntimeError(
+                    "LLM model and tokenizer are required for chapter selection"
+                )
             llm_chapters = [ch for ch in all_chapters if ch.index not in obvious_skip]
             log_step("classify openings")
             analyses = analyze_chapter_openings_with_llm(

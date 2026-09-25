@@ -1,0 +1,51 @@
+{
+  "paths": {
+    "input_dir": "data/input",
+    "staging_dir": "data/staging",
+    "output_dir": "data/output",
+    "runs_dir": "data/runs"
+  },
+  "chunking": {
+    "format_words_per_chunk": 700,
+    "speak_target_phonemes": 160,
+    "speak_max_phonemes": 400,
+    "max_chunks_per_chapter": null
+  },
+  "selection": {
+    "keep_chapter_indices": null,
+    "max_chapters": null,
+    "include_intro": true,
+    "include_appendix": false,
+    "opening_words": 250,
+    "opening_batch_size": 4
+  },
+  "llm": {
+    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "device": "cuda",
+    "cleanup": true,
+    "cleanup_batch_size": 1,
+    "max_new_tokens": 2048,
+    "clean_prompt": "Clean this text for text-to-speech narration. Return only the cleaned text, no commentary.\n\nRules:\n- Remove URLs.\n- Spell dates like 03/09/2026 as \"the third of September, twenty twenty-six\".\n- Expand i.e. and e.i. to \"in other words\", and e.g. to \"for example\".\n- Delete bibliography, references, works cited, and endnotes sections entirely.\n- Simplify inline citations. Example: \"Mark Fisher (2012). Terminator vs Avatar in #Accelerate: The Accelerationist Reader, Urbanomic, p. 342.\" becomes \"Wrote Mark Fisher in twenty twelve.\".\n- Do not read tables or figures cell by cell. Replace them with a short reference to the ebook or the original page.\n- Speak section marks: \u00a70.21 becomes \"section 0.21\".\n- Title lists in parentheses such as (Cyberpunk, Elysium) become \"for example Cyberpunk, Elysium\".\n- Drop leading # from tags (#Accelerate \u2192 Accelerate); expand & to and and % to percent.\n- Improve phonetic readability otherwise.\n\nText:\n{text}"
+  },
+  "tts": {
+    "lang": "a",
+    "voice": "af_bella",
+    "speed": 0.9,
+    "device": "auto"
+  },
+  "output": {
+    "chapter_mp3": false,
+    "mp3_bitrate": "128k",
+    "m4b_bitrate": "128k",
+    "keep_wav": false,
+    "skip_existing": true,
+    "chunk_silence_ms": 300,
+    "chapter_silence_ms": 1000,
+    "loudnorm": true
+  },
+  "pipeline": {
+    "concurrent_models": false,
+    "ffmpeg_workers": 2,
+    "queue_size": 32
+  }
+}

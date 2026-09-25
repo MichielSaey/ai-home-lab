@@ -240,7 +240,7 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     prepared = prepare_chapters_for_tts(chapters, speak_footnote_cues=True)
     assert len(prepared) == 1
     text = prepared[0].text
-    assert "Harris" not in text
+    assert "Harris" in text
     assert "Footnote." in text
     assert "End of footnote." in text
     assert text.index("Cuddles have no interiority.") < text.index("Footnote.")
@@ -252,6 +252,7 @@ def test_prepare_chapters_relocates_footnotes_before_chunking() -> None:
     assert "Footnote." not in uncued
     assert "End of footnote." not in uncued
     assert "Discursive note about eggmen" in uncued
+    assert "Harris" in uncued
 
 
 def test_cleanup_accepts_heavy_citation_cuts() -> None:
@@ -385,14 +386,18 @@ def test_same_sentence_page_mention_is_not_a_citation() -> None:
     source = (
         "Mark Fisher (2012). He later appeared in The Guardian and cited p. 12 for the chart."
     )
-    assert format_for_tts(source) == source
+    assert format_for_tts(source) == (
+        "Mark Fisher (2012). He later appeared in The Guardian and cited page 12 for the chart."
+    )
 
 
 def test_page_mention_in_a_later_sentence_is_not_a_citation() -> None:
     source = (
         "Mark Fisher (2012). He later appeared in The Guardian. See p. 12 for the chart."
     )
-    assert format_for_tts(source) == source
+    assert format_for_tts(source) == (
+        "Mark Fisher (2012). He later appeared in The Guardian. See page 12 for the chart."
+    )
 
 
 def test_narrative_in_the_is_not_treated_as_a_citation() -> None:
@@ -497,13 +502,13 @@ def test_hashtag_ampersand_percent_spoken() -> None:
 
 
 def test_default_clean_prompt_covers_new_rules() -> None:
-    assert "the third of September, twenty twenty-six" in DEFAULT_CLEAN_PROMPT
-    assert "in other words" in DEFAULT_CLEAN_PROMPT
-    assert "Wrote Mark Fisher in twenty twelve." in DEFAULT_CLEAN_PROMPT
+    assert "Footnote." in DEFAULT_CLEAN_PROMPT
+    assert "This note looks bibliographic." in DEFAULT_CLEAN_PROMPT
+    assert "Do not summarize" in DEFAULT_CLEAN_PROMPT
     assert "page numbers" in DEFAULT_CLEAN_PROMPT
-    assert "[...]" in DEFAULT_CLEAN_PROMPT
+    assert "Delete bibliography" not in DEFAULT_CLEAN_PROMPT
     cfg = load_config()
-    assert "in other words" in cfg.llm.clean_prompt
+    assert "Footnote." in cfg.llm.clean_prompt
     assert cfg.tts.voice == "cloned"
     assert cfg.tts.lang == "English"
     assert cfg.tts.instruct

@@ -16,7 +16,7 @@ from typing import Any
 
 from text2audiobook import formats  # noqa: F401 — register built-in readers
 from text2audiobook.audio import build_m4b, encode_chapter_mp3
-from text2audiobook.catalog import select_chapters
+from text2audiobook.catalog import load_decisions_cache, select_chapters
 from text2audiobook.cleanup import CLEANER_VERSION, CleanSection, clean_chapters
 from text2audiobook.chunking import (
     TextChunk,
@@ -486,10 +486,19 @@ def process_source(
             unload_tts(own_tts)
 
 
+def _direction_enabled(config: AppConfig) -> bool:
+    """True when config asks for direction and the active TTS model can use it.
+
+    Base and 0.6B CustomVoice ignore instruct at generate time, so running the
+    direction LLM pass would only burn GPU time.
+    """
+    return bool(config.llm.direction) and supports_instruct(config.tts.model_id)
+
+
 def _run_needs_llm(config: AppConfig, stages: tuple[str, ...]) -> bool:
     if "extract" in stages and config.selection.keep_chapter_indices is None:
         return True
-    return "format" in stages and (config.llm.cleanup or config.llm.direction)
+    return "format" in stages and (config.llm.cleanup or _direction_enabled(config))
 
 
 def _resolve_tts(
@@ -611,6 +620,7 @@ def _clean_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str
 
 
 def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str) -> dict[str, Any]:
+    direction = _direction_enabled(config)
     return {
         "version": 2,
         "clean_hash": clean_hash,
@@ -618,7 +628,7 @@ def _format_fingerprint(config: AppConfig, *, clean_hash: str, source_kind: str)
         "source_kind": source_kind,
         "llm_model_id": config.llm.model_id,
         "cleanup": config.llm.cleanup,
-        "direction": config.llm.direction,
+        "direction": direction,
         "max_new_tokens": config.llm.max_new_tokens,
         "direction_max_new_tokens": config.llm.direction_max_new_tokens,
         "cleanup_batch_size": config.llm.cleanup_batch_size,
@@ -775,7 +785,19 @@ def _run_extract(
     with tracker.stage(record, "classify"):
         active = None
         if config.selection.keep_chapter_indices is None:
-            active = ensure_llm()
+            cached = load_decisions_cache(
+                metadata.staging_dir,
+                book_title=metadata.title,
+                chapter_count=len(all_chapters),
+                selection=config.selection,
+            )
+            if cached is None:
+                active = ensure_llm()
+            else:
+                logger.info(
+                    "Decisions cache hit — skipping LLM load for classify (%d section(s))",
+                    len(all_chapters),
+                )
         chapters, _decisions = select_chapters(
             active.model if active is not None else None,
             active.tokenizer if active is not None else None,
@@ -997,7 +1019,13 @@ def _run_format(
         if cache:
             logger.info("Resuming: %d of %d window(s) already formatted", len(cache), len(chunks))
 
-    need_llm = config.llm.cleanup or config.llm.direction
+    run_direction = _direction_enabled(config)
+    if config.llm.direction and not run_direction:
+        logger.info(
+            "Skipping direction pass — TTS model %s does not support instruct",
+            config.tts.model_id,
+        )
+    need_llm = config.llm.cleanup or run_direction
     active_llm = ensure_llm() if need_llm else None
     cleaned_list = list(
         _timed_persist_iter(
@@ -1015,7 +1043,7 @@ def _run_format(
             source_kind=source_kind,
         )
     )
-    if config.llm.direction:
+    if run_direction:
         cleaned_list = apply_direction_pass(
             active_llm,
             cleaned_list,

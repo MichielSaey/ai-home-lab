@@ -1,4 +1,4 @@
-"""Deterministic clean stage: split body/footnotes, then scrub citations and print junk.
+"""Deterministic clean stage: link paragraphs to footnotes, then scrub print junk.
 
 Runs after extract and before LLM format. Artifacts live under ``clean/`` so the
 split and scrub can be inspected before any model rewrite.
@@ -10,32 +10,25 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from text2audiobook.chunking import split_sentences
 from text2audiobook.formatting import (
     FOOTNOTE_SPOKEN_MARKER,
-    _FOOTNOTE_CALLOUT_LINE_RE,
-    _consume_footnote,
-    _extract_notes_apparatus,
-    _note_numbers_from_spec,
-    _SEE_NOTE_NUM_RE,
+    _is_resume_heading,
     expand_abbreviations,
     expand_dates,
     expand_example_parentheticals,
     expand_section_marks,
     expand_symbols,
-    is_citation_only_note,
     is_references_heading,
     replace_tables_and_figures,
-    simplify_inline_citations,
-    strip_reference_sections,
+    visual_reference,
     _collapse_whitespace,
 )
-from text2audiobook.io import Chapter
+from text2audiobook.io import Block, Chapter
+from text2audiobook.structure import parse_plain_document
 
-CLEANER_VERSION = "3"
+CLEANER_VERSION = "4"
 FOOTNOTE_END_MARKER = "End of footnote."
 
-_FN_TOKEN_RE = re.compile(r"⟦FN:(\d+[a-z]?)⟧\.?")
 _URL_RE = re.compile(
     r"""
     <\s*https?://[^>\s]+>
@@ -55,6 +48,9 @@ class CleanSection:
     kind: str  # "body" | "footnote"
     text: str
     note_number: str | None = None
+    block_id: str | None = None
+    parent_id: str | None = None
+    bibliographic_hint: bool = False
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -64,6 +60,9 @@ class CleanSection:
             "section_index": self.section_index,
             "kind": self.kind,
             "note_number": self.note_number,
+            "block_id": self.block_id,
+            "parent_id": self.parent_id,
+            "bibliographic_hint": self.bibliographic_hint,
             "text": self.text,
             "text_hash": text_hash(self.text),
         }
@@ -101,7 +100,7 @@ def apply_deterministic_cleanup(
     text = replace_tables_and_figures(
         text, chapter_title=chapter_title, source_kind=source_kind
     )
-    text = simplify_inline_citations(text)
+    # Citation wording is a format-stage decision. Clean only scrubs print junk.
     text = expand_section_marks(text)
     text = expand_dates(text)
     text = expand_abbreviations(text)
@@ -121,57 +120,86 @@ def apply_deterministic_cleanup(
     return text
 
 
-def _attach_callout_tokens(body: str) -> str:
-    """Place footnote callouts as tokens at unit boundaries.
+def _sections_from_blocks(
+    chapter: Chapter,
+    blocks: list[Block],
+    *,
+    source_kind: str,
+    speak_footnote_cues: bool,
+) -> list[CleanSection]:
+    """Scrub blocks in order. Notes stay attached to the paragraph that cites them.
 
-    A callout on its own line ends the previous unit when that line already
-    finishes a sentence (``.!?``) **or** when the following line starts a new
-    unit (capital letter / non-lowercase continuation). Only glue the token
-    into the previous line when the next line clearly continues mid-sentence
-    (lowercase), e.g. ``superflatness,\\n38\\nand for…``.
+    Bibliographic notes are kept. ``bibliographic_hint`` records the guess so the
+    format stage can compress them without the clean stage deleting the argument.
     """
-    lines = body.splitlines()
-    lines_out: list[str] = []
-    sentence_end = re.compile(r'[.!?…]["\'\)\]]*\s*$')
-
-    def _next_content(index: int) -> str:
-        for later in lines[index + 1 :]:
-            if later.strip() and not _FOOTNOTE_CALLOUT_LINE_RE.match(later):
-                return later.strip()
-        return ""
-
-    for index, line in enumerate(lines):
-        if _FOOTNOTE_CALLOUT_LINE_RE.match(line):
-            token = f"⟦FN:{line.strip()}⟧"
-            prev = lines_out[-1] if lines_out else ""
-            nxt = _next_content(index)
-            continues = bool(nxt) and nxt[:1].islower()
-            if lines_out and continues and not sentence_end.search(prev):
-                lines_out[-1] = f"{prev.rstrip()} {token}"
-            else:
-                # Newline before a new unit (or after .!?) counts as sentence end.
-                lines_out.append(token)
+    skipping_refs = False
+    kept: list[Block] = []
+    for block in blocks:
+        if block.kind == "heading" and is_references_heading(block.text):
+            skipping_refs = True
             continue
-        lines_out.append(_SEE_NOTE_NUM_RE.sub(_see_note_to_tokens, line))
-    return "\n".join(lines_out)
+        if skipping_refs:
+            if block.kind == "heading" and _is_resume_heading(block.text):
+                skipping_refs = False
+            else:
+                continue
+        if block.kind in {"table", "figure"}:
+            text = block.text.strip() or visual_reference(
+                "figure" if block.kind == "figure" else "table",
+                title=None,
+                chapter_title=chapter.title,
+                source_kind=source_kind,
+            )
+            kept.append(
+                Block(
+                    id=block.id,
+                    kind="paragraph",
+                    text=text,
+                    note_refs=list(block.note_refs or []),
+                    parent_id=block.parent_id,
+                )
+            )
+            continue
+        kept.append(block)
 
-
-def _see_note_to_tokens(match: re.Match[str]) -> str:
-    nums = _note_numbers_from_spec(match.group("nums"))
-    if not nums:
-        return ""
-    return " " + " ".join(f"⟦FN:{num}⟧" for num in nums) + " "
-
-
-def _sentence_note_numbers(sentence: str) -> list[str]:
-    return [match.group(1) for match in _FN_TOKEN_RE.finditer(sentence)]
-
-
-def _strip_fn_tokens(sentence: str) -> str:
-    text = _FN_TOKEN_RE.sub("", sentence)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    text = re.sub(r"(?m)^\s*\.\s*$", "", text)
-    return text.strip()
+    sections: list[CleanSection] = []
+    for block in kept:
+        if block.kind == "footnote":
+            cleaned = apply_deterministic_cleanup(
+                format_footnote_section_text(
+                    block.text, speak_footnote_cues=speak_footnote_cues
+                ),
+                chapter_title=chapter.title,
+                source_kind=source_kind,
+                kind="footnote",
+                speak_footnote_cues=speak_footnote_cues,
+            )
+            kind = "footnote"
+        else:
+            cleaned = apply_deterministic_cleanup(
+                block.text,
+                chapter_title=chapter.title,
+                source_kind=source_kind,
+                kind="body",
+            )
+            kind = "body"
+        if not cleaned.strip():
+            continue
+        sections.append(
+            CleanSection(
+                chapter_index=chapter.index,
+                chapter_title=chapter.title,
+                chapter_slug=chapter.slug,
+                section_index=len(sections),
+                kind=kind,
+                text=cleaned,
+                note_number=block.note_number,
+                block_id=block.id,
+                parent_id=block.parent_id,
+                bibliographic_hint=block.bibliographic_hint,
+            )
+        )
+    return sections
 
 
 def split_chapter_sections(
@@ -180,110 +208,22 @@ def split_chapter_sections(
     source_kind: str = "ebook",
     speak_footnote_cues: bool = False,
 ) -> list[CleanSection]:
-    """Split one chapter into body/footnote sections in reading order.
+    """Split one chapter into body and footnote sections in reading order.
 
-    Discursive notes are placed after the sentence that referenced them.
-    Citation-only notes are dropped. Optional spoken start/end markers wrap
+    Notes follow the paragraph that references them. Citation-only notes are
+    kept, with ``bibliographic_hint`` set. Spoken start/end markers wrap
     footnote sections when ``speak_footnote_cues`` is true.
     """
     if is_references_heading(chapter.title):
         return []
 
-    text = strip_reference_sections(chapter.text)
-    body, preamble, entries = _extract_notes_apparatus(text)
-    tokenized = _attach_callout_tokens(body)
-    # Standalone callout tokens must be their own sentences for split order.
-    tokenized = re.sub(r"(?m)^(⟦FN:\d+[a-z]?⟧)\s*$", r"\1.", tokenized)
-    sentences = split_sentences(tokenized) if tokenized.strip() else []
-
-    raw_sections: list[tuple[str, str | None, str]] = []
-    body_parts: list[str] = []
-    used: set[str] = set()
-
-    def flush_body() -> None:
-        nonlocal body_parts
-        joined = "\n".join(part for part in body_parts if part).strip()
-        body_parts = []
-        if joined:
-            raw_sections.append(("body", None, joined))
-
-    for sentence in sentences:
-        nums = _sentence_note_numbers(sentence)
-        plain = _strip_fn_tokens(sentence)
-        if plain:
-            body_parts.append(plain)
-        if not nums:
-            continue
-        flush_body()
-        for num in nums:
-            block = _consume_footnote(num, entries, used)
-            if block is None:
-                continue
-            # _consume_footnote returns "Footnote.\\n{body}" — strip marker for storage.
-            note_body = block
-            if note_body.startswith(FOOTNOTE_SPOKEN_MARKER):
-                note_body = note_body[len(FOOTNOTE_SPOKEN_MARKER) :].strip()
-            raw_sections.append(("footnote", num, note_body))
-
-    flush_body()
-
-    if preamble and preamble.strip():
-        raw_sections.append(("body", None, preamble.strip()))
-
-    for num in sorted(entries, key=lambda value: int(re.sub(r"\D", "", value) or 0)):
-        if num in used:
-            continue
-        note_body = entries[num]
-        if is_citation_only_note(note_body):
-            continue
-        raw_sections.append(("footnote", num, note_body))
-
-    sections: list[CleanSection] = []
-    for section_index, (kind, note_number, raw_text) in enumerate(raw_sections):
-        if kind == "footnote":
-            cleaned = apply_deterministic_cleanup(
-                format_footnote_section_text(
-                    raw_text, speak_footnote_cues=speak_footnote_cues
-                ),
-                chapter_title=chapter.title,
-                source_kind=source_kind,
-                kind="footnote",
-                speak_footnote_cues=speak_footnote_cues,
-            )
-        else:
-            cleaned = apply_deterministic_cleanup(
-                raw_text,
-                chapter_title=chapter.title,
-                source_kind=source_kind,
-                kind="body",
-                speak_footnote_cues=speak_footnote_cues,
-            )
-        if not cleaned.strip():
-            continue
-        sections.append(
-            CleanSection(
-                chapter_index=chapter.index,
-                chapter_title=chapter.title,
-                chapter_slug=chapter.slug,
-                section_index=section_index,
-                kind=kind,
-                text=cleaned,
-                note_number=note_number,
-            )
-        )
-    # Re-number after dropping empties.
-    return [
-        CleanSection(
-            chapter_index=section.chapter_index,
-            chapter_title=section.chapter_title,
-            chapter_slug=section.chapter_slug,
-            section_index=index,
-            kind=section.kind,
-            text=section.text,
-            note_number=section.note_number,
-        )
-        for index, section in enumerate(sections)
-    ]
+    blocks = chapter.blocks if chapter.blocks is not None else parse_plain_document(chapter.text)
+    return _sections_from_blocks(
+        chapter,
+        blocks,
+        source_kind=source_kind,
+        speak_footnote_cues=speak_footnote_cues,
+    )
 
 
 def clean_chapters(

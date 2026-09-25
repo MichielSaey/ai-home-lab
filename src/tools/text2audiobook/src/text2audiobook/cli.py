@@ -114,7 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="text2audiobook",
         description=(
-            "Convert supported text sources (EPUB, Markdown, HTML, .url) "
+            "Convert supported text sources (EPUB, PDF, Markdown, HTML, .url) "
             "to M4B audiobooks."
         ),
     )

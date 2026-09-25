@@ -43,6 +43,28 @@ def test_further_split_preserves_unit_boundaries() -> None:
     assert len(out) > 2
 
 
+def test_linked_notes_stay_on_the_paragraph_window() -> None:
+    sections = [
+        CleanSection(1, "Ch", "ch", 0, "body", "Alpha sentence here.", block_id="b1"),
+        CleanSection(
+            1,
+            "Ch",
+            "ch",
+            1,
+            "footnote",
+            " ".join(f"note{i}" for i in range(40)),
+            note_number="4",
+            block_id="fn:4",
+            parent_id="b1",
+        ),
+    ]
+    chunks = build_chunks_from_sections(sections, words_per_chunk=1000)
+    assert len(chunks) == 1
+    assert chunks[0].text.startswith("Alpha sentence here.")
+    assert "Footnote 4." in chunks[0].text
+    assert "note0" in chunks[0].text
+
+
 def test_build_chunks_from_sections_does_not_rematch() -> None:
     sections = [
         CleanSection(1, "Ch", "ch", 0, "body", "Alpha sentence here."),

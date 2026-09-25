@@ -190,6 +190,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert cfg.chunking.speak_target_chars == 800
     assert cfg.chunking.speak_max_chars == 1200
     assert cfg.llm.direction is True
+    assert cfg.llm.cleanup_batch_size == 4
     assert "{text}" in cfg.llm.direction_prompt
     assert "bracket" in cfg.llm.direction_prompt.lower()
     assert "accent" in cfg.llm.direction_prompt.lower()

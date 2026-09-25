@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 from text2audiobook.formats.markdown import extract_chapters as extract_markdown_chapters
 from text2audiobook.io import BookMetadata, Chapter, finalize_metadata
+from text2audiobook.structure import parse_plain_document
 
 _STRIP_TAGS = (
     "script",
@@ -115,9 +116,12 @@ def html_to_markdownish(html: str | bytes) -> str:
 def extract_html_chapters(html: str | bytes, *, preamble_title: str) -> list[Chapter]:
     content = html_to_markdownish(html)
     try:
-        return extract_markdown_chapters(content, preamble_title=preamble_title)
+        chapters = extract_markdown_chapters(content, preamble_title=preamble_title)
     except ValueError as exc:
         raise ValueError("No readable chapters found in HTML") from exc
+    for chapter in chapters:
+        chapter.blocks = parse_plain_document(chapter.text)
+    return chapters
 
 
 def metadata_from_html(

@@ -126,27 +126,39 @@ def manifest_matches(path: Path, expected: dict[str, Any]) -> bool:
 
 
 def chapters_to_payload(chapters: list[Chapter]) -> list[dict[str, Any]]:
-    return [
-        {
+    payload: list[dict[str, Any]] = []
+    for chapter in chapters:
+        item: dict[str, Any] = {
             "index": chapter.index,
             "title": chapter.title,
             "text": chapter.text,
             "slug": chapter.slug,
         }
-        for chapter in chapters
-    ]
+        if chapter.blocks is not None:
+            item["blocks"] = [block.to_json() for block in chapter.blocks]
+        payload.append(item)
+    return payload
 
 
 def chapters_from_payload(payload: list[dict[str, Any]]) -> list[Chapter]:
-    return [
-        Chapter(
-            index=int(item["index"]),
-            title=str(item["title"]),
-            text=str(item["text"]),
-            slug=str(item["slug"]),
+    from text2audiobook.io import block_from_json
+
+    chapters: list[Chapter] = []
+    for item in payload:
+        raw_blocks = item.get("blocks")
+        blocks = None
+        if isinstance(raw_blocks, list):
+            blocks = [block_from_json(block) for block in raw_blocks if isinstance(block, dict)]
+        chapters.append(
+            Chapter(
+                index=int(item["index"]),
+                title=str(item["title"]),
+                text=str(item["text"]),
+                slug=str(item["slug"]),
+                blocks=blocks,
+            )
         )
-        for item in payload
-    ]
+    return chapters
 
 
 def load_extract_chapters(stems: BookStems) -> list[Chapter]:
@@ -208,6 +220,9 @@ def load_clean_sections(stems: BookStems) -> list[Any]:
             note_number=(
                 None if row.get("note_number") is None else str(row["note_number"])
             ),
+            block_id=None if row.get("block_id") is None else str(row["block_id"]),
+            parent_id=None if row.get("parent_id") is None else str(row["parent_id"]),
+            bibliographic_hint=bool(row.get("bibliographic_hint")),
         )
         for row in rows
     ]
