@@ -81,6 +81,7 @@ from text2audiobook.tts import (
     create_voice_clone_prompt,
     is_base,
     is_cuda_oom,
+    is_retryable_cuda_error,
     is_voice_design,
     iter_speak_batches,
     load_tts,
@@ -102,7 +103,7 @@ logger = logging.getLogger(__name__)
 
 
 def _hard_clear_cuda() -> None:
-    """Best-effort CUDA allocator reset between book retries."""
+    """Best-effort CUDA allocator / context reset between book retries."""
     import gc
 
     gc.collect()
@@ -114,7 +115,27 @@ def _hard_clear_cuda() -> None:
                 torch.cuda.synchronize()
             except Exception:
                 pass
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+            try:
+                torch.cuda.reset_peak_memory_stats()
+            except Exception:
+                pass
+            # Second synchronize after cache clear sometimes unsticks CUBLAS.
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
     except Exception:
         pass
     gc.collect()
@@ -221,10 +242,17 @@ def run(
                     tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
                     raise
                 except Exception as exc:
-                    retryable = is_cuda_oom(exc) or is_hub_connection_error(exc)
+                    retryable = is_retryable_cuda_error(exc) or is_hub_connection_error(
+                        exc
+                    )
                     if retryable and attempt < max_book_retries:
                         attempt += 1
-                        kind = "CUDA OOM" if is_cuda_oom(exc) else "hub/network"
+                        if is_cuda_oom(exc):
+                            kind = "CUDA OOM"
+                        elif is_retryable_cuda_error(exc):
+                            kind = "CUDA device"
+                        else:
+                            kind = "hub/network"
                         logger.warning(
                             "%s on %s — book retry %d/%d after GPU clear "
                             "(speak resumes from completed WAVs; stems skip done stages)",
@@ -241,6 +269,9 @@ def run(
                     tracker.finish_book(
                         record, status="failed", error=f"{type(exc).__name__}: {exc}"
                     )
+                    # Unstick CUBLAS/OOM poison before the next book in the queue.
+                    if is_retryable_cuda_error(exc):
+                        _hard_clear_cuda()
                     break
     except KeyboardInterrupt:
         interrupted = True

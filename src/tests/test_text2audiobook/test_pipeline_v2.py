@@ -1311,6 +1311,99 @@ def test_run_retries_book_on_cuda_oom(tmp_path: Path, monkeypatch) -> None:
     assert attempts["n"] == 2
 
 
+def test_run_retries_book_on_cublas_error(tmp_path: Path, monkeypatch) -> None:
+    from text2audiobook.pipeline import run
+
+    source = tmp_path / "input" / "sample.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# Chapter One\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 1},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    attempts = {"n": 0}
+
+    def flaky_process(*_a, **_k) -> None:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError(
+                "CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasSgemm`"
+            )
+
+    monkeypatch.setattr("text2audiobook.pipeline.process_source", flaky_process)
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", lambda: None)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    assert run(config, source_paths=[source], stages=("speak",)) == 0
+    assert attempts["n"] == 2
+
+
+def test_run_clears_gpu_after_exhausted_cuda_retries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """After CUDA retries are spent, clear GPU before the next queued book."""
+    from text2audiobook.pipeline import run
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    first = input_dir / "a.md"
+    second = input_dir / "b.md"
+    first.write_text(f"# A\n\n{_BODY}\n", encoding="utf-8")
+    second.write_text(f"# B\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 0},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    clears = {"n": 0}
+    seen: list[str] = []
+
+    def process(source_path, *_a, **_k) -> None:
+        seen.append(source_path.name)
+        if source_path.name == "a.md":
+            raise RuntimeError(
+                "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling `cublasGemmEx`"
+            )
+
+    def clear() -> None:
+        clears["n"] += 1
+
+    monkeypatch.setattr("text2audiobook.pipeline.process_source", process)
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", clear)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    assert run(config, source_paths=[first, second], stages=("speak",)) == 1
+    assert seen == ["a.md", "b.md"]
+    assert clears["n"] == 1
+
+
 def test_run_retries_book_on_hub_connection_error(tmp_path: Path, monkeypatch) -> None:
     from text2audiobook.pipeline import run
 

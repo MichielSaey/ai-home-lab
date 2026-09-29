@@ -353,6 +353,41 @@ def is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
 
 
+def is_retryable_cuda_error(exc: BaseException) -> bool:
+    """True for CUDA OOM or poisoned-device errors that often clear after a full GPU reset.
+
+    Covers CUBLAS/CUDNN status failures and generic ``CUDA error:`` messages seen
+    after an OOM leaves the context unusable for later books in the same process.
+    """
+    if is_cuda_oom(exc):
+        return True
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    tokens = (
+        "cublas_status_",
+        "cudnn_status_",
+        "cuda error:",
+        "device-side assert",
+        "illegal memory access",
+        "an illegal memory access was encountered",
+        "cudaerror",
+    )
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        msg = str(current).lower()
+        if any(token in msg for token in tokens):
+            return True
+        try:
+            import torch
+
+            if isinstance(current, torch.cuda.CudaError):
+                return True
+        except Exception:
+            pass
+        current = current.__cause__ or current.__context__
+    return False
+
+
 # Backward-compatible alias for internal callers (batch_vram, synthesize retries).
 _is_cuda_oom = is_cuda_oom
 

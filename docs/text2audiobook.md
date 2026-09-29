@@ -19,7 +19,7 @@ Drop `.epub`, `.pdf`, `.md`, `.html`, or `.url` files into `data/input/`. A `.ur
 
 - **Speak WAV resume:** completed chunk WAVs under `data/staging/<slug>/speak/` are kept; re-runs skip them when fingerprints match.
 - **In-batch CUDA OOM:** TTS reloads the model to defrag VRAM, then retries with half-split batches.
-- **Book-level retry:** after a book still fails with CUDA OOM or a Hugging Face connection error, the pipeline clears the GPU and re-enters the same book (default `pipeline.book_retries: 3`). Earlier stages reuse current stems; speak continues from existing WAVs.
+- **Book-level retry:** after a book still fails with CUDA OOM, CUBLAS/CUDNN / other poisoned-device CUDA errors, or a Hugging Face connection error, the pipeline clears the GPU and re-enters the same book (default `pipeline.book_retries: 3`). Earlier stages reuse current stems; speak continues from existing WAVs. A CUDA failure that exhausts retries also clears the GPU before the next book.
 - **Local-first model load:** LLM/TTS resolve through the HF cache (`snapshot_download(..., local_files_only=True)` first) so mid-run reloads do not need the network. Set `pipeline.hub_offline: true` to never contact the hub (requires a warm cache or a local `model_id` path).
 
 ```json
