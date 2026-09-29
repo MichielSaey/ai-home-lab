@@ -64,28 +64,41 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def load_llm(config: LlmConfig) -> LoadedLlm:
+def load_llm(
+    config: LlmConfig,
+    *,
+    hub_prefer_local: bool = True,
+    hub_offline: bool = False,
+) -> LoadedLlm:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+    from text2audiobook.hub import resolve_pretrained_path
 
     if not torch.cuda.is_available():
         raise RuntimeError(f"CUDA not available — cannot load {config.model_id}")
 
+    model_path = resolve_pretrained_path(
+        config.model_id,
+        prefer_local=hub_prefer_local,
+        offline=hub_offline,
+    )
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
     )
-    tokenizer = AutoTokenizer.from_pretrained(config.model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(
-        config.model_id,
+        model_path,
         quantization_config=bnb_config,
         device_map="auto",
         dtype=torch.float16,
+        local_files_only=True,
     )
     model.eval()
-    logger.info("Loaded %s on %s", config.model_id, config.device)
+    logger.info("Loaded %s on %s (path=%s)", config.model_id, config.device, model_path)
     return LoadedLlm(model=model, tokenizer=tokenizer, model_id=config.model_id)
 
 
