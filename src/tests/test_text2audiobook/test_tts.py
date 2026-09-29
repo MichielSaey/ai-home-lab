@@ -689,6 +689,27 @@ def test_is_cuda_oom_public_alias() -> None:
     assert not is_cuda_oom(RuntimeError("something else"))
 
 
+def test_is_retryable_cuda_error_covers_oom_and_cublas() -> None:
+    from text2audiobook.tts import is_retryable_cuda_error
+
+    assert is_retryable_cuda_error(RuntimeError("CUDA out of memory"))
+    assert is_retryable_cuda_error(
+        RuntimeError(
+            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling `cublasGemmEx`"
+        )
+    )
+    assert is_retryable_cuda_error(
+        RuntimeError(
+            "CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasSgemm`"
+        )
+    )
+    assert is_retryable_cuda_error(
+        RuntimeError("CUDA error: an illegal memory access was encountered")
+    )
+    assert not is_retryable_cuda_error(ValueError("bad config"))
+    assert not is_retryable_cuda_error(RuntimeError("huggingface.co connection failed"))
+
+
 def test_synthesize_batch_normalizes_newlines(tmp_path: Path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
