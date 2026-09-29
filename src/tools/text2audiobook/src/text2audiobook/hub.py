@@ -36,7 +36,6 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "SSLError",
         "MaxRetryError",
         "NewConnectionError",
-        "OfflineModeIsEnabled",
     }
     transient_http_tokens = (
         "429",
@@ -70,7 +69,6 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "network is unreachable",
         "device or resource busy",
         "nodename nor servname",
-        "offline mode is enabled",
         "connection reset by peer",
         "connection aborted",
         "cannot reach hugging face",
