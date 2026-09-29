@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_TRANSIENT_HTTP_RE = re.compile(
+    r"(?:\b(?:429|500|502|503|504)\b|"
+    r"too many requests|internal server error|bad gateway|"
+    r"service unavailable|gateway timeout)",
+    re.IGNORECASE,
+)
+_PERMANENT_HTTP_RE = re.compile(
+    r"(?:\b(?:401|403|404)\b|"
+    r"repository not found|gated repo|invalid username or password|"
+    r"unauthorized|forbidden)",
+    re.IGNORECASE,
+)
 
 
 def is_hub_connection_error(exc: BaseException) -> bool:
@@ -37,28 +51,6 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "MaxRetryError",
         "NewConnectionError",
     }
-    transient_http_tokens = (
-        "429",
-        "500",
-        "502",
-        "503",
-        "504",
-        "too many requests",
-        "internal server error",
-        "bad gateway",
-        "service unavailable",
-        "gateway timeout",
-    )
-    permanent_http_tokens = (
-        "401",
-        "403",
-        "404",
-        "repository not found",
-        "gated repo",
-        "invalid username or password",
-        "unauthorized",
-        "forbidden",
-    )
     transient_conn_tokens = (
         "failed to establish a new connection",
         "all connection attempts failed",
@@ -93,18 +85,18 @@ def is_hub_connection_error(exc: BaseException) -> bool:
 
         if name in permanent_names:
             continue
-        if any(token in msg for token in permanent_http_tokens):
+        if _PERMANENT_HTTP_RE.search(msg):
             # Permanent client status — do not treat this node as transient,
             # but keep walking for a sibling/context network failure.
             continue
         if name in {"HfHubHTTPError", "HTTPError"}:
-            if any(token in msg for token in transient_http_tokens):
+            if _TRANSIENT_HTTP_RE.search(msg):
                 found_transient = True
             continue
         if name in transient_names:
             found_transient = True
             continue
-        if any(token in msg for token in transient_http_tokens):
+        if _TRANSIENT_HTTP_RE.search(msg):
             found_transient = True
             continue
         if any(token in msg for token in transient_conn_tokens):
