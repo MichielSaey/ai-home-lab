@@ -28,6 +28,20 @@ def test_is_hub_connection_error_rejects_unrelated() -> None:
     assert not is_hub_connection_error(ValueError("bad config"))
 
 
+def test_is_hub_connection_error_rejects_permanent_hf_client_errors() -> None:
+    class RepositoryNotFoundError(Exception):
+        pass
+
+    class HfHubHTTPError(Exception):
+        pass
+
+    assert not is_hub_connection_error(RepositoryNotFoundError("Qwen/Nope"))
+    assert not is_hub_connection_error(HfHubHTTPError("404 Client Error"))
+    assert not is_hub_connection_error(
+        Exception("401 Client Error for url: https://huggingface.co/api/models/x")
+    )
+
+
 def test_resolve_pretrained_path_uses_existing_directory(tmp_path) -> None:
     model_dir = tmp_path / "weights"
     model_dir.mkdir()

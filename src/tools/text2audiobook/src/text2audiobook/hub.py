@@ -9,36 +9,61 @@ logger = logging.getLogger(__name__)
 
 
 def is_hub_connection_error(exc: BaseException) -> bool:
-    """True when ``exc`` (or its cause chain) looks like a hub/network failure."""
+    """True when ``exc`` (or its cause chain) looks like a *transient* hub failure.
+
+    Permanent client errors (404/401/403, missing repo, bad token) must not match —
+    book-level retries would only burn GPU clears on an unfixable config.
+    """
+    permanent_names = {
+        "RepositoryNotFoundError",
+        "RevisionNotFoundError",
+        "EntryNotFoundError",
+        "GatedRepoError",
+        "LocalEntryNotFoundError",
+        "BadRequestError",
+        "HfHubHTTPError",
+    }
+    transient_names = {
+        "ConnectionError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "TimeoutError",
+        "ProxyError",
+        "SSLError",
+        "MaxRetryError",
+        "NewConnectionError",
+        "OfflineModeIsEnabled",
+    }
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         name = type(current).__name__
         msg = str(current).lower()
-        if name in {
-            "ConnectionError",
-            "ConnectTimeout",
-            "ReadTimeout",
-            "TimeoutError",
-            "ProxyError",
-            "SSLError",
-            "MaxRetryError",
-            "NewConnectionError",
-            "HTTPError",
-            "OfflineModeIsEnabled",
-            "LocalEntryNotFoundError",
-        }:
-            # LocalEntryNotFoundError alone is a cache miss, not connectivity —
-            # only treat it as hub-related when nested under a connection failure.
-            if name == "LocalEntryNotFoundError":
-                current = current.__cause__ or current.__context__
-                continue
+
+        if name in permanent_names:
+            return False
+        # requests/urllib3 HTTPError is too broad; only treat as hub-related when
+        # the message clearly indicates connectivity (not 4xx client errors).
+        if any(
+            token in msg
+            for token in (
+                "401",
+                "403",
+                "404",
+                "repository not found",
+                "gated repo",
+                "invalid username or password",
+                "unauthorized",
+                "forbidden",
+            )
+        ):
+            return False
+        if name in transient_names:
             return True
         if any(
             token in msg
             for token in (
-                "huggingface.co",
                 "failed to establish a new connection",
                 "max retries exceeded",
                 "connection refused",
@@ -48,6 +73,8 @@ def is_hub_connection_error(exc: BaseException) -> bool:
                 "device or resource busy",
                 "nodename nor servname",
                 "offline mode is enabled",
+                "connection reset by peer",
+                "connection aborted",
             )
         ):
             return True
