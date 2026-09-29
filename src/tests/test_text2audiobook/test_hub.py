@@ -30,6 +30,11 @@ def test_is_hub_connection_error_detects_httpx_connect_error() -> None:
     assert is_hub_connection_error(ConnectError("All connection attempts failed"))
 
 
+def test_is_hub_connection_error_rejects_unrelated() -> None:
+    assert not is_hub_connection_error(RuntimeError("CUDA out of memory"))
+    assert not is_hub_connection_error(ValueError("bad config"))
+
+
 def test_is_hub_connection_error_rejects_permanent_hf_client_errors() -> None:
     class RepositoryNotFoundError(Exception):
         pass
