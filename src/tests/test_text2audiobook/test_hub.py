@@ -30,6 +30,24 @@ def test_is_hub_connection_error_detects_httpx_connect_error() -> None:
     assert is_hub_connection_error(ConnectError("All connection attempts failed"))
 
 
+def test_is_hub_connection_error_sees_hub_error_behind_cache_miss_cause() -> None:
+    """Cache-miss __cause__ must not hide a transient hub failure in the chain."""
+    hub_exc = ConnectionError("failed to establish a new connection")
+
+    class LocalEntryNotFoundError(Exception):
+        pass
+
+    wrapped = RuntimeError("Cannot reach Hugging Face; Last error: ...")
+    wrapped.__cause__ = LocalEntryNotFoundError("incomplete cache")
+    wrapped.__context__ = hub_exc
+    assert is_hub_connection_error(wrapped)
+
+    # Preferred chaining: raise from the hub error directly.
+    chained = RuntimeError("Cannot reach Hugging Face")
+    chained.__cause__ = hub_exc
+    assert is_hub_connection_error(chained)
+
+
 def test_is_hub_connection_error_rejects_unrelated() -> None:
     assert not is_hub_connection_error(RuntimeError("CUDA out of memory"))
     assert not is_hub_connection_error(ValueError("bad config"))

@@ -9,11 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 def is_hub_connection_error(exc: BaseException) -> bool:
-    """True when ``exc`` (or its cause chain) looks like a *transient* hub failure.
+    """True when ``exc`` (or its cause/context graph) looks like a *transient* hub failure.
 
     Permanent client errors (404/401/403, missing repo, bad token) must not match —
     book-level retries would only burn GPU clears on an unfixable config.
     Transient HTTP outages (429/502/503/504) remain retryable.
+
+    Walks both ``__cause__`` and ``__context__`` so a cache-miss ``__cause__`` does
+    not hide a transient hub error elsewhere in the chain.
     """
     permanent_names = {
         "RepositoryNotFoundError",
@@ -57,44 +60,59 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "unauthorized",
         "forbidden",
     )
+    transient_conn_tokens = (
+        "failed to establish a new connection",
+        "all connection attempts failed",
+        "max retries exceeded",
+        "connection refused",
+        "name or service not known",
+        "temporary failure in name resolution",
+        "network is unreachable",
+        "device or resource busy",
+        "nodename nor servname",
+        "offline mode is enabled",
+        "connection reset by peer",
+        "connection aborted",
+        "cannot reach hugging face",
+    )
+
     seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
+    stack: list[BaseException] = [exc]
+    found_transient = False
+
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
         seen.add(id(current))
         name = type(current).__name__
         msg = str(current).lower()
 
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None:
+            stack.append(current.__context__)
+
         if name in permanent_names:
-            return False
+            continue
         if any(token in msg for token in permanent_http_tokens):
-            return False
-        # HfHubHTTPError / HTTPError: only retry on rate-limit / gateway outages.
+            # Permanent client status — do not treat this node as transient,
+            # but keep walking for a sibling/context network failure.
+            continue
         if name in {"HfHubHTTPError", "HTTPError"}:
-            return any(token in msg for token in transient_http_tokens)
+            if any(token in msg for token in transient_http_tokens):
+                found_transient = True
+            continue
         if name in transient_names:
-            return True
+            found_transient = True
+            continue
         if any(token in msg for token in transient_http_tokens):
-            return True
-        if any(
-            token in msg
-            for token in (
-                "failed to establish a new connection",
-                "all connection attempts failed",
-                "max retries exceeded",
-                "connection refused",
-                "name or service not known",
-                "temporary failure in name resolution",
-                "network is unreachable",
-                "device or resource busy",
-                "nodename nor servname",
-                "offline mode is enabled",
-                "connection reset by peer",
-                "connection aborted",
-            )
-        ):
-            return True
-        current = current.__cause__ or current.__context__
-    return False
+            found_transient = True
+            continue
+        if any(token in msg for token in transient_conn_tokens):
+            found_transient = True
+
+    return found_transient
 
 
 def resolve_pretrained_path(
@@ -149,10 +167,12 @@ def resolve_pretrained_path(
                     path,
                 )
                 return path
-            except Exception as local_exc:
+            except Exception:
+                # Chain from the hub/network error so book retries still classify
+                # this as transient (cache-miss alone must not mask connectivity).
                 raise RuntimeError(
                     f"Cannot reach Hugging Face for {stripped!r} and the local "
                     "cache is incomplete. Download once while online "
                     f"(or set HF_HOME to a populated cache). Last error: {exc}"
-                ) from local_exc
+                ) from exc
         raise
