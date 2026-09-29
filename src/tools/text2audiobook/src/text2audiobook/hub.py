@@ -9,15 +9,15 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _TRANSIENT_HTTP_RE = re.compile(
-    r"(?:\b(?:429|500|502|503|504)\b|"
+    r"(?:\b(?:429|500|502|503|504)\s+(?:client|server|error|too)|"
     r"too many requests|internal server error|bad gateway|"
     r"service unavailable|gateway timeout)",
     re.IGNORECASE,
 )
 _PERMANENT_HTTP_RE = re.compile(
-    r"(?:\b(?:401|403|404)\b|"
+    r"(?:\b(?:401|403|404)\s+(?:client|server|error)|"
     r"repository not found|gated repo|invalid username or password|"
-    r"unauthorized|forbidden)",
+    r"\bunauthorized\b|\bforbidden\b)",
     re.IGNORECASE,
 )
 
