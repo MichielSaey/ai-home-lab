@@ -25,6 +25,7 @@ def is_hub_connection_error(exc: BaseException) -> bool:
     }
     transient_names = {
         "ConnectionError",
+        "ConnectError",
         "ConnectTimeout",
         "ReadTimeout",
         "TimeoutError",
@@ -78,6 +79,7 @@ def is_hub_connection_error(exc: BaseException) -> bool:
             token in msg
             for token in (
                 "failed to establish a new connection",
+                "all connection attempts failed",
                 "max retries exceeded",
                 "connection refused",
                 "name or service not known",
