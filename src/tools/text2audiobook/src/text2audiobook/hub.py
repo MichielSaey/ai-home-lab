@@ -13,6 +13,7 @@ def is_hub_connection_error(exc: BaseException) -> bool:
 
     Permanent client errors (404/401/403, missing repo, bad token) must not match —
     book-level retries would only burn GPU clears on an unfixable config.
+    Transient HTTP outages (429/502/503/504) remain retryable.
     """
     permanent_names = {
         "RepositoryNotFoundError",
@@ -21,7 +22,6 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "GatedRepoError",
         "LocalEntryNotFoundError",
         "BadRequestError",
-        "HfHubHTTPError",
     }
     transient_names = {
         "ConnectionError",
@@ -34,6 +34,28 @@ def is_hub_connection_error(exc: BaseException) -> bool:
         "NewConnectionError",
         "OfflineModeIsEnabled",
     }
+    transient_http_tokens = (
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "too many requests",
+        "internal server error",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+    )
+    permanent_http_tokens = (
+        "401",
+        "403",
+        "404",
+        "repository not found",
+        "gated repo",
+        "invalid username or password",
+        "unauthorized",
+        "forbidden",
+    )
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
@@ -43,23 +65,14 @@ def is_hub_connection_error(exc: BaseException) -> bool:
 
         if name in permanent_names:
             return False
-        # requests/urllib3 HTTPError is too broad; only treat as hub-related when
-        # the message clearly indicates connectivity (not 4xx client errors).
-        if any(
-            token in msg
-            for token in (
-                "401",
-                "403",
-                "404",
-                "repository not found",
-                "gated repo",
-                "invalid username or password",
-                "unauthorized",
-                "forbidden",
-            )
-        ):
+        if any(token in msg for token in permanent_http_tokens):
             return False
+        # HfHubHTTPError / HTTPError: only retry on rate-limit / gateway outages.
+        if name in {"HfHubHTTPError", "HTTPError"}:
+            return any(token in msg for token in transient_http_tokens)
         if name in transient_names:
+            return True
+        if any(token in msg for token in transient_http_tokens):
             return True
         if any(
             token in msg

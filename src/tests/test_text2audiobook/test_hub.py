@@ -42,6 +42,15 @@ def test_is_hub_connection_error_rejects_permanent_hf_client_errors() -> None:
     )
 
 
+def test_is_hub_connection_error_allows_transient_hf_http() -> None:
+    class HfHubHTTPError(Exception):
+        pass
+
+    assert is_hub_connection_error(HfHubHTTPError("503 Server Error: Service Unavailable"))
+    assert is_hub_connection_error(HfHubHTTPError("429 Too Many Requests"))
+    assert is_hub_connection_error(HfHubHTTPError("500 Internal Server Error"))
+
+
 def test_resolve_pretrained_path_uses_existing_directory(tmp_path) -> None:
     model_dir = tmp_path / "weights"
     model_dir.mkdir()
