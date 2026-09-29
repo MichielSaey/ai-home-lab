@@ -1094,7 +1094,7 @@ def test_synthesize_reloads_every_n_units(tmp_path: Path, monkeypatch, caplog) -
             wav_path.parent.mkdir(parents=True, exist_ok=True)
             wav_path.write_bytes(b"RIFF")
 
-    def fake_reload(_config, old_model, *, device=None):
+    def fake_reload(_config, old_model, *, device=None, **_kwargs):
         reload_calls.append(old_model)
         return models[len(reload_calls)]
 
@@ -1269,3 +1269,124 @@ def test_synthesize_oom_retry_still_oom_reraises(tmp_path: Path, monkeypatch) ->
                 progress=ProgressContext(book_title="Book"),
                 skip_wavs=False,
             )
+
+
+def test_run_retries_book_on_cuda_oom(tmp_path: Path, monkeypatch) -> None:
+    from text2audiobook.pipeline import run
+
+    source = tmp_path / "input" / "sample.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# Chapter One\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 2},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    attempts = {"n": 0}
+
+    def flaky_process(*_a, **_k) -> None:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 MiB.")
+
+    monkeypatch.setattr("text2audiobook.pipeline.process_source", flaky_process)
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", lambda: None)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    code = run(config, source_paths=[source], stages=("speak",))
+    assert code == 0
+    assert attempts["n"] == 2
+
+
+def test_run_retries_book_on_hub_connection_error(tmp_path: Path, monkeypatch) -> None:
+    from text2audiobook.pipeline import run
+
+    source = tmp_path / "input" / "sample.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# Chapter One\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 1},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    attempts = {"n": 0}
+
+    def flaky_process(*_a, **_k) -> None:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ConnectionError(
+                "Max retries exceeded with url: /api/models/Qwen/Qwen3-TTS "
+                "(Failed to establish a new connection to huggingface.co)"
+            )
+
+    monkeypatch.setattr("text2audiobook.pipeline.process_source", flaky_process)
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", lambda: None)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    assert run(config, source_paths=[source], stages=("speak",)) == 0
+    assert attempts["n"] == 2
+
+
+def test_run_gives_up_after_book_retries(tmp_path: Path, monkeypatch) -> None:
+    from text2audiobook.pipeline import run
+
+    source = tmp_path / "input" / "sample.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(f"# Chapter One\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 2},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    attempts = {"n": 0}
+
+    def always_oom(*_a, **_k) -> None:
+        attempts["n"] += 1
+        raise RuntimeError("CUDA out of memory")
+
+    monkeypatch.setattr("text2audiobook.pipeline.process_source", always_oom)
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", lambda: None)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    assert run(config, source_paths=[source], stages=("speak",)) == 1
+    # initial attempt + 2 retries
+    assert attempts["n"] == 3

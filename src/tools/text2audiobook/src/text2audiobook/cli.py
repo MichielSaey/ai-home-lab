@@ -58,7 +58,11 @@ def _run_batch_vram_calibration(config_path: Path | None) -> int:
     out_dir = config.paths.runs_dir / f"{stamp}_batch_vram"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    model = load_tts(tts)
+    model = load_tts(
+        tts,
+        hub_prefer_local=config.pipeline.hub_prefer_local,
+        hub_offline=config.pipeline.hub_offline,
+    )
 
     def _hard_unload(current) -> None:
         unload_tts(current)
@@ -80,7 +84,11 @@ def _run_batch_vram_calibration(config_path: Path | None) -> int:
         nonlocal model
         _hard_unload(model)
         model = None
-        model = load_tts(tts)
+        model = load_tts(
+            tts,
+            hub_prefer_local=config.pipeline.hub_prefer_local,
+            hub_offline=config.pipeline.hub_offline,
+        )
         # Skip rebuild of voice_clone_prompt here — encoding the ref right after an
         # OOM often OOMs again. synthesize uses ref_audio when prompt is None.
         return model, None

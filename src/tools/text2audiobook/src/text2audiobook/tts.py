@@ -89,10 +89,18 @@ def _ensure_tts_pad_token_id(model: Any) -> None:
         gen_cfg.pad_token_id = int(eos)
 
 
-def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
+def load_tts(
+    config: TtsConfig,
+    *,
+    device: str | None = None,
+    hub_prefer_local: bool = True,
+    hub_offline: bool = False,
+) -> Any:
     """Load Qwen3-TTS; device defaults to resolve_tts_device(config.device)."""
     import torch
     from qwen_tts import Qwen3TTSModel
+
+    from text2audiobook.hub import resolve_pretrained_path
 
     gc.collect()
     if torch.cuda.is_available():
@@ -104,15 +112,24 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     device_map = "cpu" if device == "cpu" else "cuda:0"
     # Qwen3-TTS expects float32 on CPU; bfloat16 on CUDA.
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
+    model_id = config.model_id
+    model_path = resolve_pretrained_path(
+        model_id,
+        prefer_local=hub_prefer_local,
+        offline=hub_offline,
+    )
     load_kwargs: dict[str, Any] = {
         "device_map": device_map,
         "dtype": dtype,
+        # Path is already a local snapshot; keep processor/model off the network.
+        "local_files_only": True,
     }
 
-    model_id = config.model_id
     # Do not request flash_attention_2: when flash_attn is missing, transformers
     # raises a loud ImportError that looks like a crash. Eager attention is fine.
-    model = Qwen3TTSModel.from_pretrained(model_id, **load_kwargs)
+    # Note: qwen_tts only forwards kwargs to AutoModel; processor still loads from
+    # the same local path so it stays offline once resolve_pretrained_path succeeds.
+    model = Qwen3TTSModel.from_pretrained(model_path, **load_kwargs)
     _ensure_tts_pad_token_id(model)
 
     if is_base(model_id):
@@ -122,9 +139,10 @@ def load_tts(config: TtsConfig, *, device: str | None = None) -> Any:
     else:
         mode = "CustomVoice"
     logger.info(
-        "Loaded Qwen3-TTS on %s (model=%s, mode=%s, lang=%s, voice=%s, instruct=%r)",
+        "Loaded Qwen3-TTS on %s (model=%s, path=%s, mode=%s, lang=%s, voice=%s, instruct=%r)",
         device,
         model_id,
+        model_path,
         mode,
         config.lang,
         config.voice,
@@ -164,7 +182,14 @@ def unload_tts(model: Any) -> None:
     gc.collect()
 
 
-def reload_tts(config: TtsConfig, old_model: Any, *, device: str | None = None) -> Any:
+def reload_tts(
+    config: TtsConfig,
+    old_model: Any,
+    *,
+    device: str | None = None,
+    hub_prefer_local: bool = True,
+    hub_offline: bool = False,
+) -> Any:
     """Unload old model, hard-clear CUDA, load a fresh TTS model.
 
     Callers must drop their own live references (e.g. ``tts_slot[0] = None``)
@@ -184,7 +209,12 @@ def reload_tts(config: TtsConfig, old_model: Any, *, device: str | None = None) 
             pass
         torch.cuda.empty_cache()
     gc.collect()
-    return load_tts(config, device=device)
+    return load_tts(
+        config,
+        device=device,
+        hub_prefer_local=hub_prefer_local,
+        hub_offline=hub_offline,
+    )
 
 
 def append_silence(audio: np.ndarray, silence_ms: int, sample_rate: int) -> np.ndarray:

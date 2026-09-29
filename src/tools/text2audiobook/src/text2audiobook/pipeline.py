@@ -33,6 +33,7 @@ from text2audiobook.config import (
 )
 from text2audiobook.formatting import FORMATTER_VERSION
 from text2audiobook.gpu import resolve_tts_device
+from text2audiobook.hub import is_hub_connection_error
 from text2audiobook.io import (
     BookMetadata,
     Chapter,
@@ -98,6 +99,25 @@ from text2audiobook.voices import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _hard_clear_cuda() -> None:
+    """Best-effort CUDA allocator reset between book retries."""
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    gc.collect()
 
 
 @dataclass
@@ -175,33 +195,53 @@ def run(
     started = time.perf_counter()
     interrupted = False
     fatal = False
+    max_book_retries = max(0, int(config.pipeline.book_retries))
 
     try:
         for position, source_path in enumerate(sources, start=1):
             record = tracker.start_book(source_path)
-            try:
-                process_source(
-                    source_path,
-                    config,
-                    tracker=tracker,
-                    record=record,
-                    position=(position, len(sources)),
-                    tts_device=tts_device,
-                    stages=selected,
-                    force=force,
-                    voice=voice,
-                    speak_footnote_cues=speak_footnote_cues,
-                    x_vector_only=x_vector_only,
-                )
-            except KeyboardInterrupt:
-                tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
-                raise
-            except Exception as exc:
-                logger.error("FAILED %s: %s", source_path.name, exc)
-                logger.debug("Book failure traceback", exc_info=True)
-                tracker.finish_book(
-                    record, status="failed", error=f"{type(exc).__name__}: {exc}"
-                )
+            attempt = 0
+            while True:
+                try:
+                    process_source(
+                        source_path,
+                        config,
+                        tracker=tracker,
+                        record=record,
+                        position=(position, len(sources)),
+                        tts_device=tts_device,
+                        stages=selected,
+                        force=force,
+                        voice=voice,
+                        speak_footnote_cues=speak_footnote_cues,
+                        x_vector_only=x_vector_only,
+                    )
+                    break
+                except KeyboardInterrupt:
+                    tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
+                    raise
+                except Exception as exc:
+                    retryable = is_cuda_oom(exc) or is_hub_connection_error(exc)
+                    if retryable and attempt < max_book_retries:
+                        attempt += 1
+                        kind = "CUDA OOM" if is_cuda_oom(exc) else "hub/network"
+                        logger.warning(
+                            "%s on %s — book retry %d/%d after GPU clear "
+                            "(speak resumes from completed WAVs; stems skip done stages)",
+                            kind,
+                            source_path.name,
+                            attempt,
+                            max_book_retries,
+                        )
+                        logger.debug("Book retry traceback", exc_info=True)
+                        _hard_clear_cuda()
+                        continue
+                    logger.error("FAILED %s: %s", source_path.name, exc)
+                    logger.debug("Book failure traceback", exc_info=True)
+                    tracker.finish_book(
+                        record, status="failed", error=f"{type(exc).__name__}: {exc}"
+                    )
+                    break
     except KeyboardInterrupt:
         interrupted = True
         logger.info("Interrupted — flushing run manifest and exiting.")
@@ -316,7 +356,11 @@ def process_source(
         if llm is not None:
             return llm
         if own_llm is None:
-            own_llm = load_llm(config.llm)
+            own_llm = load_llm(
+                config.llm,
+                hub_prefer_local=config.pipeline.hub_prefer_local,
+                hub_offline=config.pipeline.hub_offline,
+            )
         return own_llm
 
     state = StageState()
@@ -442,7 +486,12 @@ def process_source(
         own_tts = tts_model
         loaded_here = False
         if own_tts is None:
-            own_tts = load_tts(tts_config, device=tts_device)
+            own_tts = load_tts(
+                tts_config,
+                device=tts_device,
+                hub_prefer_local=config.pipeline.hub_prefer_local,
+                hub_offline=config.pipeline.hub_offline,
+            )
             loaded_here = True
         # Mutable slot so periodic/OOM reloads stay visible to finally on failure.
         tts_slot: list[Any] = [own_tts]
@@ -1285,7 +1334,12 @@ def _synthesize_and_encode(
         # failing with ~7 GiB still held and no "Loaded" log).
         old = tts_slot[0]
         tts_slot[0] = None
-        tts_slot[0] = reload_tts(tts_config, old)
+        tts_slot[0] = reload_tts(
+            tts_config,
+            old,
+            hub_prefer_local=config.pipeline.hub_prefer_local,
+            hub_offline=config.pipeline.hub_offline,
+        )
         if rebuild_prompt:
             rebuild_voice_clone_prompt()
         else:

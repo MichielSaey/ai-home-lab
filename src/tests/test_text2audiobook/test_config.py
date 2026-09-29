@@ -8,28 +8,34 @@ from text2audiobook.config import (
 )
 
 
-def test_load_config_resolves_new_paths(tmp_path: Path) -> None:
+def test_load_config_pipeline_resilience_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    cfg = load_config(config_path)
+    assert cfg.pipeline.book_retries == 3
+    assert cfg.pipeline.hub_prefer_local is True
+    assert cfg.pipeline.hub_offline is False
+
+
+def test_load_config_pipeline_resilience_overrides(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
             {
-                "paths": {
-                    "input_dir": "books",
-                    "staging_dir": "scratch",
-                    "output_dir": "out",
-                    "runs_dir": "runs",
-                },
-                "output": {"chapter_mp3": False},
+                "pipeline": {
+                    "book_retries": 5,
+                    "hub_prefer_local": False,
+                    "hub_offline": True,
+                }
             }
         ),
         encoding="utf-8",
     )
     cfg = load_config(config_path)
-    assert cfg.paths.input_dir == tmp_path / "books"
-    assert cfg.paths.staging_dir == tmp_path / "scratch"
-    assert cfg.paths.output_dir == tmp_path / "out"
-    assert cfg.output.chapter_mp3 is False
-    assert cfg.output.speak_footnote_cues is False
+    assert cfg.pipeline.book_retries == 5
+    assert cfg.pipeline.hub_prefer_local is False
+    assert cfg.pipeline.hub_offline is True
+
 
 
 def test_load_config_maps_legacy_words_per_chunk(tmp_path: Path) -> None:

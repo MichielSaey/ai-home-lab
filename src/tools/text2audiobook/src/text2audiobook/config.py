@@ -162,6 +162,12 @@ class PipelineConfig:
     concurrent_models: bool = False
     ffmpeg_workers: int = 2
     queue_size: int = 32
+    # Re-enter the book after CUDA OOM / hub blips; speak resumes from existing WAVs.
+    book_retries: int = 3
+    # Prefer ~/.cache/huggingface (or HF_HOME) so model reloads need no network.
+    hub_prefer_local: bool = True
+    # Never contact the hub (fail if cache incomplete).
+    hub_offline: bool = False
 
 
 @dataclass

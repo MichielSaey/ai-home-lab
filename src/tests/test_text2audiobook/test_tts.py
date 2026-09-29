@@ -665,7 +665,7 @@ def test_reload_tts_unloads_then_loads(monkeypatch) -> None:
     def fake_unload(model) -> None:
         calls.append(("unload", model))
 
-    def fake_load(config, *, device=None):
+    def fake_load(config, *, device=None, **_kwargs):
         calls.append(("load", config))
         return fresh
 
