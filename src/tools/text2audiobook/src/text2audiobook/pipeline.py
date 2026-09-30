@@ -269,10 +269,11 @@ def run(
                     tracker.finish_book(
                         record, status="failed", error=f"{type(exc).__name__}: {exc}"
                     )
-                    # Unstick CUBLAS/OOM poison before the next book in the queue.
-                    if is_retryable_cuda_error(exc):
-                        _hard_clear_cuda()
                     break
+            # Proactive clear between books so TTS fragmentation from one title
+            # does not OOM the next book's format LLM load (see Spinal after Stack).
+            if position < len(sources):
+                _hard_clear_cuda()
     except KeyboardInterrupt:
         interrupted = True
         logger.info("Interrupted — flushing run manifest and exiting.")
