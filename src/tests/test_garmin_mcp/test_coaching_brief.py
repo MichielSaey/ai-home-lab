@@ -1,4 +1,4 @@
-from coaching_brief import build_coaching_brief
+from coaching_brief import SESSION_TARGETS, build_coaching_brief
 from training_plan import build_training_plan
 
 
@@ -98,6 +98,10 @@ def test_build_coaching_brief_includes_narrative_and_proposal() -> None:
     assert "under_zone_5" in flags
     assert "under_sprint" in flags
     assert "345 min" in brief["narrative"]["proposal_summary"]
+    assert brief["next_week_proposal"]["session_targets"] == SESSION_TARGETS
+    assert SESSION_TARGETS["threshold"]["tool"] == "create_threshold_workout"
+    assert SESSION_TARGETS["threshold"]["target"] == "HR zone 4"
+    assert SESSION_TARGETS["sprint"]["tool"] == "create_sprint_workout"
 
 
 def test_build_coaching_brief_includes_personal_records_summary() -> None:
