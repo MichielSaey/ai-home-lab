@@ -39,16 +39,26 @@ def _ensure_expandable_segments() -> None:
     """Ask the CUDA caching allocator to reduce fragmentation across book loads.
 
     Must run before torch initializes the allocator. Existing user overrides of
-    ``PYTORCH_CUDA_ALLOC_CONF`` that already mention ``expandable_segments`` are
-    left alone.
+    ``PYTORCH_CUDA_ALLOC_CONF`` / ``PYTORCH_ALLOC_CONF`` that already mention
+    ``expandable_segments`` are left alone. When only the legacy
+    ``PYTORCH_ALLOC_CONF`` is set, append there so a newly written
+    ``PYTORCH_CUDA_ALLOC_CONF`` does not shadow the user's other knobs
+    (PyTorch prefers the CUDA-named variable when both exist).
     """
-    conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "").strip()
-    if "expandable_segments" in conf:
+    cuda_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "").strip()
+    alloc_conf = os.environ.get("PYTORCH_ALLOC_CONF", "").strip()
+    if "expandable_segments" in cuda_conf or "expandable_segments" in alloc_conf:
         return
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = (
-        f"{conf},{_EXPANDABLE_SEGMENTS}" if conf else _EXPANDABLE_SEGMENTS
-    )
-    log.debug("Set PYTORCH_CUDA_ALLOC_CONF=%s", os.environ["PYTORCH_CUDA_ALLOC_CONF"])
+    if cuda_conf:
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = f"{cuda_conf},{_EXPANDABLE_SEGMENTS}"
+        key = "PYTORCH_CUDA_ALLOC_CONF"
+    elif alloc_conf:
+        os.environ["PYTORCH_ALLOC_CONF"] = f"{alloc_conf},{_EXPANDABLE_SEGMENTS}"
+        key = "PYTORCH_ALLOC_CONF"
+    else:
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = _EXPANDABLE_SEGMENTS
+        key = "PYTORCH_CUDA_ALLOC_CONF"
+    log.debug("Set %s=%s", key, os.environ[key])
 
 
 def cuda_available() -> bool:
