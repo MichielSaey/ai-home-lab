@@ -26,6 +26,7 @@ from nutrition_matrix import (
 )
 from rest_shim import mount_rest_routes
 from rolling_week import anchor_end as compute_anchor_end, window_bounds
+from self_evaluation import extract_self_evaluation
 from training_plan import (
     build_training_plan,
     first_event_date,
@@ -375,6 +376,7 @@ def _recent_activity_summaries(
         summaries.append(
             {
                 "date": act_date.isoformat(),
+                "activity_id": activity.get("activityId"),
                 "name": activity.get("activityName"),
                 "activity_type": activity_type_key(activity),
                 "distance_km": round((activity.get("distance", 0) or 0) / 1000, 2),
@@ -385,6 +387,46 @@ def _recent_activity_summaries(
         )
         if len(summaries) >= limit:
             break
+    return summaries
+
+
+def _enrich_self_evaluations(
+    client: Garmin,
+    summaries: list[dict[str, Any]],
+    activities: list[dict[str, Any]],
+    window_start: date,
+    window_end: date,
+) -> list[dict[str, Any]]:
+    """Attach Garmin self-evaluation to this-week activity summaries only.
+
+    Extra ``get_activity`` calls cover the review window (and today when the
+    window includes it). Older lookback weeks keep distance/circumstances
+    without feel / RPE / comments.
+    """
+    list_by_id: dict[str, dict[str, Any]] = {}
+    for activity in activities:
+        activity_id = activity.get("activityId")
+        if activity_id is not None:
+            list_by_id[str(activity_id)] = activity
+
+    for summary in summaries:
+        raw_date = summary.get("date")
+        try:
+            act_date = date.fromisoformat(str(raw_date))
+        except (TypeError, ValueError):
+            continue
+        if act_date < window_start or act_date > window_end:
+            continue
+        activity_id = summary.get("activity_id")
+        list_row = (
+            list_by_id.get(str(activity_id)) if activity_id is not None else None
+        )
+        detail: dict[str, Any] | None = None
+        if activity_id is not None:
+            raw = _call_optional(client, "get_activity", str(activity_id))
+            if isinstance(raw, dict) and not raw.get("error"):
+                detail = raw
+        summary["self_evaluation"] = extract_self_evaluation(list_row, detail)
     return summaries
 
 
@@ -593,6 +635,14 @@ def get_report(
 
     training_plan, plan_activities = plan_result
     recent_activities = _recent_activity_summaries(plan_activities)
+    eval_end = date.today() if days_ago == 0 else end_date
+    _enrich_self_evaluations(
+        client,
+        recent_activities,
+        plan_activities,
+        start_date,
+        eval_end,
+    )
 
     report: Dict[str, Any] = {
         "window": {
@@ -628,8 +678,8 @@ def get_coaching_brief(
 
     Returns profile, race predictions, events, training_plan (lookback + upcoming
     week rows), coaching_brief (review, assessment, next-week context with
-    per-day weather, ready-to-read narrative), and optional activities. Call once
-    per coaching turn.
+    per-day weather, ready-to-read narrative, this week's self_evaluation notes),
+    and optional activities. Call once per coaching turn.
     """
     return get_report(
         days=days_back,

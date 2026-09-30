@@ -83,7 +83,9 @@ def test_build_coaching_brief_includes_narrative_and_proposal() -> None:
     assert "5% Z5" in brief["narrative"]["intensity_check"]
     assert "ACWR 0.84" in brief["narrative"]["load_check"]
     assert "personal_records_summary" in brief["narrative"]
-    assert brief["presentation_order"][3] == "personal_records_summary"
+    assert brief["presentation_order"][3] == "self_evaluation_notes"
+    assert brief["presentation_order"][4] == "personal_records_summary"
+    assert "No athlete self-evaluation notes" in brief["narrative"]["self_evaluation_notes"]
     assert brief["next_week_proposal"]["target_min"] == 345
     assert "target_km" not in brief["next_week_proposal"]
     assert brief["next_week_proposal"]["chronic_min"] == 300.0
@@ -168,6 +170,38 @@ def test_build_coaching_brief_passes_recent_activities_without_day_prescriptions
     days = brief["next_week_proposal"]["days"]
     assert all("session" not in day for day in days)
     assert all("workout_type" not in day for day in days)
+
+
+def test_build_coaching_brief_includes_self_evaluation_notes() -> None:
+    plan = _sample_plan()
+    recent = [
+        {
+            "date": "2026-07-07",
+            "name": "Recovery Run",
+            "activity_type": "running",
+            "distance_km": 8.0,
+            "duration_min": 50,
+            "self_evaluation": {
+                "message": "calves tight after yesterday",
+                "feeling": "Weak",
+                "perceived_effort": 6.0,
+            },
+        },
+        {
+            "date": "2026-07-08",
+            "name": "Z2 Ride",
+            "activity_type": "cycling",
+            "distance_km": 25.0,
+            "duration_min": 60,
+        },
+    ]
+    brief = build_coaching_brief(plan, recent_activities=recent)
+    notes = brief["narrative"]["self_evaluation_notes"]
+    assert "calves tight after yesterday" in notes
+    assert "Weak" in notes
+    assert "RPE 6.0" in notes
+    assert "Recovery Run" in notes
+    assert "Z2 Ride" not in notes
 
 
 def test_build_coaching_brief_proposal_days_without_weather() -> None:

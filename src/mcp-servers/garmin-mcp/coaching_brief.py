@@ -76,6 +76,35 @@ def _acwr_sentence(acwr: float | None) -> str:
     return f"ACWR {acwr} — spike; hold or reduce volume before adding load."
 
 
+def _self_evaluation_notes(recent_activities: list[dict[str, Any]] | None) -> str:
+    """One-line recap of this week's athlete comments / feel / RPE."""
+    if not recent_activities:
+        return "No athlete self-evaluation notes for this week."
+    lines: list[str] = []
+    for act in recent_activities:
+        if not isinstance(act, dict):
+            continue
+        ev = act.get("self_evaluation")
+        if not isinstance(ev, dict):
+            continue
+        bits: list[str] = []
+        if ev.get("feeling"):
+            bits.append(str(ev["feeling"]))
+        if ev.get("perceived_effort") is not None:
+            bits.append(f"RPE {ev['perceived_effort']}")
+        if ev.get("message"):
+            bits.append(str(ev["message"]))
+        if not bits:
+            continue
+        name = act.get("name") or act.get("activity_type") or "activity"
+        date_s = act.get("date") or ""
+        prefix = f"{date_s} {name}".strip()
+        lines.append(f"{prefix}: {'; '.join(bits)}")
+    if not lines:
+        return "No athlete self-evaluation notes for this week."
+    return "Athlete self-evaluation this week — " + " | ".join(lines) + "."
+
+
 def _cross_training_note(recent_activities: list[dict[str, Any]] | None) -> str:
     if not recent_activities:
         return ""
@@ -305,6 +334,7 @@ def _narrative(
 
     load_check = _acwr_sentence(actuals.get("acwr"))
     load_check += _cross_training_note(recent_activities)
+    self_evaluation_notes = _self_evaluation_notes(recent_activities)
 
     chronic = proposal.get("chronic_min")
     outliers = proposal.get("outlier_weeks_dropped") or []
@@ -341,6 +371,7 @@ def _narrative(
         "review_summary": review_summary,
         "intensity_check": intensity_check,
         "load_check": load_check,
+        "self_evaluation_notes": self_evaluation_notes,
         "personal_records_summary": personal_records_summary,
         "proposal_summary": proposal_summary,
         "coaching_note": proposal.get("coaching_note", ""),
@@ -444,6 +475,7 @@ def build_coaching_brief(
             "review_summary",
             "intensity_check",
             "load_check",
+            "self_evaluation_notes",
             "personal_records_summary",
             "proposal_summary",
             "coaching_note",

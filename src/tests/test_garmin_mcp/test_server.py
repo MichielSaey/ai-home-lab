@@ -502,6 +502,173 @@ def test_get_coaching_brief_can_include_activities() -> None:
     )
 
 
+def test_recent_activity_summaries_include_activity_id() -> None:
+    summaries = server._recent_activity_summaries(
+        [
+            {
+                "activityId": 101,
+                "activityName": "Morning Run",
+                "activityType": {"typeKey": "running"},
+                "distance": 5000,
+                "movingDuration": 1800,
+                "trainingEffectLabel": "Base",
+                "averageHR": 140,
+                "startTimeLocal": "2026-09-28 07:00:00",
+            }
+        ]
+    )
+    assert summaries[0]["activity_id"] == 101
+    assert "self_evaluation" not in summaries[0]
+
+
+def test_enrich_self_evaluations_this_week_only() -> None:
+    mock_client = MagicMock()
+    mock_client.get_activity.side_effect = lambda aid: {
+        "description": f"note {aid}",
+        "summaryDTO": {"directWorkoutFeel": 75, "directWorkoutRpe": 60},
+    }
+    summaries = [
+        {"date": "2026-09-28", "activity_id": 1, "name": "Run"},
+        {"date": "2026-09-20", "activity_id": 2, "name": "Old"},
+    ]
+    activities = [
+        {"activityId": 1, "description": "list note"},
+        {"activityId": 2},
+    ]
+
+    server._enrich_self_evaluations(
+        mock_client,
+        summaries,
+        activities,
+        date(2026, 9, 24),
+        date(2026, 9, 30),
+    )
+
+    assert summaries[0]["self_evaluation"] == {
+        "message": "note 1",
+        "feeling": "Strong",
+        "perceived_effort": 6.0,
+    }
+    assert "self_evaluation" not in summaries[1]
+    mock_client.get_activity.assert_called_once_with("1")
+
+
+def test_enrich_self_evaluations_falls_back_to_list_description() -> None:
+    mock_client = MagicMock()
+    mock_client.get_activity.side_effect = RuntimeError("garmin down")
+    summaries = [{"date": "2026-09-28", "activity_id": 1, "name": "Run"}]
+    activities = [{"activityId": 1, "description": "calves tight"}]
+
+    server._enrich_self_evaluations(
+        mock_client,
+        summaries,
+        activities,
+        date(2026, 9, 24),
+        date(2026, 9, 30),
+    )
+
+    assert summaries[0]["self_evaluation"]["message"] == "calves tight"
+    assert summaries[0]["self_evaluation"]["feeling"] is None
+
+
+def test_get_report_attaches_self_evaluation_for_latest_week() -> None:
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    older = yesterday - timedelta(days=10)
+    mock_client = MagicMock()
+    mock_client.get_activity.return_value = {
+        "description": "felt strong on the last k",
+        "summaryDTO": {"directWorkoutFeel": 100, "directWorkoutRpe": 50},
+    }
+    this_week = {
+        "activityId": 11,
+        "activityName": "Threshold",
+        "activityType": {"typeKey": "running"},
+        "distance": 8000,
+        "movingDuration": 2400,
+        "trainingEffectLabel": "Tempo",
+        "averageHR": 160,
+        "startTimeLocal": f"{yesterday.isoformat()} 07:00:00",
+        "description": "list leftover",
+    }
+    last_month = {
+        "activityId": 99,
+        "activityName": "Old Long",
+        "activityType": {"typeKey": "running"},
+        "distance": 20000,
+        "movingDuration": 7200,
+        "trainingEffectLabel": "Base",
+        "averageHR": 145,
+        "startTimeLocal": f"{older.isoformat()} 08:00:00",
+    }
+    training_plan = [
+        {
+            "week_description": "latest_week",
+            "week_type": "build",
+            "actuals": {
+                "distance_km": 8,
+                "total_zone_min": 40,
+                "easy_pct": 80,
+                "medium_pct": 0,
+                "hard_pct": 20,
+                "zone_4_pct": 15,
+                "zone_5_pct": 5,
+                "acwr": 1.0,
+            },
+            "target": {
+                "target_min": 40,
+                "easy_pct": 80,
+                "medium_pct": 0,
+                "zone_4_pct": 15,
+                "zone_5_pct": 5,
+                "hard_pct": 20,
+            },
+        },
+        {
+            "week_description": "upcoming_week",
+            "week_type": "build",
+            "actuals": {},
+            "target": {"target_min": 44},
+            "days": [],
+        },
+    ]
+
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(mock_client, None)),
+        patch.object(server, "get_profile", return_value={"weight": 70}),
+        patch.object(
+            server, "get_race_predictions", return_value={"Garmin Race Predictions": {}}
+        ),
+        patch.object(
+            server,
+            "get_personal_records",
+            return_value={"records": [], "summary": "No personal records"},
+        ),
+        patch.object(
+            server, "get_events", return_value={"Garmin Events": {}, "latest_event": None}
+        ),
+        patch.object(
+            server,
+            "_training_plan_table",
+            return_value=(training_plan, [this_week, last_month]),
+        ),
+    ):
+        result = server.get_report(days=7, days_ago=0)
+
+    recent = result["coaching_brief"]["recent_activities"]
+    by_name = {row["name"]: row for row in recent}
+    assert by_name["Threshold"]["self_evaluation"] == {
+        "message": "felt strong on the last k",
+        "feeling": "Very Strong",
+        "perceived_effort": 5.0,
+    }
+    assert "self_evaluation" not in by_name["Old Long"]
+    assert "felt strong on the last k" in result["coaching_brief"]["narrative"][
+        "self_evaluation_notes"
+    ]
+    mock_client.get_activity.assert_called_once_with("11")
+
+
 def test_weekly_report_resource_aliases_get_report() -> None:
     with patch.object(
         server, "get_report", return_value={"profile": {}, "training_plan": []}
