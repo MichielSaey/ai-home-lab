@@ -68,9 +68,10 @@ Do **not** call any other tool before `get_coaching_brief` returns.
    - `next_week_proposal.days` for weather context
    - `recent_activities` — **all sports**. Bike/hike/etc. count toward weekly
      training time; do not treat them as “missing run volume”. For **this
-     week's** sessions, read `self_evaluation` (athlete comment `message`,
-     How Did You Feel? `feeling`, perceived effort 1–10) and fold those notes
-     into the review — do not ignore them.
+     week's** sessions, `self_evaluation` is the athlete's **written note**
+     (free text: energy, niggles, context). `feeling` and `perceived_effort`
+     are extra scores only — do not treat them as the self-evaluation. Fold
+     the written notes into the review.
 4. Call `create_*_workout` only when the user asks to upload workouts to Garmin
    Connect — use each session’s `duration_minutes` (optional `workout_date`).
 
@@ -102,7 +103,8 @@ this skill. There is no fixture to invent.
   recovery ≈ 80% of chronic minutes (outliers >50% from the median are dropped).
 - Polarized easy + quality: ≈80% Z1-2 / 0% Z3 / 15% Z4 / 5% Z5 (build week).
 - Factor cross-training from `recent_activities` into the review.
-- Factor this week's `self_evaluation` comments / feel / RPE into the review.
+- Factor this week's written `self_evaluation` notes into the review (scores
+  are extra context, not the note).
 - Do not ask the user to paste Garmin data.
 
 ## Verification

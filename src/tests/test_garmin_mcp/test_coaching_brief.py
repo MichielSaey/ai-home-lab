@@ -181,11 +181,9 @@ def test_build_coaching_brief_includes_self_evaluation_notes() -> None:
             "activity_type": "running",
             "distance_km": 8.0,
             "duration_min": 50,
-            "self_evaluation": {
-                "message": "calves tight after yesterday",
-                "feeling": "Weak",
-                "perceived_effort": 6.0,
-            },
+            "self_evaluation": "calves tight after yesterday",
+            "feeling": "Weak",
+            "perceived_effort": 6.0,
         },
         {
             "date": "2026-07-08",
@@ -198,6 +196,7 @@ def test_build_coaching_brief_includes_self_evaluation_notes() -> None:
     brief = build_coaching_brief(plan, recent_activities=recent)
     notes = brief["narrative"]["self_evaluation_notes"]
     assert "calves tight after yesterday" in notes
+    assert notes.index("calves tight after yesterday") < notes.index("Weak")
     assert "Weak" in notes
     assert "RPE 6.0" in notes
     assert "Recovery Run" in notes

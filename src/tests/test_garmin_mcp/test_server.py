@@ -544,12 +544,11 @@ def test_enrich_self_evaluations_this_week_only() -> None:
         date(2026, 9, 30),
     )
 
-    assert summaries[0]["self_evaluation"] == {
-        "message": "note 1",
-        "feeling": "Strong",
-        "perceived_effort": 6.0,
-    }
+    assert summaries[0]["self_evaluation"] == "note 1"
+    assert summaries[0]["feeling"] == "Strong"
+    assert summaries[0]["perceived_effort"] == 6.0
     assert "self_evaluation" not in summaries[1]
+    assert "feeling" not in summaries[1]
     mock_client.get_activity.assert_called_once_with("1")
 
 
@@ -567,8 +566,8 @@ def test_enrich_self_evaluations_falls_back_to_list_description() -> None:
         date(2026, 9, 30),
     )
 
-    assert summaries[0]["self_evaluation"]["message"] == "calves tight"
-    assert summaries[0]["self_evaluation"]["feeling"] is None
+    assert summaries[0]["self_evaluation"] == "calves tight"
+    assert summaries[0]["feeling"] is None
 
 
 def test_get_report_attaches_self_evaluation_for_latest_week() -> None:
@@ -657,11 +656,9 @@ def test_get_report_attaches_self_evaluation_for_latest_week() -> None:
 
     recent = result["coaching_brief"]["recent_activities"]
     by_name = {row["name"]: row for row in recent}
-    assert by_name["Threshold"]["self_evaluation"] == {
-        "message": "felt strong on the last k",
-        "feeling": "Very Strong",
-        "perceived_effort": 5.0,
-    }
+    assert by_name["Threshold"]["self_evaluation"] == "felt strong on the last k"
+    assert by_name["Threshold"]["feeling"] == "Very Strong"
+    assert by_name["Threshold"]["perceived_effort"] == 5.0
     assert "self_evaluation" not in by_name["Old Long"]
     assert "felt strong on the last k" in result["coaching_brief"]["narrative"][
         "self_evaluation_notes"

@@ -1,4 +1,4 @@
-"""Garmin Connect self-evaluation: activity comments, feel, and RPE."""
+"""Garmin Connect self-evaluation: written notes, plus feel/RPE scores."""
 
 from __future__ import annotations
 
@@ -14,12 +14,31 @@ _FEELING_LABELS = {
     100: "Very Strong",
 }
 
+# Free-text fields the athlete can fill in on an activity. ``description`` is
+# the Connect "Description" / notes box — that is self-evaluation. ``comments``
+# is a less common string field on the list payload.
+_NOTE_KEYS = ("description", "comments")
 
-def _clean_message(value: Any) -> str | None:
+
+def _clean_text(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     text = value.strip()
     return text or None
+
+
+def _note_from_payload(payload: dict[str, Any] | None) -> str | None:
+    """Return the athlete's written note, not numeric feel/RPE."""
+    if not isinstance(payload, dict):
+        return None
+    parts: list[str] = []
+    for key in _NOTE_KEYS:
+        text = _clean_text(payload.get(key))
+        if text and text not in parts:
+            parts.append(text)
+    if not parts:
+        return None
+    return "\n".join(parts)
 
 
 def feeling_label(score: Any) -> str | None:
@@ -54,48 +73,48 @@ def perceived_effort(raw: Any) -> float | None:
     return round(value, 1)
 
 
+def _scores_from_payload(payload: dict[str, Any] | None) -> tuple[str | None, float | None]:
+    if not isinstance(payload, dict):
+        return None, None
+    summary = payload.get("summaryDTO")
+    feeling = None
+    effort = None
+    if isinstance(summary, dict):
+        feeling = feeling_label(summary.get("directWorkoutFeel"))
+        effort = perceived_effort(summary.get("directWorkoutRpe"))
+    feeling = feeling or feeling_label(payload.get("directWorkoutFeel"))
+    effort = effort or perceived_effort(payload.get("directWorkoutRpe"))
+    return feeling, effort
+
+
 def extract_self_evaluation(
     list_activity: dict[str, Any] | None = None,
     detail: Any = None,
 ) -> dict[str, Any]:
-    """Pull comment + self-evaluation from a list row and/or ``get_activity``.
+    """Pull the written self-evaluation note plus optional feel/RPE scores.
 
-    ``get_activities_by_date`` may include ``description`` (the message the
-    athlete added). Feel and perceived effort live on the activity-detail
-    ``summaryDTO`` (``directWorkoutFeel``, ``directWorkoutRpe``).
+    ``self_evaluation`` is free text (Garmin activity Description / notes).
+    ``feeling`` and ``perceived_effort`` are extra numeric ratings from
+    ``summaryDTO`` and are not a substitute for the note.
     """
-    message: str | None = None
+    note: str | None = None
     feeling: str | None = None
     effort: float | None = None
 
-    if isinstance(list_activity, dict):
-        message = _clean_message(list_activity.get("description"))
-        summary = list_activity.get("summaryDTO")
-        if isinstance(summary, dict):
-            feeling = feeling_label(summary.get("directWorkoutFeel"))
-            effort = perceived_effort(summary.get("directWorkoutRpe"))
-        feeling = feeling or feeling_label(list_activity.get("directWorkoutFeel"))
-        effort = effort or perceived_effort(list_activity.get("directWorkoutRpe"))
+    list_note = _note_from_payload(list_activity)
+    list_feeling, list_effort = _scores_from_payload(list_activity)
+    note = list_note
+    feeling = list_feeling
+    effort = list_effort
 
     if isinstance(detail, dict) and not detail.get("error"):
-        message = _clean_message(detail.get("description")) or message
-        summary = detail.get("summaryDTO")
-        if isinstance(summary, dict):
-            feeling = feeling_label(summary.get("directWorkoutFeel")) or feeling
-            effort = perceived_effort(summary.get("directWorkoutRpe")) or effort
+        note = _note_from_payload(detail) or note
+        detail_feeling, detail_effort = _scores_from_payload(detail)
+        feeling = detail_feeling or feeling
+        effort = detail_effort if detail_effort is not None else effort
 
     return {
-        "message": message,
+        "self_evaluation": note,
         "feeling": feeling,
         "perceived_effort": effort,
     }
-
-
-def has_self_evaluation_content(evaluation: dict[str, Any] | None) -> bool:
-    if not isinstance(evaluation, dict):
-        return False
-    return bool(
-        evaluation.get("message")
-        or evaluation.get("feeling")
-        or evaluation.get("perceived_effort") is not None
-    )

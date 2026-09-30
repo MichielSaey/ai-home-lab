@@ -401,7 +401,7 @@ def _enrich_self_evaluations(
 
     Extra ``get_activity`` calls cover the review window (and today when the
     window includes it). Older lookback weeks keep distance/circumstances
-    without feel / RPE / comments.
+    without the written note or feel / RPE scores.
     """
     list_by_id: dict[str, dict[str, Any]] = {}
     for activity in activities:
@@ -426,7 +426,12 @@ def _enrich_self_evaluations(
             raw = _call_optional(client, "get_activity", str(activity_id))
             if isinstance(raw, dict) and not raw.get("error"):
                 detail = raw
-        summary["self_evaluation"] = extract_self_evaluation(list_row, detail)
+        extracted = extract_self_evaluation(list_row, detail)
+        # ``self_evaluation`` is the written note (free text). Feel / RPE stay
+        # as extra scores and are not a substitute for that note.
+        summary["self_evaluation"] = extracted["self_evaluation"]
+        summary["feeling"] = extracted["feeling"]
+        summary["perceived_effort"] = extracted["perceived_effort"]
     return summaries
 
 
@@ -678,7 +683,8 @@ def get_coaching_brief(
 
     Returns profile, race predictions, events, training_plan (lookback + upcoming
     week rows), coaching_brief (review, assessment, next-week context with
-    per-day weather, ready-to-read narrative, this week's self_evaluation notes),
+    per-day weather, ready-to-read narrative, this week's written
+    self-evaluation notes),
     and optional activities. Call once per coaching turn.
     """
     return get_report(

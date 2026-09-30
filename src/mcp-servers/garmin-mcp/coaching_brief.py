@@ -76,30 +76,40 @@ def _acwr_sentence(acwr: float | None) -> str:
     return f"ACWR {acwr} — spike; hold or reduce volume before adding load."
 
 
+def _activity_self_evaluation_text(act: dict[str, Any]) -> str | None:
+    """Written note on an activity. ``self_evaluation`` is free text, not a score."""
+    note = act.get("self_evaluation")
+    if isinstance(note, str) and note.strip():
+        return note.strip()
+    return None
+
+
 def _self_evaluation_notes(recent_activities: list[dict[str, Any]] | None) -> str:
-    """One-line recap of this week's athlete comments / feel / RPE."""
+    """Recap this week's written self-evaluation notes (scores are secondary)."""
     if not recent_activities:
         return "No athlete self-evaluation notes for this week."
     lines: list[str] = []
     for act in recent_activities:
         if not isinstance(act, dict):
             continue
-        ev = act.get("self_evaluation")
-        if not isinstance(ev, dict):
-            continue
-        bits: list[str] = []
-        if ev.get("feeling"):
-            bits.append(str(ev["feeling"]))
-        if ev.get("perceived_effort") is not None:
-            bits.append(f"RPE {ev['perceived_effort']}")
-        if ev.get("message"):
-            bits.append(str(ev["message"]))
-        if not bits:
+        note = _activity_self_evaluation_text(act)
+        feeling = act.get("feeling")
+        effort = act.get("perceived_effort")
+        if not note and not feeling and effort is None:
             continue
         name = act.get("name") or act.get("activity_type") or "activity"
         date_s = act.get("date") or ""
         prefix = f"{date_s} {name}".strip()
-        lines.append(f"{prefix}: {'; '.join(bits)}")
+        extras: list[str] = []
+        if feeling:
+            extras.append(str(feeling))
+        if effort is not None:
+            extras.append(f"RPE {effort}")
+        extra = f" ({', '.join(extras)})" if extras else ""
+        if note:
+            lines.append(f"{prefix}: {note}{extra}")
+        else:
+            lines.append(f"{prefix}:{extra}" if extra else prefix)
     if not lines:
         return "No athlete self-evaluation notes for this week."
     return "Athlete self-evaluation this week — " + " | ".join(lines) + "."
