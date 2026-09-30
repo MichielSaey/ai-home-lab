@@ -25,7 +25,12 @@ from nutrition_matrix import (
     intensity_for_template,
 )
 from rest_shim import mount_rest_routes
-from rolling_week import anchor_end as compute_anchor_end, window_bounds
+from rolling_week import (
+    anchor_end as compute_anchor_end,
+    block_bounds,
+    window_bounds,
+)
+from self_evaluation import extract_self_evaluation
 from training_plan import (
     build_training_plan,
     first_event_date,
@@ -362,19 +367,34 @@ def _activities_table(
 
 
 def _recent_activity_summaries(
-    activities: list[dict[str, Any]], *, limit: int = 10
+    activities: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    window_limit: int = 40,
 ) -> list[dict[str, Any]]:
-    """Lightweight recent activities for the coach (includes today through yesterday)."""
+    """Lightweight recent activities for the coach.
+
+    When ``window_start`` / ``window_end`` are set, include every activity in
+    that review window (this week), not just the global last ``limit`` rows.
+    """
     summaries: list[dict[str, Any]] = []
+    cap = window_limit if window_start is not None and window_end is not None else limit
     for activity in sorted(
         activities, key=lambda row: row.get("startTimeLocal", ""), reverse=True
     ):
         act_date = activity_date(activity)
         if act_date is None:
             continue
+        if window_start is not None and act_date < window_start:
+            continue
+        if window_end is not None and act_date > window_end:
+            continue
         summaries.append(
             {
                 "date": act_date.isoformat(),
+                "activity_id": activity.get("activityId"),
                 "name": activity.get("activityName"),
                 "activity_type": activity_type_key(activity),
                 "distance_km": round((activity.get("distance", 0) or 0) / 1000, 2),
@@ -383,8 +403,53 @@ def _recent_activity_summaries(
                 "avg_hr": activity.get("averageHR"),
             }
         )
-        if len(summaries) >= limit:
+        if len(summaries) >= cap:
             break
+    return summaries
+
+
+def _enrich_self_evaluations(
+    client: Garmin,
+    summaries: list[dict[str, Any]],
+    activities: list[dict[str, Any]],
+    window_start: date,
+    window_end: date,
+) -> list[dict[str, Any]]:
+    """Attach Garmin self-evaluation to this-week activity summaries only.
+
+    Extra ``get_activity`` calls cover the review window (and today when the
+    window includes it). Older lookback weeks keep distance/circumstances
+    without the written note or feel / RPE scores.
+    """
+    list_by_id: dict[str, dict[str, Any]] = {}
+    for activity in activities:
+        activity_id = activity.get("activityId")
+        if activity_id is not None:
+            list_by_id[str(activity_id)] = activity
+
+    for summary in summaries:
+        raw_date = summary.get("date")
+        try:
+            act_date = date.fromisoformat(str(raw_date))
+        except (TypeError, ValueError):
+            continue
+        if act_date < window_start or act_date > window_end:
+            continue
+        activity_id = summary.get("activity_id")
+        list_row = (
+            list_by_id.get(str(activity_id)) if activity_id is not None else None
+        )
+        detail: dict[str, Any] | None = None
+        if activity_id is not None:
+            raw = _call_optional(client, "get_activity", str(activity_id))
+            if isinstance(raw, dict) and not raw.get("error"):
+                detail = raw
+        extracted = extract_self_evaluation(list_row, detail)
+        # ``self_evaluation`` is the written note (free text). Feel / RPE stay
+        # as extra scores and are not a substitute for that note.
+        summary["self_evaluation"] = extracted["self_evaluation"]
+        summary["feeling"] = extracted["feeling"]
+        summary["perceived_effort"] = extracted["perceived_effort"]
     return summaries
 
 
@@ -592,7 +657,20 @@ def get_report(
         return plan_result
 
     training_plan, plan_activities = plan_result
-    recent_activities = _recent_activity_summaries(plan_activities)
+    review_start, review_end = block_bounds(anchor)
+    eval_end = date.today() if days_ago == 0 else review_end
+    recent_activities = _recent_activity_summaries(
+        plan_activities,
+        window_start=review_start,
+        window_end=eval_end,
+    )
+    _enrich_self_evaluations(
+        client,
+        recent_activities,
+        plan_activities,
+        review_start,
+        eval_end,
+    )
 
     report: Dict[str, Any] = {
         "window": {
@@ -628,8 +706,9 @@ def get_coaching_brief(
 
     Returns profile, race predictions, events, training_plan (lookback + upcoming
     week rows), coaching_brief (review, assessment, next-week context with
-    per-day weather, ready-to-read narrative, session_targets for uploads), and
-    optional activities. Call once per coaching turn.
+    per-day weather, ready-to-read narrative, this week's written
+    self-evaluation notes, session_targets for uploads), and optional
+    activities. Call once per coaching turn.
 
     Upload each next_week_proposal session with the matching create_*_workout
     template. Threshold uses HR zone 4. Combine named templates with

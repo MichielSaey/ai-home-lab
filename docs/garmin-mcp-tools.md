@@ -57,7 +57,7 @@ All four are already inside `get_coaching_brief`.
 
 - `profile`, `race_predictions`, `personal_records`, `events`
 - **`training_plan`** — week rows (past, current, upcoming): actuals (distance + zone minutes + intensity pcts including Z4/Z5), targets (≈80/15/5 for build weeks), load, weather
-- **`coaching_brief`** — `narrative` (includes `personal_records_summary` and a time-based intensity overview), `assessment`, `next_week_proposal` (week_type, `target_min`, `chronic_min`, `outlier_weeks_dropped`, `sessions[]`, `session_targets` mapping session_type → upload tool + intensity target, focus, per-day weather in `days`), `recent_activities` (all sports with `activity_type` + `duration_min`)
+- **`coaching_brief`** — `narrative` (includes `personal_records_summary`, a time-based intensity overview, and `self_evaluation_notes`), `assessment`, `next_week_proposal` (week_type, `target_min`, `chronic_min`, `outlier_weeks_dropped`, `sessions[]`, `session_targets` mapping session_type → upload tool + intensity target, focus, per-day weather in `days`), `recent_activities` (all sports with `activity_type` + `duration_min`; **this week's** rows also include **`self_evaluation` as free text** — the athlete's written Garmin Description/notes — plus optional scores `feeling` and `perceived_effort` 1–10)
 - `window` — default 7-day review ends **yesterday** (today may appear only in `recent_activities`)
 - optional `activities`
 
