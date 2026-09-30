@@ -108,11 +108,23 @@ def unload_llm(llm: LoadedLlm | None) -> None:
         return
     import torch
 
+    model = llm.model
+    if model is not None:
+        try:
+            model.to("cpu")
+        except Exception:
+            pass
     llm.model = None
     llm.tokenizer = None
+    del model
     gc.collect()
     if torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            pass
         torch.cuda.empty_cache()
+    gc.collect()
 
 
 def _build_prompt(

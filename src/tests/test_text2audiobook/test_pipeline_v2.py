@@ -1355,7 +1355,7 @@ def test_run_retries_book_on_cublas_error(tmp_path: Path, monkeypatch) -> None:
 def test_run_clears_gpu_after_exhausted_cuda_retries(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """After CUDA retries are spent, clear GPU before the next queued book."""
+    """After any book finishes, clear GPU before the next queued book."""
     from text2audiobook.pipeline import run
 
     input_dir = tmp_path / "input"
@@ -1401,6 +1401,52 @@ def test_run_clears_gpu_after_exhausted_cuda_retries(
     monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
     assert run(config, source_paths=[first, second], stages=("speak",)) == 1
     assert seen == ["a.md", "b.md"]
+    # One between-book clear after a.md (failed) before b.md; none after last book.
+    assert clears["n"] == 1
+
+
+def test_run_clears_gpu_between_successful_books(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Successful books also clear CUDA so the next title starts with a clean GPU."""
+    from text2audiobook.pipeline import run
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    first = input_dir / "a.md"
+    second = input_dir / "b.md"
+    first.write_text(f"# A\n\n{_BODY}\n", encoding="utf-8")
+    second.write_text(f"# B\n\n{_BODY}\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "input_dir": "input",
+                    "staging_dir": "staging",
+                    "output_dir": "output",
+                    "runs_dir": "runs",
+                },
+                "pipeline": {"book_retries": 0},
+                "selection": {"keep_chapter_indices": [0]},
+                "llm": {"cleanup": False, "direction": False},
+                "output": {"skip_existing": False, "loudnorm": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    clears = {"n": 0}
+
+    def clear() -> None:
+        clears["n"] += 1
+
+    monkeypatch.setattr(
+        "text2audiobook.pipeline.process_source", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr("text2audiobook.pipeline._hard_clear_cuda", clear)
+    monkeypatch.setattr("text2audiobook.pipeline.setup_logging", lambda *_a, **_k: None)
+    assert run(config, source_paths=[first, second], stages=("speak",)) == 0
     assert clears["n"] == 1
 
 

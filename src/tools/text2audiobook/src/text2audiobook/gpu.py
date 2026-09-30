@@ -2,6 +2,7 @@
 
 import ctypes
 import logging
+import os
 from pathlib import Path
 
 from shared.cuda_bootstrap import ensure_torch_compat, ensure_triton_compat
@@ -15,6 +16,7 @@ _HOST_LIB_DIRS = (
 )
 # libcuda: CUDA driver API; ptxjitcompiler: dlopen'd by libcuda for PTX->SASS JIT.
 _DRIVER_LIBS = ("libcuda.so.1", "libnvidia-ptxjitcompiler.so.1")
+_EXPANDABLE_SEGMENTS = "expandable_segments:True"
 
 __all__ = ["cuda_available", "prepare_gpu_env", "resolve_tts_device"]
 
@@ -33,6 +35,32 @@ def _preload_driver_libs() -> list[str]:
     return loaded
 
 
+def _ensure_expandable_segments() -> None:
+    """Ask the CUDA caching allocator to reduce fragmentation across book loads.
+
+    Must run before torch initializes the allocator. Existing user overrides of
+    ``PYTORCH_CUDA_ALLOC_CONF`` / ``PYTORCH_ALLOC_CONF`` that already mention
+    ``expandable_segments`` are left alone. When only the legacy
+    ``PYTORCH_ALLOC_CONF`` is set, append there so a newly written
+    ``PYTORCH_CUDA_ALLOC_CONF`` does not shadow the user's other knobs
+    (PyTorch prefers the CUDA-named variable when both exist).
+    """
+    cuda_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "").strip()
+    alloc_conf = os.environ.get("PYTORCH_ALLOC_CONF", "").strip()
+    if "expandable_segments" in cuda_conf or "expandable_segments" in alloc_conf:
+        return
+    if cuda_conf:
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = f"{cuda_conf},{_EXPANDABLE_SEGMENTS}"
+        key = "PYTORCH_CUDA_ALLOC_CONF"
+    elif alloc_conf:
+        os.environ["PYTORCH_ALLOC_CONF"] = f"{alloc_conf},{_EXPANDABLE_SEGMENTS}"
+        key = "PYTORCH_ALLOC_CONF"
+    else:
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = _EXPANDABLE_SEGMENTS
+        key = "PYTORCH_CUDA_ALLOC_CONF"
+    log.debug("Set %s=%s", key, os.environ[key])
+
+
 def cuda_available() -> bool:
     """Return True if torch can see a CUDA device."""
     import torch
@@ -42,6 +70,8 @@ def cuda_available() -> bool:
 
 def prepare_gpu_env() -> bool:
     """Preload driver libs; return True if CUDA is available for TTS/LLM."""
+    # Allocator knobs before any torch/CUDA init via cuda_available().
+    _ensure_expandable_segments()
     _preload_driver_libs()
     ensure_torch_compat()
     ensure_triton_compat()
