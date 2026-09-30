@@ -37,7 +37,7 @@ def feeling_label(score: Any) -> str | None:
 def perceived_effort(raw: Any) -> float | None:
     """Normalize Garmin ``directWorkoutRpe`` to a 1–10 scale.
 
-    Connect stores RPE as 10–100 (divide by 10). Values already on 1–10 are
+    Connect stores RPE as 10–100 (RPE × 10). Values already below 10 are
     left as-is. Zero / missing is treated as unset.
     """
     if raw is None:
@@ -48,7 +48,8 @@ def perceived_effort(raw: Any) -> float | None:
         return None
     if value <= 0:
         return None
-    if value > 10:
+    # 10 is RPE 1 on Connect (10–100 encoding), not a pre-scaled 10.
+    if value >= 10:
         value = value / 10.0
     return round(value, 1)
 

@@ -20,6 +20,8 @@ def test_feeling_label_maps_garmin_scores() -> None:
 def test_perceived_effort_normalizes_0_100_and_1_10() -> None:
     assert perceived_effort(60) == 6.0
     assert perceived_effort(6) == 6.0
+    assert perceived_effort(10) == 1.0
+    assert perceived_effort(100) == 10.0
     assert perceived_effort(0) is None
     assert perceived_effort(None) is None
     assert perceived_effort("hard") is None
