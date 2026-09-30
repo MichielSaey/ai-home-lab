@@ -25,7 +25,11 @@ from nutrition_matrix import (
     intensity_for_template,
 )
 from rest_shim import mount_rest_routes
-from rolling_week import anchor_end as compute_anchor_end, window_bounds
+from rolling_week import (
+    anchor_end as compute_anchor_end,
+    block_bounds,
+    window_bounds,
+)
 from self_evaluation import extract_self_evaluation
 from training_plan import (
     build_training_plan,
@@ -640,12 +644,13 @@ def get_report(
 
     training_plan, plan_activities = plan_result
     recent_activities = _recent_activity_summaries(plan_activities)
-    eval_end = date.today() if days_ago == 0 else end_date
+    review_start, review_end = block_bounds(anchor)
+    eval_end = date.today() if days_ago == 0 else review_end
     _enrich_self_evaluations(
         client,
         recent_activities,
         plan_activities,
-        start_date,
+        review_start,
         eval_end,
     )
 
@@ -684,8 +689,7 @@ def get_coaching_brief(
     Returns profile, race predictions, events, training_plan (lookback + upcoming
     week rows), coaching_brief (review, assessment, next-week context with
     per-day weather, ready-to-read narrative, this week's written
-    self-evaluation notes),
-    and optional activities. Call once per coaching turn.
+    self-evaluation notes), and optional activities. Call once per coaching turn.
     """
     return get_report(
         days=days_back,

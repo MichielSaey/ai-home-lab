@@ -652,7 +652,8 @@ def test_get_report_attaches_self_evaluation_for_latest_week() -> None:
             return_value=(training_plan, [this_week, last_month]),
         ),
     ):
-        result = server.get_report(days=7, days_ago=0)
+        # days=14 widens the report window; notes still attach only to latest_week.
+        result = server.get_report(days=14, days_ago=0)
 
     recent = result["coaching_brief"]["recent_activities"]
     by_name = {row["name"]: row for row in recent}
