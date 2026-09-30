@@ -521,6 +521,43 @@ def test_recent_activity_summaries_include_activity_id() -> None:
     assert "self_evaluation" not in summaries[0]
 
 
+def test_recent_activity_summaries_include_all_this_week_over_default_cap() -> None:
+    yesterday = date.today() - timedelta(days=1)
+    older = yesterday - timedelta(days=10)
+    activities = []
+    for i in range(12):
+        activities.append(
+            {
+                "activityId": i,
+                "activityName": f"Run {i}",
+                "activityType": {"typeKey": "running"},
+                "distance": 5000,
+                "movingDuration": 1800,
+                "startTimeLocal": f"{yesterday.isoformat()} {i:02d}:00:00",
+            }
+        )
+    activities.append(
+        {
+            "activityId": 99,
+            "activityName": "Old",
+            "activityType": {"typeKey": "running"},
+            "distance": 5000,
+            "movingDuration": 1800,
+            "startTimeLocal": f"{older.isoformat()} 07:00:00",
+        }
+    )
+    uncapped = server._recent_activity_summaries(activities)
+    assert len(uncapped) == 10
+    in_week = server._recent_activity_summaries(
+        activities,
+        window_start=yesterday - timedelta(days=6),
+        window_end=date.today(),
+    )
+    assert len(in_week) == 12
+    assert all(row["name"].startswith("Run") for row in in_week)
+    assert all(row["activity_id"] != 99 for row in in_week)
+
+
 def test_enrich_self_evaluations_this_week_only() -> None:
     mock_client = MagicMock()
     mock_client.get_activity.side_effect = lambda aid: {
@@ -660,7 +697,7 @@ def test_get_report_attaches_self_evaluation_for_latest_week() -> None:
     assert by_name["Threshold"]["self_evaluation"] == "felt strong on the last k"
     assert by_name["Threshold"]["feeling"] == "Very Strong"
     assert by_name["Threshold"]["perceived_effort"] == 5.0
-    assert "self_evaluation" not in by_name["Old Long"]
+    assert "Old Long" not in by_name
     assert "felt strong on the last k" in result["coaching_brief"]["narrative"][
         "self_evaluation_notes"
     ]

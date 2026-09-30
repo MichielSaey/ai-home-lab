@@ -367,15 +367,29 @@ def _activities_table(
 
 
 def _recent_activity_summaries(
-    activities: list[dict[str, Any]], *, limit: int = 10
+    activities: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    window_limit: int = 40,
 ) -> list[dict[str, Any]]:
-    """Lightweight recent activities for the coach (includes today through yesterday)."""
+    """Lightweight recent activities for the coach.
+
+    When ``window_start`` / ``window_end`` are set, include every activity in
+    that review window (this week), not just the global last ``limit`` rows.
+    """
     summaries: list[dict[str, Any]] = []
+    cap = window_limit if window_start is not None and window_end is not None else limit
     for activity in sorted(
         activities, key=lambda row: row.get("startTimeLocal", ""), reverse=True
     ):
         act_date = activity_date(activity)
         if act_date is None:
+            continue
+        if window_start is not None and act_date < window_start:
+            continue
+        if window_end is not None and act_date > window_end:
             continue
         summaries.append(
             {
@@ -389,7 +403,7 @@ def _recent_activity_summaries(
                 "avg_hr": activity.get("averageHR"),
             }
         )
-        if len(summaries) >= limit:
+        if len(summaries) >= cap:
             break
     return summaries
 
@@ -643,9 +657,13 @@ def get_report(
         return plan_result
 
     training_plan, plan_activities = plan_result
-    recent_activities = _recent_activity_summaries(plan_activities)
     review_start, review_end = block_bounds(anchor)
     eval_end = date.today() if days_ago == 0 else review_end
+    recent_activities = _recent_activity_summaries(
+        plan_activities,
+        window_start=review_start,
+        window_end=eval_end,
+    )
     _enrich_self_evaluations(
         client,
         recent_activities,
