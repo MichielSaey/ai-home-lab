@@ -47,7 +47,7 @@ from zones import (
     weekly_stats_rows,
     zones_to_minute_columns,
 )
-from workout_builder import extract_workout_id
+from workout_builder import build_running_workout, extract_workout_id
 from workout_templates import (
     TEMPLATE_DESCRIPTIONS,
     TEMPLATE_TYPES,
@@ -710,9 +710,9 @@ def get_coaching_brief(
     self-evaluation notes, session_targets for uploads), and optional
     activities. Call once per coaching turn.
 
-    Upload each next_week_proposal session with the matching create_*_workout
-    template. Threshold uses HR zone 4. Combine named templates with
-    combine_workout_templates.
+    Prefer create_*_workout for next_week_proposal sessions (see
+    session_targets). Use workout() for custom freeform step lists, or
+    combine_workout_templates for named-template hybrids.
     """
     return get_report(
         days=days_back,
@@ -1180,6 +1180,56 @@ def get_workouts(start: int = 0, limit: int = 20) -> Dict[str, Any]:
             "Rows": rows,
         }
     }
+
+
+@mcp.tool()
+def workout(
+    name: str,
+    steps: List[Dict[str, Any]],
+    description: Optional[str] = None,
+    workout_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a running workout from an ordered list of adjacent steps.
+
+    Each step is a dict with:
+    - type: warmup | interval | recovery | cooldown | repeat
+    - duration_minutes: float (time end condition) OR distance_meters (distance end)
+    - workout_type: optional preset zone key (base, threshold, sprint, ...)
+    - heart_rate_zone: optional Garmin zone number 1-5 (overrides workout_type)
+    - target: optional "speed" with speed_mps_min / speed_mps_max (m/s range)
+    - iterations + steps: required for repeat blocks
+
+    Default intensity target is HR zone. Sprint-style efforts can use
+    distance_meters + target="speed" instead. Pass workout_date (YYYY-MM-DD)
+    to also schedule it in the same call.
+    """
+    client, error = _get_client_or_error()
+    if error:
+        return error
+
+    if workout_date is not None:
+        date_error = _validate_workout_date(workout_date)
+        if date_error:
+            return date_error
+
+    try:
+        running_workout = build_running_workout(name, steps, description=description)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    upload_result = _upload_running_workout(client, running_workout)
+    if upload_result.get("error"):
+        return upload_result
+
+    upload_result["heartRateZones"] = resolve_hr_context(client, get_profile()).get("zones")
+
+    workout_id = upload_result.get("workoutId")
+    if workout_date is not None and workout_id is not None:
+        upload_result["schedule"] = _schedule_existing(
+            client, int(workout_id), workout_date
+        )
+
+    return upload_result
 
 
 def _validate_workout_date(workout_date: str) -> Optional[Dict[str, Any]]:

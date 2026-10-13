@@ -112,10 +112,70 @@ def test_create_template_with_bad_workout_date_returns_error_before_upload() -> 
     mock_upload.assert_not_called()
 
 
-def test_generic_workout_tool_is_not_exported() -> None:
-    assert not hasattr(server, "workout")
+def test_generic_workout_tool_is_exported() -> None:
+    assert hasattr(server, "workout")
     assert hasattr(server, "combine_workout_templates")
     assert hasattr(server, "create_threshold_workout")
+
+
+def test_workout_tool_uploads_freeform_steps() -> None:
+    mock_client = MagicMock()
+
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(mock_client, None)),
+        patch.object(
+            server,
+            "_upload_running_workout",
+            return_value={"workoutId": 777, "workoutName": "Custom Z2"},
+        ) as mock_upload,
+        patch.object(
+            server,
+            "resolve_hr_context",
+            return_value={"zones": {"z2": [120, 140]}},
+        ),
+        patch.object(server, "get_profile", return_value={}),
+    ):
+        result = server.workout(
+            name="Custom Z2",
+            steps=[
+                {
+                    "type": "interval",
+                    "duration_minutes": 25,
+                    "workout_type": "base",
+                }
+            ],
+        )
+
+    assert result["workoutId"] == 777
+    assert result["heartRateZones"] == {"z2": [120, 140]}
+    mock_upload.assert_called_once()
+    mock_client.schedule_workout.assert_not_called()
+
+
+def test_workout_tool_with_workout_date_also_schedules() -> None:
+    mock_client = MagicMock()
+    mock_client.get_scheduled_workouts.return_value = {"calendarItems": []}
+    mock_client.schedule_workout.return_value = {"workoutScheduleId": 9200}
+
+    with (
+        patch.object(server, "_get_client_or_error", return_value=(mock_client, None)),
+        patch.object(
+            server,
+            "_upload_running_workout",
+            return_value={"workoutId": 778, "workoutName": "Custom"},
+        ),
+        patch.object(server, "resolve_hr_context", return_value={"zones": {}}),
+        patch.object(server, "get_profile", return_value={}),
+    ):
+        result = server.workout(
+            name="Custom",
+            steps=[{"type": "interval", "duration_minutes": 20, "workout_type": "base"}],
+            workout_date="2026-07-02",
+        )
+
+    assert result["workoutId"] == 778
+    assert result["schedule"]["schedule"] == {"workoutScheduleId": 9200}
+    mock_client.schedule_workout.assert_called_once_with(778, "2026-07-02")
 
 
 def test_combine_workout_templates_rejects_steps_even_with_template() -> None:
