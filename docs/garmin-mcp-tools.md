@@ -39,11 +39,12 @@ All four are already inside `get_coaching_brief`.
 | `create_hill_repeats_workout` | Hill distance sprints with speed targets |
 | `create_weighted_pack_workout` | Loaded pack / ruck |
 | `combine_workout_templates` | Hybrid session from **named** templates (e.g. base + sprints). Not a freeform step builder. |
+| `workout` | Low-level custom steps (freeform builder) |
 | `schedule_workout` | Schedule existing workout by ID |
 | `list_workout_templates` | Built-in template catalog |
 | `get_workouts` | Saved library workouts |
 
-`create_*` accepts optional `workout_date` (`YYYY-MM-DD`) to upload and schedule in one call.
+`create_*` and `workout` accept optional `workout_date` (`YYYY-MM-DD`) to upload and schedule in one call.
 
 ## Reference
 
